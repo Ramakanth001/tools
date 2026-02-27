@@ -1,10 +1,10 @@
-# pg-backup
+# pg-backup 🗄️
 
-Local web UI to create **real PostgreSQL backups** using `pg_dump` and export a single **zip**.
+Local web UI to create **real PostgreSQL backups** using `pg_dump` and export a single **zip**. 📦
 
-Now includes a production-grade UI (light + dark mode), job history, retention cleanup, cancellation, and streaming zip generation.
+Now includes a production-grade UI (light + dark mode), job history, retention cleanup, cancellation, and streaming zip generation. ✅
 
-## What it generates
+## What it generates 🧾
 
 For each run it creates a timestamped folder under `backups/` and then a zip containing:
 
@@ -16,7 +16,7 @@ For each run it creates a timestamped folder under `backups/` and then a zip con
 - `globals.sql` (roles/privileges) **if enabled** (requires `pg_dumpall`)
 - `meta.json`
 
-## Requirements
+## Requirements ⚙️
 
 This tool shells out to:
 
@@ -56,7 +56,7 @@ export PSQL_PATH="/opt/homebrew/opt/postgresql@16/bin/psql"
 export PG_DUMPALL_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dumpall"
 ```
 
-## Run
+## Run ▶️
 
 ```bash
 cd tools/pg-backup
@@ -70,7 +70,7 @@ http://localhost:8787
 
 Paste your Supabase DB connection string (Supabase Dashboard → Settings → Database → Connection string).
 
-## How to use (step-by-step)
+## How to use (step-by-step) 🧭
 
 1) Start the app:
 
@@ -103,9 +103,9 @@ The output is also written to a timestamped folder under `backups/`.
 
 ---
 
-## Connection methods
+## Connection methods 🔌
 
-### A) Supabase (Pooler fields)
+### A) Supabase (Pooler fields) 🟩
 
 Where to get values:
 
@@ -130,7 +130,7 @@ Pooler variants:
 - **Transaction pooler**: recommended for most tooling.
 - **Session pooler**: can also work, but transaction pooler is usually preferred.
 
-### B) Any Postgres (full connection string)
+### B) Any Postgres (full connection string) 🐘
 
 Paste a connection string like:
 
@@ -149,9 +149,9 @@ Tip: if your server requires TLS, include `?sslmode=require` (or the UI will add
 
 ---
 
-## Backup options
+## Backup options 🧰
 
-### Artifacts
+### Artifacts 📁
 
 - **Full dump (custom)** → `db.dump`
 - **Schema-only** → `schema.sql`
@@ -159,7 +159,7 @@ Tip: if your server requires TLS, include `?sslmode=require` (or the UI will add
 - **Inventory CSV exports** → `inventory/*.csv` (includes sizes)
 - **Roles/privileges** → `globals.sql` (requires `pg_dumpall`)
 
-### Filters (schemas/tables)
+### Filters (schemas/tables) 🧪
 
 All filter fields are **comma-separated**.
 
@@ -186,13 +186,13 @@ Examples:
 
 Tip: use **schema-qualified** table names for clarity.
 
-## Notes
+## Notes 📝
 
 - This is intentionally a **local-only** tool. Credentials are sent only to `localhost`.
 - For large DBs, dumps can take time.
 - Zipping is done via a streaming zip implementation (does not buffer the entire archive in memory).
 
-## UI features
+## UI features 🖥️
 
 - Light mode by default + **dark mode toggle** (persisted in localStorage)
 - Tabs: Run / History / Settings
@@ -201,20 +201,20 @@ Tip: use **schema-qualified** table names for clarity.
 - **Retention cleanup**: delete old jobs by days / keep count
 - **Cancel job**: cancels running backup (sends SIGTERM to child processes)
 
-## Advanced backup options
+## Advanced backup options 🧩
 
 - Schema include/exclude (comma-separated)
 - Table include/exclude (comma-separated, schema-qualified recommended)
 - Plain SQL dump option
 - Roles/privileges artifact (`globals.sql`) via `pg_dumpall --globals-only` (if available)
 
-## Retention
+## Retention 🧹
 
 Retention cleanup is manual: go to **History** → set **Days** + **Keep** → click **Cleanup**.
 
 Defaults are conservative (e.g. 30 days / 200 jobs). There is also a **Max retention** preset button in the UI.
 
-## Troubleshooting
+## Troubleshooting 🧯
 
 ### Job fails with "Missing required tools" / "spawn pg_dump ENOENT"
 
