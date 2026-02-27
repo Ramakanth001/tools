@@ -3,261 +3,260 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Local Backup UI</title>
-    <style>
-      body {
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-        margin: 24px;
-        max-width: 900px;
-      }
-      textarea {
-        width: 100%;
-        min-height: 90px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-          'Courier New', monospace;
-      }
-      .row {
-        display: flex;
-        gap: 16px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .log {
-        margin-top: 16px;
-        background: #0b1020;
-        color: #d7e0ff;
-        padding: 12px;
-        border-radius: 8px;
-        height: 320px;
-        overflow: auto;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-          'Courier New', monospace;
-        font-size: 12px;
-        white-space: pre-wrap;
-      }
-      .warn {
-        padding: 12px;
-        border: 1px solid #e7c200;
-        background: #fff9d6;
-        border-radius: 8px;
-        margin: 12px 0;
-      }
-      button {
-        padding: 10px 14px;
-      }
-      .muted {
-        color: #666;
-      }
-    </style>
+    <title>pg-backup</title>
+    <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
-    <h1>Local Backup UI</h1>
-    <div class="warn">
-      <b>Important:</b> This app runs <code>pg_dump</code> and <code>psql</code> on your machine.
-      If they are not installed, the backup job will fail.
-      <div style="margin-top: 8px">
-        Install (macOS Homebrew): <code>brew install postgresql@16</code> then
-        <code>brew link --force postgresql@16</code>
+    <div class="container">
+      <div class="topbar">
+        <div class="brand">
+          <div class="logo" aria-hidden="true"></div>
+          <div>
+            <h1>pg-backup</h1>
+            <div class="subtitle">Local, real PostgreSQL backups via <span class="mono">pg_dump</span> + <span class="mono">psql</span></div>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="pill">
+            <label class="switch" style="margin:0">
+              <span class="mono" style="font-size:12px">Dark</span>
+              <input id="themeToggle" type="checkbox" aria-label="Toggle dark mode" />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="alertBox"></div>
+
+      <div class="panel" style="margin-top:14px">
+        <div class="panel-header">
+          <div class="tabs" role="tablist" aria-label="Sections">
+            <button class="tab" role="tab" data-tab="run" aria-selected="true">Run</button>
+            <button class="tab" role="tab" data-tab="history" aria-selected="false">History</button>
+            <button class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+          </div>
+          <div class="toolbar">
+            <span class="badge" id="runStatus">Idle</span>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <!-- RUN -->
+          <section role="tabpanel" data-panel="run">
+            <div style="display:flex; flex-direction:column; gap: 20px">
+              <div class="card">
+                <h3>Connection</h3>
+                <div class="row">
+                  <div class="field lg">
+                    <label>Profile</label>
+                    <div class="toolbar">
+                      <select id="profileSelect" style="flex:1"></select>
+                      <button class="btn" id="deleteProfile" type="button">Delete</button>
+                    </div>
+                    <div class="hint">Profiles are stored in your browser. Password is never stored.</div>
+                  </div>
+
+                  <div class="field">
+                    <label>Host</label>
+                    <input id="host" type="text" placeholder="pooler host" />
+                  </div>
+                  <div class="field sm">
+                    <label>Port</label>
+                    <input id="port" type="number" placeholder="5432" />
+                  </div>
+                  <div class="field">
+                    <label>User</label>
+                    <input id="user" type="text" />
+                  </div>
+                  <div class="field">
+                    <label>Database</label>
+                    <input id="database" type="text" />
+                  </div>
+                  <div class="field">
+                    <label>Password</label>
+                    <div class="toolbar">
+                      <input id="password" type="password" style="flex:1" />
+                      <button class="btn" id="togglePw" type="button">Show</button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>Connection test</label>
+                    <div class="toolbar">
+                      <button class="btn" id="test" type="button">Test connection</button>
+                      <span id="testStatus" class="badge">—</span>
+                    </div>
+                    <div class="hint">Uses <span class="mono">psql</span> to run <span class="mono">select 1;</span></div>
+                  </div>
+                </div>
+
+                <div class="spacer"></div>
+                <div class="row">
+                  <div class="field lg">
+                    <label>Advanced: paste full connection string (overrides pooler fields)</label>
+                    <textarea id="conn" placeholder="postgresql://user:pass@host:5432/db?sslmode=require"></textarea>
+                  </div>
+                </div>
+
+                <div class="spacer"></div>
+                <div class="row">
+                  <div class="field">
+                    <label>Save as profile</label>
+                    <div class="toolbar">
+                      <input id="profileName" type="text" placeholder="e.g. staging" style="flex:1" />
+                      <button class="btn" id="saveProfile" type="button">Save profile</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3>Backup options</h3>
+                <div class="divider"></div>
+
+                <div class="section-title">
+                  <p><b>Artifacts</b> — choose what to generate</p>
+                </div>
+                <div class="row" style="margin-top:10px">
+                  <div class="field">
+                    <label><input type="checkbox" id="fullDump" checked /> Full dump (custom)</label>
+                    <div class="hint">Creates <span class="mono">db.dump</span></div>
+                  </div>
+                  <div class="field">
+                    <label><input type="checkbox" id="schemaOnly" checked /> Schema-only</label>
+                    <div class="hint">Creates <span class="mono">schema.sql</span></div>
+                  </div>
+                  <div class="field">
+                    <label><input type="checkbox" id="plainSql" /> Plain SQL dump</label>
+                    <div class="hint">Creates <span class="mono">db.sql</span></div>
+                  </div>
+                  <div class="field">
+                    <label><input type="checkbox" id="inventory" checked /> Inventory CSV exports</label>
+                    <div class="hint">Also includes sizes</div>
+                  </div>
+                  <div class="field">
+                    <label><input type="checkbox" id="roles" checked /> Roles/privileges</label>
+                    <div class="hint">Creates <span class="mono">globals.sql</span> (pg_dumpall)</div>
+                  </div>
+                </div>
+
+                <div class="divider"></div>
+                <div class="section-title">
+                  <p><b>Filters</b> — leave blank to include all</p>
+                </div>
+                <div class="row" style="margin-top:10px">
+                  <div class="field lg">
+                    <label>Schema include (comma-separated)</label>
+                    <input id="schemaInclude" type="text" placeholder="public,auth" />
+                    <div class="hint">Blank = all schemas</div>
+                  </div>
+                  <div class="field lg">
+                    <label>Schema exclude (comma-separated)</label>
+                    <input id="schemaExclude" type="text" placeholder="pg_catalog,information_schema" />
+                    <div class="hint">Blank = exclude none</div>
+                  </div>
+                  <div class="field lg">
+                    <label>Table include (comma-separated, optional)</label>
+                    <input id="tableInclude" type="text" placeholder="public.users,public.orders" />
+                    <div class="hint">Blank = all tables</div>
+                  </div>
+                  <div class="field lg">
+                    <label>Table exclude (comma-separated, optional)</label>
+                    <input id="tableExclude" type="text" placeholder="public.logs" />
+                    <div class="hint">Blank = exclude none</div>
+                  </div>
+                </div>
+
+                <div class="spacer"></div>
+                <div class="toolbar">
+                  <button class="btn primary" id="run" type="button">Run backup</button>
+                  <button class="btn danger" id="cancel" type="button" style="display:none">Cancel</button>
+                  <a class="btn" id="download" href="#" style="display:none">Download zip</a>
+                  <span class="badge">Job: <span id="jobId" class="mono">—</span></span>
+                </div>
+
+                <div class="spacer"></div>
+                <div class="card" style="padding:12px; background: color-mix(in oklab, var(--panel-2) 68%, transparent)">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
+                    <div>
+                      <div style="font-weight:800">Progress</div>
+                      <div class="hint" id="progressMeta">—</div>
+                    </div>
+                    <progress id="progressBar" max="100" value="0" style="width: 220px; height: 14px"></progress>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="spacer"></div>
+            <div class="card">
+              <div class="toolbar" style="justify-content:space-between">
+                <h3 style="margin:0">Logs</h3>
+                <button class="btn" id="copyLogs" type="button">Copy logs</button>
+              </div>
+              <div id="log" class="log"></div>
+            </div>
+          </section>
+
+          <!-- HISTORY -->
+          <section role="tabpanel" data-panel="history" hidden>
+            <div class="card">
+              <div class="toolbar" style="justify-content:space-between">
+                <div class="toolbar" style="flex:1">
+                  <input id="historySearch" type="text" placeholder="Search job id…" style="max-width:420px" />
+                  <button class="btn" id="historyRefresh" type="button">Refresh</button>
+                </div>
+                <div class="toolbar">
+                  <span class="badge">Retention</span>
+                  <input id="retentionDays" type="number" value="30" style="width:130px" />
+                  <input id="retentionKeep" type="number" value="200" style="width:130px" />
+                  <button class="btn" id="maxRetention" type="button">Max retention</button>
+                  <button class="btn" id="runCleanup" type="button">Cleanup</button>
+                </div>
+              </div>
+
+              <div class="spacer"></div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th class="right">Zip size</th>
+                    <th class="right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- SETTINGS -->
+          <section role="tabpanel" data-panel="settings" hidden>
+            <div class="grid">
+              <div class="card">
+                <h3>System checks</h3>
+                <div class="alert warn">
+                  <div style="font-weight:800">Important</div>
+                  <div class="hint" style="margin-top:6px">
+                    This app runs <span class="mono">pg_dump</span> and <span class="mono">psql</span> on <b>your machine</b>.
+                    Install PostgreSQL client tools and ensure they are in PATH.
+                  </div>
+                </div>
+                <div class="hint" style="margin-top:10px">
+                  macOS: <span class="mono">brew install postgresql@16</span> then <span class="mono">brew link --force postgresql@16</span>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3>Security</h3>
+                <div class="hint">Passwords are never stored. Connection strings are redacted in logs.</div>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
 
-    <p class="muted">
-      Use Supabase Pooler fields (recommended) or paste a full connection string.
-    </p>
-
-    <h3>Pooler connection</h3>
-    <div class="row">
-      <label>
-        Host
-        <input id="host" style="width: 320px" />
-      </label>
-      <label>
-        Port
-        <input id="port" style="width: 120px" />
-      </label>
-    </div>
-    <div class="row" style="margin-top: 8px">
-      <label>
-        User
-        <input id="user" style="width: 320px" />
-      </label>
-      <label>
-        Database
-        <input id="database" style="width: 200px" />
-      </label>
-    </div>
-    <div class="row" style="margin-top: 8px">
-      <label>
-        Password
-        <input id="password" type="password" style="width: 320px" />
-      </label>
-      <button id="test" type="button">Test connection</button>
-      <span id="testStatus" class="muted"></span>
-    </div>
-
-    <details style="margin-top: 12px">
-      <summary>Advanced: paste full connection string</summary>
-      <label style="display: block; margin-top: 8px">
-        Connection string
-        <textarea id="conn" placeholder="postgresql://..."></textarea>
-      </label>
-    </details>
-
-    <div class="row" style="margin-top: 12px">
-      <label><input type="checkbox" id="fullDump" checked /> Full dump (.dump)</label>
-      <label><input type="checkbox" id="schemaOnly" checked /> Schema-only (schema.sql)</label>
-      <label><input type="checkbox" id="inventory" checked /> Inventory (CSV exports)</label>
-    </div>
-
-    <div class="row" style="margin-top: 12px">
-      <button id="run">Run backup</button>
-      <a id="download" href="#" style="display: none">Download zip</a>
-      <span id="status" class="muted"></span>
-    </div>
-
-    <div id="log" class="log"></div>
-
-    <script>
-      const elConn = document.getElementById('conn');
-      const elHost = document.getElementById('host');
-      const elPort = document.getElementById('port');
-      const elUser = document.getElementById('user');
-      const elDatabase = document.getElementById('database');
-      const elPassword = document.getElementById('password');
-      const elTest = document.getElementById('test');
-      const elTestStatus = document.getElementById('testStatus');
-      const elFullDump = document.getElementById('fullDump');
-      const elSchemaOnly = document.getElementById('schemaOnly');
-      const elInventory = document.getElementById('inventory');
-      const elRun = document.getElementById('run');
-      const elLog = document.getElementById('log');
-      const elStatus = document.getElementById('status');
-      const elDownload = document.getElementById('download');
-
-      // Pooler defaults
-      elHost.value = 'aws-1-ap-south-1.pooler.supabase.com';
-      elPort.value = '5432';
-      elUser.value = 'postgres.cughfeafhxhumjbijlpr';
-      elDatabase.value = 'postgres';
-
-      function buildPoolerConnectionString() {
-        const host = elHost.value.trim();
-        const port = Number(elPort.value.trim() || 5432);
-        const user = elUser.value.trim();
-        const database = elDatabase.value.trim();
-        const password = elPassword.value;
-
-        if (!host || !user || !database) return '';
-        const encodedUser = encodeURIComponent(user);
-        const encodedPass = encodeURIComponent(password || '');
-        const encodedDb = encodeURIComponent(database);
-        return `postgresql://${encodedUser}:${encodedPass}@${host}:${port}/${encodedDb}?sslmode=require`;
-      }
-
-      async function testConnection() {
-        elTestStatus.textContent = '';
-        const cs = (elConn.value || '').trim() || buildPoolerConnectionString();
-        if (!cs) {
-          alert('Please enter pooler details (and password) OR paste a connection string');
-          return;
-        }
-        elTest.disabled = true;
-        try {
-          const resp = await fetch('/api/test-connection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ connectionString: cs }),
-          });
-          const body = await resp.json();
-          if (!body.ok) throw new Error(body.error || 'test failed');
-          elTestStatus.textContent = 'OK';
-        } catch (e) {
-          elTestStatus.textContent = 'FAILED';
-          log('TEST ERROR: ' + (e?.message || String(e)));
-        } finally {
-          elTest.disabled = false;
-        }
-      }
-
-      elTest.addEventListener('click', testConnection);
-
-      function log(line) {
-        elLog.textContent += line + '\n';
-        elLog.scrollTop = elLog.scrollHeight;
-      }
-
-      elRun.addEventListener('click', async () => {
-        elLog.textContent = '';
-        elDownload.style.display = 'none';
-        elStatus.textContent = '';
-        const connectionString = elConn.value.trim();
-        const poolerCs = buildPoolerConnectionString();
-        if (!connectionString && !poolerCs) {
-          alert('Please enter pooler fields (and password) OR paste a connection string');
-          return;
-        }
-        elRun.disabled = true;
-        try {
-          const resp = await fetch('/api/backup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              connectionString,
-              pooler: connectionString
-                ? undefined
-                : {
-                    host: elHost.value.trim(),
-                    port: elPort.value.trim(),
-                    user: elUser.value.trim(),
-                    database: elDatabase.value.trim(),
-                    password: elPassword.value,
-                  },
-              options: {
-                fullDump: elFullDump.checked,
-                schemaOnly: elSchemaOnly.checked,
-                inventory: elInventory.checked,
-              },
-            }),
-          });
-          const body = await resp.json();
-          if (!body.ok) throw new Error(JSON.stringify(body.error));
-          const jobId = body.jobId;
-          elStatus.textContent = `Job: ${jobId}`;
-
-          const ev = new EventSource(`/api/jobs/${jobId}/events`);
-          ev.addEventListener('log', (e) => {
-            const line = JSON.parse(e.data);
-            log(line);
-          });
-          ev.addEventListener('status', async (e) => {
-            const s = JSON.parse(e.data);
-            log(`STATUS: ${s.status}`);
-            ev.close();
-            elRun.disabled = false;
-
-            if (s.status === 'done') {
-              elDownload.href = `/api/jobs/${jobId}/download`;
-              elDownload.style.display = 'inline-block';
-            } else {
-              try {
-                const st = await fetch(`/api/jobs/${jobId}`);
-                const jb = await st.json();
-                if (jb?.job?.error) {
-                  log('SERVER ERROR: ' + jb.job.error);
-                }
-                if (jb?.job?.code) {
-                  log('SERVER ERROR CODE: ' + jb.job.code);
-                }
-              } catch (_e) {
-                // ignore
-              }
-            }
-          });
-        } catch (err) {
-          elRun.disabled = false;
-          log('CLIENT ERROR: ' + (err?.message || String(err)));
-        }
-      });
-    </script>
+    <script src="/app.js"></script>
   </body>
 </html>

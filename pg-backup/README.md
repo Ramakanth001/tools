@@ -2,13 +2,18 @@
 
 Local web UI to create **real PostgreSQL backups** using `pg_dump` and export a single **zip**.
 
+Now includes a production-grade UI (light + dark mode), job history, retention cleanup, cancellation, and streaming zip generation.
+
 ## What it generates
 
 For each run it creates a timestamped folder under `backups/` and then a zip containing:
 
 - `db.dump` (custom format) **if enabled**
+- `db.sql` (plain SQL) **if enabled**
 - `schema.sql` (schema-only) **if enabled**
 - `inventory/` CSVs (extensions, RLS policies, tables list) **if enabled**
+- `inventory/db_size.csv` and `inventory/schema_sizes.csv` **if enabled**
+- `globals.sql` (roles/privileges) **if enabled** (requires `pg_dumpall`)
 - `meta.json`
 
 ## Requirements
@@ -79,6 +84,23 @@ TLS is required. This tool enforces `sslmode=require` automatically.
 
 - This is intentionally a **local-only** tool. Credentials are sent only to `localhost`.
 - For large DBs, dumps can take time.
+- Zipping is done via a streaming zip implementation (does not buffer the entire archive in memory).
+
+## UI features
+
+- Light mode by default + **dark mode toggle** (persisted in localStorage)
+- Tabs: Run / History / Settings
+- **Profiles**: save connection presets (password is never stored)
+- **Job history**: list/search/download/delete
+- **Retention cleanup**: delete old jobs by days / keep count
+- **Cancel job**: cancels running backup (sends SIGTERM to child processes)
+
+## Advanced backup options
+
+- Schema include/exclude (comma-separated)
+- Table include/exclude (comma-separated, schema-qualified recommended)
+- Plain SQL dump option
+- Roles/privileges artifact (`globals.sql`) via `pg_dumpall --globals-only` (if available)
 
 ## Troubleshooting
 
@@ -100,4 +122,9 @@ brew link --force postgresql@16
 ```bash
 export PG_DUMP_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dump"
 export PSQL_PATH="/opt/homebrew/opt/postgresql@16/bin/psql"
+
+If roles dump is enabled and you see warnings about `pg_dumpall`, install PostgreSQL client tools that include it or set:
+
+export PG_DUMPALL_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dumpall"
+
 ```

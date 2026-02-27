@@ -10,6 +10,7 @@
     "health": "node -e \"fetch('http://localhost:8787/api/health').then(r=>r.text()).then(t=>console.log(t)).catch(e=>{console.error(e.message); process.exit(1);})\""
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "express": "^5.2.1",
     "jszip": "^3.10.1",
     "multer": "^2.0.2",

@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 
+const { redactConnectionString } = require('./redact');
+
 async function commandExists(cmd) {
   return new Promise((resolve) => {
     const child = spawn(cmd, ['--version'], {
@@ -51,7 +53,7 @@ function emit(logFn, msg) {
   logFn(String(msg));
 }
 
-function spawnLogged(cmd, args, { env, cwd, log }) {
+function spawnLogged(cmd, args, { env, cwd, log, onChild, isCancelled }) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       env,
@@ -59,15 +61,58 @@ function spawnLogged(cmd, args, { env, cwd, log }) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    if (onChild) onChild(child);
+
     child.stdout.on('data', (d) => log(d.toString()));
     child.stderr.on('data', (d) => log(d.toString()));
 
+    const cancelInterval = setInterval(() => {
+      if (!isCancelled) return;
+      if (!isCancelled()) return;
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }, 250);
+
     child.on('error', reject);
     child.on('close', (code) => {
+      clearInterval(cancelInterval);
       if (code === 0) return resolve();
       reject(new Error(`${cmd} exited with code ${code}`));
     });
   });
+}
+
+function parseList(s) {
+  const raw = String(s || '').trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function buildPgDumpFilters(options) {
+  const args = [];
+
+  const schemaInclude = parseList(options.schemaInclude);
+  const schemaExclude = parseList(options.schemaExclude);
+  const tableInclude = parseList(options.tableInclude);
+  const tableExclude = parseList(options.tableExclude);
+
+  // Note: pg_dump filtering can be subtle:
+  // - --schema=... limits to schemas
+  // - --exclude-schema=... excludes schemas
+  // - --table=... supports schema-qualified names
+  // - --exclude-table=... excludes tables
+  for (const s of schemaInclude) args.push(`--schema=${s}`);
+  for (const s of schemaExclude) args.push(`--exclude-schema=${s}`);
+  for (const t of tableInclude) args.push(`--table=${t}`);
+  for (const t of tableExclude) args.push(`--exclude-table=${t}`);
+
+  return args;
 }
 
 async function writeText(filePath, text) {
@@ -75,7 +120,7 @@ async function writeText(filePath, text) {
   await fsp.writeFile(filePath, text, 'utf8');
 }
 
-async function runBackup({ connectionString, options, outDir, log }) {
+async function runBackup({ connectionString, options, outDir, log, progress, onChild, isCancelled }) {
   const stamp = nowStamp();
   const jobDir = path.join(outDir, stamp);
   await fsp.mkdir(jobDir, { recursive: true });
@@ -93,9 +138,12 @@ async function runBackup({ connectionString, options, outDir, log }) {
   await writeText(path.join(jobDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
   emit(log, `Backup output folder: ${jobDir}`);
+  emit(log, `Database: ${redactConnectionString(connectionString)}`);
 
   const pgDump = process.env.PG_DUMP_PATH || 'pg_dump';
   const psql = process.env.PSQL_PATH || 'psql';
+
+  const pgDumpFilters = buildPgDumpFilters(options);
 
   // Hard preflight: fail fast with a clear message if tools are missing.
   const missing = [];
@@ -111,6 +159,23 @@ async function runBackup({ connectionString, options, outDir, log }) {
     throw missingPgToolsError(missing);
   }
 
+  const emitProgress = (p) => {
+    if (typeof options?.progress === 'function') options.progress(p);
+  };
+
+  const report = (p) => (progress ? progress(p) : undefined);
+
+  function throwIfCancelled() {
+    if (isCancelled && isCancelled()) {
+      const err = new Error('Job cancelled');
+      err.code = 'JOB_CANCELLED';
+      throw err;
+    }
+  }
+
+  report({ phase: 'preflight', percent: 5 });
+  throwIfCancelled();
+
   if (options.fullDump) {
     emit(log, 'Running pg_dump (custom format) ...');
     const dumpPath = path.join(jobDir, 'db.dump');
@@ -121,12 +186,15 @@ async function runBackup({ connectionString, options, outDir, log }) {
         '--no-owner',
         '--no-privileges',
         '--verbose',
+        ...pgDumpFilters,
         '--file',
         dumpPath,
         connectionString,
       ],
-      { env, cwd: jobDir, log }
+      { env, cwd: jobDir, log, onChild, isCancelled }
     );
+    report({ phase: 'fullDump', percent: 35 });
+    throwIfCancelled();
   }
 
   if (options.schemaOnly) {
@@ -134,9 +202,23 @@ async function runBackup({ connectionString, options, outDir, log }) {
     const schemaPath = path.join(jobDir, 'schema.sql');
     await spawnLogged(
       pgDump,
-      ['--schema-only', '--no-owner', '--no-privileges', '--file', schemaPath, connectionString],
-      { env, cwd: jobDir, log }
+      ['--schema-only', '--no-owner', '--no-privileges', ...pgDumpFilters, '--file', schemaPath, connectionString],
+      { env, cwd: jobDir, log, onChild, isCancelled }
     );
+    report({ phase: 'schemaOnly', percent: 55 });
+    throwIfCancelled();
+  }
+
+  if (options.plainSql) {
+    emit(log, 'Running pg_dump (plain SQL) ...');
+    const sqlPath = path.join(jobDir, 'db.sql');
+    await spawnLogged(
+      pgDump,
+      ['--format=plain', '--no-owner', '--no-privileges', ...pgDumpFilters, '--file', sqlPath, connectionString],
+      { env, cwd: jobDir, log, onChild, isCancelled }
+    );
+    report({ phase: 'plainSql', percent: 70 });
+    throwIfCancelled();
   }
 
   if (options.inventory) {
@@ -157,6 +239,14 @@ async function runBackup({ connectionString, options, outDir, log }) {
         file: 'tables.csv',
         sql: "COPY (SELECT table_schema, table_name FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_schema, table_name) TO STDOUT WITH CSV HEADER;",
       },
+      {
+        file: 'db_size.csv',
+        sql: "COPY (SELECT current_database() AS db, pg_database_size(current_database()) AS bytes) TO STDOUT WITH CSV HEADER;",
+      },
+      {
+        file: 'schema_sizes.csv',
+        sql: "COPY (SELECT n.nspname AS schema, SUM(pg_total_relation_size(c.oid))::bigint AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','m') GROUP BY n.nspname ORDER BY bytes DESC) TO STDOUT WITH CSV HEADER;",
+      },
     ];
 
     for (const q of queries) {
@@ -169,20 +259,85 @@ async function runBackup({ connectionString, options, outDir, log }) {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
 
+        if (onChild) onChild(child);
+
         const ws = fs.createWriteStream(outPath);
         child.stdout.pipe(ws);
         child.stderr.on('data', (d) => log(d.toString()));
 
+        const cancelInterval = setInterval(() => {
+          if (!isCancelled) return;
+          if (!isCancelled()) return;
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // ignore
+          }
+        }, 250);
+
         child.on('error', reject);
         child.on('close', (code) => {
+          clearInterval(cancelInterval);
           ws.end();
           if (code === 0) return resolve();
           reject(new Error(`psql exited with code ${code} for ${q.file}`));
         });
       });
+      throwIfCancelled();
     }
+    report({ phase: 'inventory', percent: 85 });
   }
 
+  if (options.roles) {
+    // Best-effort: dump globals via pg_dumpall if available; otherwise skip.
+    const pgDumpAll = process.env.PG_DUMPALL_PATH || 'pg_dumpall';
+    const ok = await commandExists(pgDumpAll);
+    if (ok) {
+      emit(log, 'Dumping globals (roles/privileges) via pg_dumpall ...');
+      const globalsPath = path.join(jobDir, 'globals.sql');
+      await new Promise((resolve, reject) => {
+        const child = spawn(pgDumpAll, ['--globals-only', '--no-role-passwords', connectionString], {
+          env,
+          cwd: jobDir,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        if (onChild) onChild(child);
+
+        const ws = fs.createWriteStream(globalsPath);
+        child.stdout.pipe(ws);
+        child.stderr.on('data', (d) => log(d.toString()));
+
+        const cancelInterval = setInterval(() => {
+          if (!isCancelled) return;
+          if (!isCancelled()) return;
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // ignore
+          }
+        }, 250);
+
+        child.on('error', (e) => {
+          clearInterval(cancelInterval);
+          reject(e);
+        });
+        child.on('close', (code) => {
+          clearInterval(cancelInterval);
+          ws.end();
+          if (code === 0) return resolve();
+          reject(new Error(`pg_dumpall exited with code ${code}`));
+        });
+      }).catch((e) => {
+        emit(log, `WARN: globals dump failed: ${e?.message || String(e)}`);
+      });
+    } else {
+      emit(log, 'WARN: pg_dumpall not found; skipping roles/privileges dump.');
+    }
+    report({ phase: 'roles', percent: 90 });
+    throwIfCancelled();
+  }
+
+  report({ phase: 'finalizing', percent: 95 });
   emit(log, 'Backup job finished.');
   return { jobDir, stamp };
 }
