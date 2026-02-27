@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Backup UI</title>
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        margin: 24px;
+        max-width: 900px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 90px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+          'Courier New', monospace;
+      }
+      .row {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .log {
+        margin-top: 16px;
+        background: #0b1020;
+        color: #d7e0ff;
+        padding: 12px;
+        border-radius: 8px;
+        height: 320px;
+        overflow: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+          'Courier New', monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+      .warn {
+        padding: 12px;
+        border: 1px solid #e7c200;
+        background: #fff9d6;
+        border-radius: 8px;
+        margin: 12px 0;
+      }
+      button {
+        padding: 10px 14px;
+      }
+      .muted {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Local Backup UI</h1>
+    <div class="warn">
+      <b>Important:</b> This app runs <code>pg_dump</code> and <code>psql</code> on your machine.
+      If they are not installed, the backup job will fail.
+      <div style="margin-top: 8px">
+        Install (macOS Homebrew): <code>brew install postgresql@16</code> then
+        <code>brew link --force postgresql@16</code>
+      </div>
+    </div>
+
+    <p class="muted">
+      Use Supabase Pooler fields (recommended) or paste a full connection string.
+    </p>
+
+    <h3>Pooler connection</h3>
+    <div class="row">
+      <label>
+        Host
+        <input id="host" style="width: 320px" />
+      </label>
+      <label>
+        Port
+        <input id="port" style="width: 120px" />
+      </label>
+    </div>
+    <div class="row" style="margin-top: 8px">
+      <label>
+        User
+        <input id="user" style="width: 320px" />
+      </label>
+      <label>
+        Database
+        <input id="database" style="width: 200px" />
+      </label>
+    </div>
+    <div class="row" style="margin-top: 8px">
+      <label>
+        Password
+        <input id="password" type="password" style="width: 320px" />
+      </label>
+      <button id="test" type="button">Test connection</button>
+      <span id="testStatus" class="muted"></span>
+    </div>
+
+    <details style="margin-top: 12px">
+      <summary>Advanced: paste full connection string</summary>
+      <label style="display: block; margin-top: 8px">
+        Connection string
+        <textarea id="conn" placeholder="postgresql://..."></textarea>
+      </label>
+    </details>
+
+    <div class="row" style="margin-top: 12px">
+      <label><input type="checkbox" id="fullDump" checked /> Full dump (.dump)</label>
+      <label><input type="checkbox" id="schemaOnly" checked /> Schema-only (schema.sql)</label>
+      <label><input type="checkbox" id="inventory" checked /> Inventory (CSV exports)</label>
+    </div>
+
+    <div class="row" style="margin-top: 12px">
+      <button id="run">Run backup</button>
+      <a id="download" href="#" style="display: none">Download zip</a>
+      <span id="status" class="muted"></span>
+    </div>
+
+    <div id="log" class="log"></div>
+
+    <script>
+      const elConn = document.getElementById('conn');
+      const elHost = document.getElementById('host');
+      const elPort = document.getElementById('port');
+      const elUser = document.getElementById('user');
+      const elDatabase = document.getElementById('database');
+      const elPassword = document.getElementById('password');
+      const elTest = document.getElementById('test');
+      const elTestStatus = document.getElementById('testStatus');
+      const elFullDump = document.getElementById('fullDump');
+      const elSchemaOnly = document.getElementById('schemaOnly');
+      const elInventory = document.getElementById('inventory');
+      const elRun = document.getElementById('run');
+      const elLog = document.getElementById('log');
+      const elStatus = document.getElementById('status');
+      const elDownload = document.getElementById('download');
+
+      // Pooler defaults
+      elHost.value = 'aws-1-ap-south-1.pooler.supabase.com';
+      elPort.value = '5432';
+      elUser.value = 'postgres.cughfeafhxhumjbijlpr';
+      elDatabase.value = 'postgres';
+
+      function buildPoolerConnectionString() {
+        const host = elHost.value.trim();
+        const port = Number(elPort.value.trim() || 5432);
+        const user = elUser.value.trim();
+        const database = elDatabase.value.trim();
+        const password = elPassword.value;
+
+        if (!host || !user || !database) return '';
+        const encodedUser = encodeURIComponent(user);
+        const encodedPass = encodeURIComponent(password || '');
+        const encodedDb = encodeURIComponent(database);
+        return `postgresql://${encodedUser}:${encodedPass}@${host}:${port}/${encodedDb}?sslmode=require`;
+      }
+
+      async function testConnection() {
+        elTestStatus.textContent = '';
+        const cs = (elConn.value || '').trim() || buildPoolerConnectionString();
+        if (!cs) {
+          alert('Please enter pooler details (and password) OR paste a connection string');
+          return;
+        }
+        elTest.disabled = true;
+        try {
+          const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectionString: cs }),
+          });
+          const body = await resp.json();
+          if (!body.ok) throw new Error(body.error || 'test failed');
+          elTestStatus.textContent = 'OK';
+        } catch (e) {
+          elTestStatus.textContent = 'FAILED';
+          log('TEST ERROR: ' + (e?.message || String(e)));
+        } finally {
+          elTest.disabled = false;
+        }
+      }
+
+      elTest.addEventListener('click', testConnection);
+
+      function log(line) {
+        elLog.textContent += line + '\n';
+        elLog.scrollTop = elLog.scrollHeight;
+      }
+
+      elRun.addEventListener('click', async () => {
+        elLog.textContent = '';
+        elDownload.style.display = 'none';
+        elStatus.textContent = '';
+        const connectionString = elConn.value.trim();
+        const poolerCs = buildPoolerConnectionString();
+        if (!connectionString && !poolerCs) {
+          alert('Please enter pooler fields (and password) OR paste a connection string');
+          return;
+        }
+        elRun.disabled = true;
+        try {
+          const resp = await fetch('/api/backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              connectionString,
+              pooler: connectionString
+                ? undefined
+                : {
+                    host: elHost.value.trim(),
+                    port: elPort.value.trim(),
+                    user: elUser.value.trim(),
+                    database: elDatabase.value.trim(),
+                    password: elPassword.value,
+                  },
+              options: {
+                fullDump: elFullDump.checked,
+                schemaOnly: elSchemaOnly.checked,
+                inventory: elInventory.checked,
+              },
+            }),
+          });
+          const body = await resp.json();
+          if (!body.ok) throw new Error(JSON.stringify(body.error));
+          const jobId = body.jobId;
+          elStatus.textContent = `Job: ${jobId}`;
+
+          const ev = new EventSource(`/api/jobs/${jobId}/events`);
+          ev.addEventListener('log', (e) => {
+            const line = JSON.parse(e.data);
+            log(line);
+          });
+          ev.addEventListener('status', async (e) => {
+            const s = JSON.parse(e.data);
+            log(`STATUS: ${s.status}`);
+            ev.close();
+            elRun.disabled = false;
+
+            if (s.status === 'done') {
+              elDownload.href = `/api/jobs/${jobId}/download`;
+              elDownload.style.display = 'inline-block';
+            } else {
+              try {
+                const st = await fetch(`/api/jobs/${jobId}`);
+                const jb = await st.json();
+                if (jb?.job?.error) {
+                  log('SERVER ERROR: ' + jb.job.error);
+                }
+                if (jb?.job?.code) {
+                  log('SERVER ERROR CODE: ' + jb.job.code);
+                }
+              } catch (_e) {
+                // ignore
+              }
+            }
+          });
+        } catch (err) {
+          elRun.disabled = false;
+          log('CLIENT ERROR: ' + (err?.message || String(err)));
+        }
+      });
+    </script>
+  </body>
+</html>

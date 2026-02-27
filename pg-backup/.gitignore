@@ -1,0 +1,17 @@
+# Ignore node_modules
+node_modules/
+
+# Python virtual env
+venv/
+__pycache__/
+*.pyc
+
+# Backups (don’t commit database dumps / zip files)
+backups/
+
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
