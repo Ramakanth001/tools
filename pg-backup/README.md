@@ -51,6 +51,9 @@ If `brew link` is not desired, you can set absolute paths:
 ```bash
 export PG_DUMP_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dump"
 export PSQL_PATH="/opt/homebrew/opt/postgresql@16/bin/psql"
+
+# optional
+export PG_DUMPALL_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dumpall"
 ```
 
 ## Run
@@ -102,6 +105,12 @@ TLS is required. This tool enforces `sslmode=require` automatically.
 - Plain SQL dump option
 - Roles/privileges artifact (`globals.sql`) via `pg_dumpall --globals-only` (if available)
 
+## Retention
+
+Retention cleanup is manual: go to **History** → set **Days** + **Keep** → click **Cleanup**.
+
+Defaults are conservative (e.g. 30 days / 200 jobs). There is also a **Max retention** preset button in the UI.
+
 ## Troubleshooting
 
 ### Job fails with "Missing required tools" / "spawn pg_dump ENOENT"
@@ -122,9 +131,5 @@ brew link --force postgresql@16
 ```bash
 export PG_DUMP_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dump"
 export PSQL_PATH="/opt/homebrew/opt/postgresql@16/bin/psql"
-
-If roles dump is enabled and you see warnings about `pg_dumpall`, install PostgreSQL client tools that include it or set:
-
-export PG_DUMPALL_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dumpall"
-
+export PG_DUMPALL_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dumpall" # optional
 ```
