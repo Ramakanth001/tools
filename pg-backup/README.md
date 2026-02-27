@@ -70,18 +70,121 @@ http://localhost:8787
 
 Paste your Supabase DB connection string (Supabase Dashboard → Settings → Database → Connection string).
 
-## Using Supabase Pooler (recommended)
+## How to use (step-by-step)
 
-You can connect via Supabase Pooler instead of the direct DB host.
+1) Start the app:
 
-Example pooler settings:
+```bash
+cd tools/pg-backup
+npm install
+npm run dev
+```
 
-- Host: `aws-1-ap-south-1.pooler.supabase.com`
-- Port: `5432`
-- User: `postgres.cughfeafhxhumjbijlpr`
-- Database: `postgres`
+2) Open the UI:
 
-TLS is required. This tool enforces `sslmode=require` automatically.
+http://localhost:8787
+
+3) Choose **one** connection method:
+
+- **Option A: Pooler fields** (recommended for Supabase)
+- **Option B: Full connection string** (works for any Postgres)
+
+4) Click **Test connection**
+
+5) Pick artifacts under **Backup options → Artifacts**
+
+6) (Optional) Configure filters under **Backup options → Filters**
+
+7) Click **Run backup**
+
+8) When status is **Done**, click **Download zip**.
+
+The output is also written to a timestamped folder under `backups/`.
+
+---
+
+## Connection methods
+
+### A) Supabase (Pooler fields)
+
+Where to get values:
+
+1) Supabase Dashboard → **Project Settings** → **Database** → **Connection string**
+2) Pick the **Pooler** section (Transaction pooler is typically best for tools).
+
+Fields mapping:
+
+- **Host**: pooler host (example: `aws-1-ap-south-1.pooler.supabase.com`)
+- **Port**: usually `5432`
+- **User**: looks like `postgres.<project-ref>`
+- **Database**: usually `postgres`
+- **Password**: the **database password** from Supabase (not an API key)
+
+Notes:
+
+- TLS is required; this tool enforces `sslmode=require`.
+- If you paste a full connection string, pooler fields are ignored.
+
+Pooler variants:
+
+- **Transaction pooler**: recommended for most tooling.
+- **Session pooler**: can also work, but transaction pooler is usually preferred.
+
+### B) Any Postgres (full connection string)
+
+Paste a connection string like:
+
+```text
+postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
+```
+
+Examples:
+
+```text
+postgresql://postgres:mysecret@127.0.0.1:5432/postgres
+postgresql://appuser:pw@db.internal:5432/app?sslmode=require
+```
+
+Tip: if your server requires TLS, include `?sslmode=require` (or the UI will add it when missing for postgres URLs).
+
+---
+
+## Backup options
+
+### Artifacts
+
+- **Full dump (custom)** → `db.dump`
+- **Schema-only** → `schema.sql`
+- **Plain SQL dump** → `db.sql`
+- **Inventory CSV exports** → `inventory/*.csv` (includes sizes)
+- **Roles/privileges** → `globals.sql` (requires `pg_dumpall`)
+
+### Filters (schemas/tables)
+
+All filter fields are **comma-separated**.
+
+Default behavior (when you leave fields blank):
+
+- **Schema include** blank → include **all schemas**
+- **Schema exclude** blank → exclude **none**
+- **Table include** blank → include **all tables**
+- **Table exclude** blank → exclude **none**
+
+Examples:
+
+- Only dump `public` and `auth` schemas:
+
+  - Schema include: `public,auth`
+
+- Exclude `storage` schema:
+
+  - Schema exclude: `storage`
+
+- Only include a few tables:
+
+  - Table include: `public.users,public.orders`
+
+Tip: use **schema-qualified** table names for clarity.
 
 ## Notes
 
