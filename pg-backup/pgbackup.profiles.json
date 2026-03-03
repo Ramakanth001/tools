@@ -1,0 +1,12 @@
+[
+  {
+    "id": "p_1472b2fb07be1_19cb2025eaa",
+    "name": "Supabase-bkp",
+    "host": "aws-1-ap-south-1.pooler.supabase.com",
+    "port": 5432,
+    "user": "postgres.cughfeafhxhumjbijlpr",
+    "database": "postgres",
+    "connectionString": "",
+    "createdAt": "2026-03-03T04:43:45.706Z"
+  }
+]

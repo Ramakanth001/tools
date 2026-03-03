@@ -1,0 +1,11 @@
+pg-backup project:-
+
+Commands:
+- Dev:
+
+  - Terminal A: `cd tools/pg-backup && node src/server.js`
+  - Terminal B: `cd tools/pg-backup && npx vite`
+
+- Prod:
+  - `cd tools/pg-backup && npm run build && node src/server.js`
+

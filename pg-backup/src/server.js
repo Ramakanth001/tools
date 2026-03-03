@@ -5,12 +5,14 @@ const { z } = require('zod');
 
 const { runBackup } = require('./backupRunner');
 const { zipFolderToFileStream } = require('./zipStream');
+const { getSchemaSnapshot, normalizeSnapshot } = require('./schemaIntrospector');
 
 const app = express();
 
 app.use(express.json({ limit: '2mb' }));
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const VITE_DIST_INDEX = path.join(PUBLIC_DIR, 'index.html');
 const BACKUPS_DIR = path.join(__dirname, '..', 'backups');
 
 /** In-memory job store (good enough for local tooling) */
@@ -134,6 +136,15 @@ function buildPoolerConnectionString(pooler) {
 
 const TestConnectionRequest = z.object({
   connectionString: z.string().min(10),
+});
+
+const SchemaSnapshotRequest = BackupRequest.pick({
+  connectionString: true,
+  pooler: true,
+  options: true,
+}).extend({
+  // whether to write the snapshot to disk under backups/schema-snapshots
+  persist: z.boolean().default(true),
 });
 
 app.get('/api/health', async (_req, res) => {
@@ -279,6 +290,58 @@ app.post('/api/test-connection', async (req, res) => {
   }
 });
 
+app.post('/api/schema/snapshot', async (req, res) => {
+  const parsed = SchemaSnapshotRequest.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  }
+
+  if (!parsed.data.connectionString && parsed.data.pooler) {
+    const pw = String(parsed.data.pooler.password || '');
+    if (!pw) {
+      return res.status(400).json({ ok: false, error: 'Pooler password is required (or paste a full connection string)' });
+    }
+  }
+
+  const connectionString = (() => {
+    if (parsed.data.connectionString && parsed.data.connectionString.trim().length > 0) {
+      return withSslModeRequireIfMissing(parsed.data.connectionString);
+    }
+    if (parsed.data.pooler) {
+      return buildPoolerConnectionString(parsed.data.pooler);
+    }
+    return '';
+  })();
+
+  if (!connectionString || connectionString.length < 10) {
+    return res.status(400).json({ ok: false, error: 'Missing connection details' });
+  }
+
+  try {
+    const filters = {
+      schemaInclude: parsed.data.options?.schemaInclude,
+      schemaExclude: parsed.data.options?.schemaExclude,
+      tableInclude: parsed.data.options?.tableInclude,
+      tableExclude: parsed.data.options?.tableExclude,
+    };
+    const snapshot = await getSchemaSnapshot({ connectionString, filters });
+    const normalized = normalizeSnapshot(snapshot);
+
+    // Optionally persist snapshot to disk.
+    if (parsed.data.persist) {
+      const stamp = new Date().toISOString().replaceAll(':', '-');
+      const outDir = path.join(BACKUPS_DIR, 'schema-snapshots');
+      await fsp.mkdir(outDir, { recursive: true });
+      const filePath = path.join(outDir, `${stamp}.schema.json`);
+      await fsp.writeFile(filePath, JSON.stringify(normalized, null, 2), 'utf8');
+    }
+
+    res.json({ ok: true, snapshot: normalized });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
 app.get('/api/jobs/:id', (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: 'not found' });
@@ -418,9 +481,18 @@ app.get('/api/jobs/:id/download', async (req, res) => {
 
 app.use(express.static(PUBLIC_DIR));
 
+// Legacy vendor routes removed: schema visualizer is now bundled by Vite (React Flow + elkjs).
+
+// SPA fallback. In dev, Vite serves the UI; in prod, we serve the built index.html.
 // Express 5 no longer accepts "*" as a route. Use a regex catch-all.
-app.get(/.*/, (_req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+app.get(/.*/, async (_req, res) => {
+  try {
+    // If build hasn't been run yet, give a helpful error instead of hanging.
+    await fsp.access(VITE_DIST_INDEX);
+    res.sendFile(VITE_DIST_INDEX);
+  } catch {
+    res.status(503).send('UI not built. Run `npm run build` for production, or `npm run dev` for local development.');
+  }
 });
 
 const port = Number(process.env.PORT || 8787);

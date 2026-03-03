@@ -61,12 +61,45 @@ export PG_DUMPALL_PATH="/opt/homebrew/opt/postgresql@16/bin/pg_dumpall"
 ```bash
 cd tools/pg-backup
 npm install
-npm run dev
+```
+
+### Development (React + API)
+
+Because the frontend is now **Vite + React** and the backend is **Express**, run them as two processes:
+
+Terminal A (API):
+
+```bash
+cd tools/pg-backup
+node src/server.js
+```
+
+Terminal B (UI):
+
+```bash
+cd tools/pg-backup
+npx vite
+```
+
+Open the UI:
+
+- http://localhost:5173
+
+The UI proxies API requests to `http://localhost:8787`.
+
+### Production build
+
+```bash
+cd tools/pg-backup
+npm run build
+node src/server.js
 ```
 
 Open:
 
-http://localhost:8787
+- http://localhost:8787
+
+---
 
 Paste your Supabase DB connection string (Supabase Dashboard → Settings → Database → Connection string).
 
@@ -77,12 +110,12 @@ Paste your Supabase DB connection string (Supabase Dashboard → Settings → Da
 ```bash
 cd tools/pg-backup
 npm install
-npm run dev
 ```
 
 2) Open the UI:
 
-http://localhost:8787
+- Dev: http://localhost:5173
+- Prod build: http://localhost:8787
 
 3) Choose **one** connection method:
 
