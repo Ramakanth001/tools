@@ -15,9 +15,13 @@ export async function computeElkLayout({ nodes, edges }) {
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '120',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '220',
+      'elk.spacing.nodeNode': '160',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '340',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '120',
+      'elk.spacing.edgeNode': '60',
       'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.layered.edgeLabels.sideSelection': 'SMART_DOWN',
       'elk.layered.crossingMinimization.semiInteractive': 'true',
     },
     children: nodes.map((n) => ({

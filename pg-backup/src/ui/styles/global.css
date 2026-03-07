@@ -343,6 +343,16 @@ select:disabled {
 
 /* ---- Schema visualizer table nodes ---- */
 
+/* React Flow: ensure edge labels are above nodes (fix FK labels hidden under tables) */
+.react-flow__edgelabel-renderer {
+  z-index: 50;
+  pointer-events: none;
+}
+
+.react-flow__node {
+  z-index: 10;
+}
+
 .tn {
   width: 360px;
   border-radius: 14px;

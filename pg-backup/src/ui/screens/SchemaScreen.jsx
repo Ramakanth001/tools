@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Background, Controls, MiniMap, ReactFlow, useEdgesState, useNodesState } from 'reactflow';
+import { Background, Controls, MiniMap, ReactFlow, useEdgesState, useNodesState, getNodesBounds, getTransformForBounds } from 'reactflow';
 import 'reactflow/dist/style.css';
+
+import * as htmlToImage from 'html-to-image';
+import jsPDF from 'jspdf';
 
 import { api } from '../lib/http.js';
 import TableNode from '../schema/nodes/TableNode.jsx';
@@ -28,6 +31,10 @@ export default function SchemaScreen() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  const [exportFormat, setExportFormat] = useState('png'); // png | jpg | pdf
+  const [exportScope, setExportScope] = useState('viewport'); // viewport | entire
+  const [exportScale, setExportScale] = useState(3);
 
   const schemas = useMemo(() => {
     const tables = snapshot?.tables || [];
@@ -67,6 +74,77 @@ export default function SchemaScreen() {
         return { ...n, position: { x: p.x, y: p.y } };
       })
     );
+  }
+
+  async function exportDiagram() {
+    const el = document.querySelector('.react-flow');
+    if (!el) return;
+
+    // Default: export visible viewport (what user sees after moving blocks).
+    // Optionally: export entire graph by temporarily fitting all nodes.
+    const instance = window.__rfInstance;
+    const prevViewport = instance?.getViewport?.();
+    const prevWidth = el.style.width;
+    const prevHeight = el.style.height;
+
+    try {
+      if (exportScope === 'entire' && instance) {
+        const nodes = instance.getNodes();
+        const bounds = getNodesBounds(nodes);
+
+        // Compute export canvas size based on node bounds (diagram coords) and desired padding.
+        const padding = 160;
+        const width = Math.max(1200, Math.ceil(bounds.width + padding * 2));
+        const height = Math.max(800, Math.ceil(bounds.height + padding * 2));
+
+        // Temporarily resize the react-flow viewport so html-to-image captures the full diagram.
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+
+        const { x, y, zoom } = getTransformForBounds(bounds, width, height, 0.15, 2);
+        instance.setViewport({ x, y, zoom }, { duration: 0 });
+      }
+
+      const toDataUrl = exportFormat === 'jpg' ? htmlToImage.toJpeg : htmlToImage.toPng;
+      const dataUrl = await toDataUrl(el, {
+        pixelRatio: exportScale,
+        backgroundColor: '#0b0d12',
+        filter: (node) => {
+          // Exclude UI chrome inside diagram.
+          const cls = node?.classList;
+          if (!cls) return true;
+          if (cls.contains('react-flow__minimap')) return false;
+          if (cls.contains('react-flow__controls')) return false;
+          return true;
+        },
+      });
+
+      if (exportFormat === 'pdf') {
+        // Create a PDF sized to the exported image (high quality single-page).
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = dataUrl;
+        });
+
+        const pdf = new jsPDF({ orientation: img.width >= img.height ? 'landscape' : 'portrait', unit: 'px', format: [img.width, img.height] });
+        pdf.addImage(dataUrl, 'PNG', 0, 0, img.width, img.height);
+        pdf.save('schema.pdf');
+      } else {
+        const a = document.createElement('a');
+        a.download = `schema.${exportFormat}`;
+        a.href = dataUrl;
+        a.click();
+      }
+    } finally {
+      // Restore viewport + size.
+      if (exportScope === 'entire') {
+        el.style.width = prevWidth;
+        el.style.height = prevHeight;
+        if (instance && prevViewport) instance.setViewport(prevViewport, { duration: 0 });
+      }
+    }
   }
 
   function applySnapshotToGraph(snap) {
@@ -133,8 +211,16 @@ export default function SchemaScreen() {
           target: fk.toTableId,
           label: fk.name,
           type: 'smoothstep',
-          style: { stroke: 'rgba(255,255,255,0.25)' },
-          labelStyle: { fill: 'rgba(238,242,255,0.6)', fontSize: 10 },
+          style: { stroke: 'rgba(148,163,184,0.55)', strokeWidth: 2 },
+          labelStyle: { fill: 'rgba(238,242,255,0.85)', fontSize: 10, fontWeight: 800 },
+          labelBgStyle: {
+            fill: 'rgba(17, 24, 42, 0.92)',
+            stroke: 'rgba(255,255,255,0.18)',
+            strokeWidth: 1,
+          },
+          interactionWidth: 18,
+          labelBgPadding: [6, 10],
+          labelBgBorderRadius: 10,
         }))
     );
 
@@ -295,6 +381,26 @@ export default function SchemaScreen() {
           >
             Auto-layout
           </button>
+
+          <div className="divider" style={{ marginLeft: 6, marginRight: 6, height: 26 }} />
+
+          <button className="btn" type="button" onClick={exportDiagram} disabled={nodes.length === 0}>
+            Export
+          </button>
+          <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)} style={{ width: 110 }}>
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+            <option value="pdf">PDF</option>
+          </select>
+          <select value={exportScope} onChange={(e) => setExportScope(e.target.value)} style={{ width: 150 }}>
+            <option value="viewport">Visible viewport</option>
+            <option value="entire">Entire diagram</option>
+          </select>
+          <select value={exportScale} onChange={(e) => setExportScale(Number(e.target.value))} style={{ width: 110 }}>
+            <option value={2}>2x</option>
+            <option value={3}>3x</option>
+            <option value={4}>4x</option>
+          </select>
         </div>
 
         <div className="divider" />
@@ -495,6 +601,9 @@ export default function SchemaScreen() {
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onInit={(inst) => {
+            window.__rfInstance = inst;
+          }}
           fitView
         >
           <Background gap={18} size={1} color="rgba(255,255,255,0.06)" />
