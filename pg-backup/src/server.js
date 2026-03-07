@@ -342,6 +342,57 @@ app.post('/api/schema/snapshot', async (req, res) => {
   }
 });
 
+app.post('/api/schema/list-schemas', async (req, res) => {
+  const parsed = SchemaSnapshotRequest.safeParse({
+    ...req.body,
+    persist: false,
+    options: { ...(req.body?.options || {}) },
+  });
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  }
+
+  if (!parsed.data.connectionString && parsed.data.pooler) {
+    const pw = String(parsed.data.pooler.password || '');
+    if (!pw) {
+      return res.status(400).json({ ok: false, error: 'Pooler password is required (or paste a full connection string)' });
+    }
+  }
+
+  const connectionString = (() => {
+    if (parsed.data.connectionString && parsed.data.connectionString.trim().length > 0) {
+      return withSslModeRequireIfMissing(parsed.data.connectionString);
+    }
+    if (parsed.data.pooler) {
+      return buildPoolerConnectionString(parsed.data.pooler);
+    }
+    return '';
+  })();
+
+  if (!connectionString || connectionString.length < 10) {
+    return res.status(400).json({ ok: false, error: 'Missing connection details' });
+  }
+
+  try {
+    const { Client } = require('pg');
+    const client = new Client({ connectionString });
+    await client.connect();
+    const r = await client.query(
+      `
+      select nspname as schema
+      from pg_namespace
+      where nspname not like 'pg_%'
+        and nspname <> 'information_schema'
+      order by nspname asc;
+    `
+    );
+    await client.end();
+    res.json({ ok: true, schemas: r.rows.map((x) => x.schema) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
 app.get('/api/jobs/:id', (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ ok: false, error: 'not found' });

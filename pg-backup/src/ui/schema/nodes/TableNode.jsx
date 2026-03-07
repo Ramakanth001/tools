@@ -34,7 +34,11 @@ export default function TableNode({ data }) {
   return (
     <div
       className={`tn ${selected ? 'tn--selected' : ''} ${dimmed ? 'tn--dim' : ''} ${highlight ? 'tn--hl' : ''}`}
-      onClick={() => onSelect?.(table?.id)}
+      onClick={(e) => {
+        // ReactFlow selection is handled by the parent <ReactFlow onNodeClick>.
+        // Stopping propagation here breaks selection, so only prevent default.
+        e.preventDefault();
+      }}
       role="button"
       tabIndex={0}
       onMouseEnter={() => data?.onHover?.(table?.id)}

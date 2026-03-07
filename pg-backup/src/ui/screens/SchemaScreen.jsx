@@ -1,5 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Background, Controls, MiniMap, ReactFlow, useEdgesState, useNodesState, getNodesBounds, getTransformForBounds } from 'reactflow';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
+  getNodesBounds,
+  getTransformForBounds,
+  useReactFlow,
+} from 'reactflow';
 import 'reactflow/dist/style.css';
 
 import * as htmlToImage from 'html-to-image';
@@ -7,7 +18,13 @@ import jsPDF from 'jspdf';
 
 import { api } from '../lib/http.js';
 import TableNode from '../schema/nodes/TableNode.jsx';
-import { computeElkLayout } from '../schema/layout/elkLayout.js';
+import FkEdge from '../schema/edges/FkEdge.jsx';
+import {
+  chooseLayoutMode,
+  computeElkPositions,
+  computeGridPositions,
+  styleModeFor,
+} from '../schema/layout/layoutEngine.js';
 import { useActiveConnection } from '../state/ActiveConnectionContext.jsx';
 
 function groupBySchema(tables) {
@@ -21,8 +38,15 @@ function groupBySchema(tables) {
 }
 
 export default function SchemaScreen() {
-  const { active } = useActiveConnection();
+  const { active, setActive } = useActiveConnection();
+  const rf = useReactFlow();
+  const fitTimerRef = useRef(null);
+  const pendingFitRef = useRef(false);
+  const pendingFitReasonRef = useRef('');
+  const activeLayoutJobRef = useRef(0);
   const [loading, setLoading] = useState(false);
+  const [layouting, setLayouting] = useState(false);
+  const [layoutNote, setLayoutNote] = useState('');
   const [error, setError] = useState('');
   const [snapshot, setSnapshot] = useState(null);
   const [fullSnapshot, setFullSnapshot] = useState(null);
@@ -31,6 +55,8 @@ export default function SchemaScreen() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  const [edgeStyleMode, setEdgeStyleMode] = useState('full'); // full | perf
 
   const [exportFormat, setExportFormat] = useState('png'); // png | jpg | pdf
   const [exportScope, setExportScope] = useState('viewport'); // viewport | entire
@@ -41,12 +67,125 @@ export default function SchemaScreen() {
     return Array.from(groupBySchema(tables).keys()).sort();
   }, [snapshot]);
 
-  const [schemaFilter, setSchemaFilter] = useState('public');
+  const [schemaFilter, setSchemaFilter] = useState('__all__');
   const [showViews, setShowViews] = useState(false);
   const [showEnums, setShowEnums] = useState(true);
   const [showFunctions, setShowFunctions] = useState(true);
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [hoveredTableId, setHoveredTableId] = useState(null);
+  const [schemaPassword, setSchemaPassword] = useState('');
+  const [profiles, setProfiles] = useState([]);
+  const [profileId, setProfileId] = useState('');
+  const [dbSchemas, setDbSchemas] = useState([]);
+
+  // Enums/Functions expand/collapse state
+  const [enumsExpanded, setEnumsExpanded] = useState(false);
+  const [functionsExpanded, setFunctionsExpanded] = useState(false);
+
+  // Only show MiniMap when diagram is larger than viewport.
+  const [showMiniMap, setShowMiniMap] = useState(false);
+  // Fit-to-view should only happen after nodes are committed into ReactFlow.
+  // We coordinate it via pendingFitRef + a useEffect on `nodes`.
+  const requestFitView = useCallback((reason = '') => {
+    pendingFitRef.current = true;
+    pendingFitReasonRef.current = reason;
+  }, []);
+
+  const updateMiniMapVisibility = useCallback(
+    (nextNodes) => {
+      try {
+        const list = Array.isArray(nextNodes) ? nextNodes : rf.getNodes();
+        if (!list?.length) return setShowMiniMap(false);
+
+        const flowEl = document.querySelector('.react-flow');
+        if (!flowEl) return;
+
+        const vb = { w: flowEl.clientWidth || 0, h: flowEl.clientHeight || 0 };
+        if (!vb.w || !vb.h) return;
+
+        const bounds = getNodesBounds(list);
+        const needs = bounds.width > vb.w * 0.98 || bounds.height > vb.h * 0.98;
+        setShowMiniMap(needs);
+      } catch {
+        // ignore
+      }
+    },
+    [rf]
+  );
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('pgbackup.profiles');
+      const parsed = raw ? JSON.parse(raw) : [];
+      setProfiles(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setProfiles([]);
+    }
+  }, []);
+
+  // Fetch schemas list from DB so dropdown can show all schemas present.
+  useEffect(() => {
+    if (sourceMode !== 'db') return;
+    if (active.connectionString) {
+      // connection string mode should work without password
+    } else {
+      // pooler mode needs password
+      const pw = active.pooler?.password || schemaPassword;
+      if (!pw) return;
+    }
+
+    (async () => {
+      try {
+        const resp = await api('/api/schema/list-schemas', {
+          method: 'POST',
+          timeoutMs: 30_000,
+          body: {
+            connectionString: active.connectionString || '',
+            pooler: active.connectionString ? undefined : { ...(active.pooler || {}), password: active.pooler?.password || schemaPassword || '' },
+            options: {},
+            persist: false,
+          },
+        });
+
+        const list = Array.isArray(resp.schemas) ? resp.schemas : [];
+        setDbSchemas(list);
+      } catch {
+        // ignore: schema snapshot load will still populate the dropdown later
+      }
+    })();
+  }, [sourceMode, active.connectionString, active.pooler?.host, active.pooler?.port, active.pooler?.user, active.pooler?.database, active.pooler?.password, schemaPassword]);
+
+  function applyProfile(p) {
+    if (!p) return;
+    setActive((curr) => ({
+      ...curr,
+      connectionString: p.connectionString || '',
+      pooler: {
+        ...(curr.pooler || {}),
+        host: p.host || curr.pooler?.host,
+        port: Number(p.port || curr.pooler?.port || 5432),
+        user: p.user || curr.pooler?.user,
+        database: p.database || curr.pooler?.database,
+        // keep current password (never stored)
+        password: curr.pooler?.password || schemaPassword || '',
+      },
+    }));
+  }
+
+  function onSelectProfile(id) {
+    setProfileId(id);
+    const p = profiles.find((x) => x.id === id);
+    applyProfile(p);
+  }
+
+  // Allow entering password here to avoid a dead-end when Schema is opened first.
+  useEffect(() => {
+    if (!schemaPassword) return;
+    setActive((curr) => ({
+      ...curr,
+      pooler: { ...(curr.pooler || {}), password: schemaPassword },
+    }));
+  }, [schemaPassword, setActive]);
 
   async function loadCustomSnapshotFromFile(file) {
     setError('');
@@ -60,20 +199,103 @@ export default function SchemaScreen() {
   }
 
   const nodeTypes = useMemo(() => ({ table: TableNode }), []);
+  const edgeTypes = useMemo(() => ({ fk: FkEdge }), []);
 
-  async function autoLayout(nextNodes = nodes, nextEdges = edges) {
-    if (!nextNodes.length) return;
-    const pos = await computeElkLayout({
-      nodes: nextNodes.map((n) => ({ id: n.id, width: 360, height: 320 })),
-      edges: nextEdges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
-    });
-    setNodes((curr) =>
-      curr.map((n) => {
-        const p = pos.get(n.id);
-        if (!p) return n;
-        return { ...n, position: { x: p.x, y: p.y } };
-      })
-    );
+  function simplifyEdgesForPerf(nextEdges) {
+    return (nextEdges || []).map((e) => ({
+      ...e,
+      style: { ...(e.style || {}), stroke: 'rgba(148,163,184,0.28)', strokeWidth: 1.5 },
+      labelStyle: { ...(e.labelStyle || {}), fill: 'rgba(226,232,240,0.35)', fontSize: 9, fontWeight: 700 },
+      interactionWidth: 10,
+    }));
+  }
+
+  async function applyProgressiveLayout({ nextNodes, nextEdges, cacheKey, fit = true }) {
+    const safeNodes = Array.isArray(nextNodes) ? nextNodes : [];
+    const safeEdges = Array.isArray(nextEdges) ? nextEdges : [];
+
+    // Cancel prior jobs by incrementing job id
+    const jobId = ++activeLayoutJobRef.current;
+
+    if (!safeNodes.length) {
+      setNodes([]);
+      setEdges([]);
+      setShowMiniMap(false);
+      setLayoutNote('');
+      return;
+    }
+
+    // Phase 1: instant grid
+    const mode = chooseLayoutMode(safeNodes.length);
+    setEdgeStyleMode(styleModeFor(safeNodes.length));
+    const gridNodes = computeGridPositions(safeNodes);
+    const gridEdges = mode === 'perf' ? simplifyEdgesForPerf(safeEdges) : safeEdges;
+
+    setLayouting(false);
+    setLayoutNote(mode === 'search' ? 'Large schema: use search/focus (not implemented yet)' : '');
+    setEdges(gridEdges);
+    setNodes(gridNodes);
+    if (fit) requestFitView('grid');
+
+    // Phase 2: worker ELK (best-effort, strictly time-budgeted)
+    // If it can't finish quickly, we keep the fast grid layout.
+    if (mode === 'search') return;
+
+    const tooBig = safeNodes.length > 180 || safeEdges.length > 420;
+    if (tooBig) {
+      setLayouting(false);
+      setLayoutNote('Fast layout');
+      return;
+    }
+
+    // Never block the UI. No overlay for refinement.
+    setLayouting(false);
+    setLayoutNote('Fast layout');
+
+    const budgetMs = mode === 'perf' ? 800 : 600;
+
+    try {
+      const elkPromise = computeElkPositions({
+        cacheKey,
+        mode: mode === 'perf' ? 'perf' : 'full',
+        nodes: safeNodes,
+        edges: safeEdges,
+      });
+
+      const budgetPromise = new Promise((_, reject) =>
+        window.setTimeout(() => reject(Object.assign(new Error('LAYOUT_BUDGET_EXCEEDED'), { code: 'LAYOUT_BUDGET_EXCEEDED' })), budgetMs)
+      );
+
+      const { positions, cached, ms } = await Promise.race([elkPromise, budgetPromise]);
+
+      // Ignore stale worker results
+      if (activeLayoutJobRef.current !== jobId) return;
+
+      const laidOutNodes = gridNodes.map((n) => {
+        const p = positions[n.id];
+        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+      });
+
+      const finalEdges = mode === 'perf' ? simplifyEdgesForPerf(safeEdges) : safeEdges;
+      setEdges(finalEdges);
+      setNodes(laidOutNodes);
+      setLayouting(false);
+      setLayoutNote(cached ? '' : '');
+
+      if (fit) requestFitView('elk');
+    } catch (e) {
+      if (activeLayoutJobRef.current !== jobId) return;
+      setLayouting(false);
+      // Budget exceeded is expected in "instant always" mode.
+      if (e?.code === 'LAYOUT_BUDGET_EXCEEDED' || e?.message === 'LAYOUT_BUDGET_EXCEEDED') {
+        setLayoutNote('Fast layout');
+        return;
+      }
+
+      setLayoutNote('Fast layout');
+      // Keep grid layout; surface real errors.
+      setError((curr) => curr || (e?.message || String(e)));
+    }
   }
 
   async function exportDiagram() {
@@ -93,9 +315,9 @@ export default function SchemaScreen() {
         const bounds = getNodesBounds(nodes);
 
         // Compute export canvas size based on node bounds (diagram coords) and desired padding.
-        const padding = 160;
-        const width = Math.max(1200, Math.ceil(bounds.width + padding * 2));
-        const height = Math.max(800, Math.ceil(bounds.height + padding * 2));
+        const padding = 36;
+        const width = Math.max(1, Math.ceil(bounds.width + padding * 2));
+        const height = Math.max(1, Math.ceil(bounds.height + padding * 2));
 
         // Temporarily resize the react-flow viewport so html-to-image captures the full diagram.
         el.style.width = `${width}px`;
@@ -147,8 +369,12 @@ export default function SchemaScreen() {
     }
   }
 
-  function applySnapshotToGraph(snap) {
+  async function applySnapshotToGraph(snap, { fit = true } = {}) {
     if (!snap) return;
+
+    // Clear selection if the selected table no longer exists after schema changes.
+    const nextTableIds = new Set((snap.tables || []).map((t) => t.id));
+    setSelectedTableId((curr) => (curr && nextTableIds.has(curr) ? curr : null));
 
     const tables = (snap.tables || []).filter((t) => {
       const schemaOk = !schemaFilter || schemaFilter === '__all__' ? true : t.schema === schemaFilter;
@@ -178,53 +404,76 @@ export default function SchemaScreen() {
       indexedColsByTableId.set(t.id, new Set(t.indexedColumns || []));
     }
 
-    setNodes(
-      tables.map((t, idx) => ({
-        id: t.id,
-        type: 'table',
-        position: { x: (idx % 4) * 420, y: Math.floor(idx / 4) * 420 },
-        data: {
-          table: t,
-          columns: columnsByTableId.get(t.id) || [],
-          fkColumns: fkColsByTableId.get(t.id) || new Set(),
-          indexedColumns: indexedColsByTableId.get(t.id) || new Set(),
-          onSelect: (id) => setSelectedTableId(id),
-          onHover: (id) => setHoveredTableId(id),
-          selected: selectedTableId === t.id,
-          dimmed: selectedTableId ? selectedTableId !== t.id : false,
-          highlight: false,
-        },
-      }))
-    );
+    const nextNodes = tables.map((t) => ({
+      id: t.id,
+      type: 'table',
+      // Temporary position near origin; ELK will override.
+      position: { x: 0, y: 0 },
+      data: {
+        table: t,
+        columns: columnsByTableId.get(t.id) || [],
+        fkColumns: fkColsByTableId.get(t.id) || new Set(),
+        indexedColumns: indexedColsByTableId.get(t.id) || new Set(),
+        // Selection is handled via ReactFlow `onNodeClick` (supports toggle).
+        onSelect: undefined,
+        onHover: (id) => setHoveredTableId(id),
+        selected: selectedTableId === t.id,
+        dimmed: selectedTableId ? selectedTableId !== t.id : false,
+        highlight: false,
+      },
+    }));
 
-    setEdges(
-      fks
-        .filter((fk) => fk.toTableId)
-        .filter((fk) => {
-          if (schemaFilter === '__all__') return true;
-          if (!schemaFilter) return true;
-          return fk.fromTableId?.startsWith(schemaFilter + '.') || fk.toTableId?.startsWith(schemaFilter + '.');
-        })
-        .map((fk) => ({
-          id: fk.id,
-          source: fk.fromTableId,
-          target: fk.toTableId,
-          label: fk.name,
-          type: 'smoothstep',
-          style: { stroke: 'rgba(148,163,184,0.55)', strokeWidth: 2 },
-          labelStyle: { fill: 'rgba(238,242,255,0.85)', fontSize: 10, fontWeight: 800 },
-          labelBgStyle: {
-            fill: 'rgba(17, 24, 42, 0.92)',
-            stroke: 'rgba(255,255,255,0.18)',
-            strokeWidth: 1,
-          },
-          interactionWidth: 18,
-          labelBgPadding: [6, 10],
-          labelBgBorderRadius: 10,
-        }))
-    );
+    const nextEdges = fks
+      .filter((fk) => fk.toTableId)
+      .filter((fk) => {
+        if (schemaFilter === '__all__') return true;
+        if (!schemaFilter) return true;
+        return fk.fromTableId?.startsWith(schemaFilter + '.') || fk.toTableId?.startsWith(schemaFilter + '.');
+      })
+      .map((fk) => ({
+        id: fk.id,
+        source: fk.fromTableId,
+        target: fk.toTableId,
+        label: fk.name,
+        type: 'fk',
+        style: { stroke: 'rgba(94,234,212,0.55)', strokeWidth: 3 },
+        labelStyle: { fill: 'rgba(238,242,255,0.85)', fontSize: 10, fontWeight: 800 },
+        labelBgStyle: {
+          fill: 'rgba(17, 24, 42, 0.92)',
+          stroke: 'rgba(255,255,255,0.18)',
+          strokeWidth: 1,
+        },
+        interactionWidth: 18,
+        labelBgPadding: [6, 10],
+        labelBgBorderRadius: 10,
+        markerEnd: {
+          type: 'arrowclosed',
+          width: 16,
+          height: 16,
+          color: 'rgba(94,234,212,0.85)',
+        },
+        data: { label: fk.name },
+      }));
 
     setSnapshot(snap);
+
+    // Ensure viewport doesn't stay far away from origin if a prior fit went wrong.
+    try {
+      rf.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 });
+    } catch {
+      // ignore
+    }
+
+    const cacheKey = JSON.stringify({
+      schema: schemaFilter,
+      showViews,
+      // bump if layout algo changes
+      v: 1,
+      nodeCount: nextNodes.length,
+      edgeCount: nextEdges.length,
+    });
+
+    await applyProgressiveLayout({ nextNodes, nextEdges, cacheKey, fit });
   }
 
   async function loadSchema() {
@@ -235,14 +484,14 @@ export default function SchemaScreen() {
         const parsed = JSON.parse(customJson || 'null');
         if (!parsed) throw new Error('Missing/invalid JSON snapshot');
         setFullSnapshot(parsed);
-        applySnapshotToGraph(parsed);
+        await applySnapshotToGraph(parsed, { fit: true });
       } else {
         const resp = await api('/api/schema/snapshot', {
           method: 'POST',
           timeoutMs: 60_000,
           body: {
             connectionString: active.connectionString || '',
-            pooler: active.connectionString ? undefined : active.pooler,
+            pooler: active.connectionString ? undefined : { ...(active.pooler || {}), password: (active.pooler?.password || schemaPassword || '') },
             options: {
               schemaInclude: schemaFilter === '__all__' ? '' : schemaFilter,
             },
@@ -251,16 +500,7 @@ export default function SchemaScreen() {
         });
 
         setFullSnapshot(resp.snapshot);
-        applySnapshotToGraph(resp.snapshot);
-      }
-
-      // Decongest immediately after loading.
-      const snap = sourceMode === 'json' ? JSON.parse(customJson || 'null') : fullSnapshot;
-      if (snap) {
-        await autoLayout(
-          (snap?.tables || []).map((t) => ({ id: t.id })),
-          (snap?.foreignKeys || []).filter((fk) => fk.toTableId).map((fk) => ({ id: fk.id, source: fk.fromTableId, target: fk.toTableId }))
-        );
+        await applySnapshotToGraph(resp.snapshot, { fit: true });
       }
     } catch (e) {
       setError(e?.message || String(e));
@@ -272,9 +512,51 @@ export default function SchemaScreen() {
   // When filters/toggles change, re-filter locally (no DB hit).
   useEffect(() => {
     if (!fullSnapshot) return;
-    applySnapshotToGraph(fullSnapshot);
+    // On schema filter changes, we must immediately show nodes; always fit.
+    void applySnapshotToGraph(fullSnapshot, { fit: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schemaFilter, showViews, showEnums, showFunctions]);
+
+  // Perform pending fit-to-view after nodes are committed.
+  useEffect(() => {
+    if (!pendingFitRef.current) return;
+    if (!nodes?.length) return;
+
+    pendingFitRef.current = false;
+    const reason = pendingFitReasonRef.current;
+    pendingFitReasonRef.current = '';
+
+    // Fit instantly first (guarantee visible), then optionally animate.
+    try {
+      rf.fitView({ nodes, padding: 0.2, duration: 0 });
+      // A second pass after layout/measurement helps avoid rare empty fits.
+      window.setTimeout(() => {
+        try {
+          rf.fitView({ nodes, padding: 0.2, duration: 220 });
+        } catch {
+          // ignore
+        }
+      }, 30);
+    } catch {
+      // ignore
+    }
+
+    updateMiniMapVisibility(nodes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, rf]);
+
+  // Update minimap visibility after manual zoom/pan.
+  // (reactflow v11 triggers onMoveEnd after interactions)
+  const onMoveEnd = useCallback(() => {
+    updateMiniMapVisibility();
+  }, [updateMiniMapVisibility]);
+
+  // Cleanup delayed fit timers.
+  useEffect(() => {
+    return () => {
+      if (fitTimerRef.current) window.clearTimeout(fitTimerRef.current);
+    };
+  }, []);
 
   const derived = useMemo(() => {
     const snap = snapshot;
@@ -360,141 +642,240 @@ export default function SchemaScreen() {
     });
   }, [edges, focusId]);
 
+  // In performance mode we avoid the expensive FK edge label collision logic
+  // (FkEdge does rf.getNodes() + geometry for every edge).
+  // Instead, we downgrade edges to default to keep interactions smooth.
+  const effectiveEdgeTypes = useMemo(() => {
+    if (edgeStyleMode === 'perf') return {};
+    return edgeTypes;
+  }, [edgeStyleMode, edgeTypes]);
+
   return (
-    <div className="grid" style={{ gridTemplateColumns: '380px 1fr', alignItems: 'stretch' }}>
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h3 style={{ margin: 0 }}>Schema visualizer</h3>
-        <div className="hint">
-          Loads schema metadata from PostgreSQL catalogs. No manual JSON input. Default is clean: tables + FK relations.
-        </div>
+    <div className="schema-screen">
+      <div className="schema-layout">
+        <div className="card schema-left" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Heading + description */}
+          <div className="section">
+            <h3 style={{ margin: 0 }}>Schema visualizer</h3>
+            <div className="hint">Loads schema metadata from PostgreSQL catalogs and renders tables + FK relations.</div>
+          </div>
 
-        <div className="toolbar" style={{ justifyContent: 'flex-start' }}>
-          <button className="tab" style={{ border: '1px solid rgba(255,255,255,0.12)' }} onClick={loadSchema} disabled={loading}>
-            {loading ? 'Loading…' : 'Load schema'}
-          </button>
+          {/* Source */}
+          <div className="section">
+            <div className="section-title">Source</div>
+            <div className="seg" role="radiogroup" aria-label="Schema source">
+              <label data-active={sourceMode === 'db'}>
+                <input type="radio" name="schemaSource" checked={sourceMode === 'db'} onChange={() => setSourceMode('db')} />
+                Active connection
+              </label>
+              <label data-active={sourceMode === 'json'}>
+                <input type="radio" name="schemaSource" checked={sourceMode === 'json'} onChange={() => setSourceMode('json')} />
+                Snapshot JSON
+              </label>
+            </div>
 
-          <button
-            className="tab"
-            style={{ border: '1px solid rgba(255,255,255,0.12)' }}
-            onClick={() => autoLayout()}
-            disabled={loading || nodes.length === 0}
-          >
-            Auto-layout
-          </button>
+            {sourceMode === 'db' ? (
+              <div className="field full" style={{ marginTop: 6 }}>
+                <div className="field-hint">
+                  Using:{' '}
+                  <span className="mono">
+                    {active.connectionString ? 'connectionString' : `${active.pooler?.host || 'pooler'}:${active.pooler?.port || 5432}`}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="form-grid schema-source-json" style={{ marginTop: 10 }}>
+                <div className="field full">
+                  <div className="field-label">Snapshot JSON</div>
+                  <textarea
+                    value={customJson}
+                    onChange={(e) => setCustomJson(e.target.value)}
+                    placeholder="Paste /api/schema/snapshot response.snapshot JSON here…"
+                    style={{ minHeight: 140 }}
+                  />
+                  <div className="field-hint">Tip: You can fetch a snapshot via API or reuse a previously persisted snapshot file.</div>
+                </div>
+                <div className="field full">
+                  <label className="btn" style={{ position: 'relative', overflow: 'hidden', width: 'fit-content' }}>
+                    Upload JSON
+                    <input
+                      type="file"
+                      accept="application/json"
+                      style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void loadCustomSnapshotFromFile(f);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
 
-          <div className="divider" style={{ marginLeft: 6, marginRight: 6, height: 26 }} />
-
-          <button className="btn" type="button" onClick={exportDiagram} disabled={nodes.length === 0}>
-            Export
-          </button>
-          <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)} style={{ width: 110 }}>
-            <option value="png">PNG</option>
-            <option value="jpg">JPG</option>
-            <option value="pdf">PDF</option>
-          </select>
-          <select value={exportScope} onChange={(e) => setExportScope(e.target.value)} style={{ width: 150 }}>
-            <option value="viewport">Visible viewport</option>
-            <option value="entire">Entire diagram</option>
-          </select>
-          <select value={exportScale} onChange={(e) => setExportScale(Number(e.target.value))} style={{ width: 110 }}>
-            <option value={2}>2x</option>
-            <option value={3}>3x</option>
-            <option value={4}>4x</option>
-          </select>
-        </div>
-
-        <div className="divider" />
-
-        <div className="hint" style={{ fontWeight: 800 }}>Source</div>
-        <div className="form-grid">
-          <label className="check" style={{ gridColumn: '1 / -1' }}>
-            <input type="radio" name="schemaSource" checked={sourceMode === 'db'} onChange={() => setSourceMode('db')} />
-            <span className="field-label" style={{ margin: 0 }}>Active connection (from Run tab)</span>
-          </label>
-          <label className="check" style={{ gridColumn: '1 / -1' }}>
-            <input type="radio" name="schemaSource" checked={sourceMode === 'json'} onChange={() => setSourceMode('json')} />
-            <span className="field-label" style={{ margin: 0 }}>Custom snapshot JSON</span>
-          </label>
-
+          {/* Connection */}
           {sourceMode === 'db' ? (
-            <div className="field full">
-              <div className="field-hint">
-                Using: <span className="mono">{active.connectionString ? 'connectionString' : `${active.pooler?.host || 'pooler'}:${active.pooler?.port || 5432}`}</span>
+            <div className="section">
+              <div className="section-title">Connection</div>
+
+              <div className="form-grid">
+                <div className="field full">
+                  <div className="field-label">Profile</div>
+                  <select value={profileId} onChange={(e) => onSelectProfile(e.target.value)}>
+                    <option value="">— Select profile —</option>
+                    {profiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="field-hint">Uses profiles from Run tab (stored in localStorage). Password is never stored.</div>
+                </div>
+
+                {!active.connectionString ? (
+                  <div className="field full">
+                    <div className="field-label">Pooler password</div>
+                    <input
+                      type="password"
+                      value={schemaPassword}
+                      onChange={(e) => setSchemaPassword(e.target.value)}
+                      placeholder="Enter password to load schema…"
+                    />
+                    <div className="field-hint">Password is kept in memory only (not saved to disk / profiles).</div>
+                  </div>
+                ) : (
+                  <div className="field full">
+                    <div className="field-hint">Connection string is set; pooler password not needed.</div>
+                  </div>
+                )}
+              </div>
+
+              {!active.connectionString && !schemaPassword ? (
+                <div className="alert warn" style={{ marginTop: 10 }}>
+                  <div style={{ fontWeight: 800 }}>Pooler password required</div>
+                  <div className="hint" style={{ marginTop: 6 }}>
+                    Enter the pooler password above (or paste a full connection string in Run, then return).
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Actions (after Connection; before Schema & advanced) */}
+          {sourceMode === 'db' ? (
+            <div className="section">
+              <div className="section-title">Actions</div>
+              <div className="toolbar" style={{ justifyContent: 'flex-start' }}>
+                <button className="btn primary" type="button" onClick={loadSchema} disabled={loading}>
+                  {loading ? 'Loading…' : 'Load schema'}
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    const cacheKey = JSON.stringify({ schema: schemaFilter, showViews, v: 1, nodeCount: nodes.length, edgeCount: edges.length });
+                    void applyProgressiveLayout({ nextNodes: nodes, nextEdges: edges, cacheKey, fit: true });
+                  }}
+                  disabled={loading || nodes.length === 0}
+                >
+                  Auto-layout
+                </button>
               </div>
             </div>
-          ) : (
-            <>
+          ) : null}
+
+          {/* Schema + Advanced */}
+          <div className="section">
+            <div className="section-title">Schema & advanced</div>
+            <div className="form-grid">
               <div className="field full">
-                <div className="field-label">Snapshot JSON</div>
-                <textarea value={customJson} onChange={(e) => setCustomJson(e.target.value)} placeholder="Paste /api/schema/snapshot response.snapshot JSON here…" style={{ minHeight: 140 }} />
-                <div className="field-hint">Tip: You can fetch a snapshot via API or reuse a previously persisted snapshot file.</div>
+                <div className="field-label">Schema</div>
+                <select value={schemaFilter} onChange={(e) => setSchemaFilter(e.target.value)}>
+                  <option value="__all__">All schemas</option>
+                  <option value="public">public</option>
+                  {(dbSchemas.length ? dbSchemas : schemas)
+                    .filter((s) => s !== 'public')
+                    .map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                </select>
               </div>
-              <div className="toolbar">
-                <label className="btn" style={{ position: 'relative', overflow: 'hidden' }}>
-                  Upload JSON
-                  <input
-                    type="file"
-                    accept="application/json"
-                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void loadCustomSnapshotFromFile(f);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
+            </div>
+
+            <label className="check">
+              <input type="checkbox" checked={showViews} onChange={(e) => setShowViews(e.target.checked)} />
+              <span className="field-label" style={{ margin: 0 }}>
+                Show views / materialized views
+              </span>
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={showEnums} onChange={(e) => setShowEnums(e.target.checked)} />
+              <span className="field-label" style={{ margin: 0 }}>
+                Show enums (sidebar)
+              </span>
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={showFunctions} onChange={(e) => setShowFunctions(e.target.checked)} />
+              <span className="field-label" style={{ margin: 0 }}>
+                Show functions (sidebar)
+              </span>
+            </label>
+          </div>
+
+          {/* Export */}
+          <div className="section">
+            <div className="section-title">Export</div>
+            <div className="form-grid">
+              <div className="field full">
+                <button className="btn" type="button" onClick={exportDiagram} disabled={nodes.length === 0}>
+                  Export
+                </button>
+                <div className="field-hint" style={{ marginTop: 6 }}>
+                  Tip: choose “Entire diagram” to export all nodes (it temporarily resizes the viewport to capture everything).
+                </div>
               </div>
-            </>
-          )}
-        </div>
-
-        <div className="hint">Schema filter</div>
-        <div className="field full">
-          <div className="field-label">Schema</div>
-          <select value={schemaFilter} onChange={(e) => setSchemaFilter(e.target.value)}>
-            <option value="__all__">All schemas</option>
-            <option value="public">public</option>
-            {schemas
-              .filter((s) => s !== 'public')
-              .map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-          </select>
-        </div>
-
-        <div className="divider" />
-
-        <div className="hint" style={{ fontWeight: 800 }}>Advanced</div>
-        <label className="check">
-          <input type="checkbox" checked={showViews} onChange={(e) => setShowViews(e.target.checked)} />
-          <span className="field-label" style={{ margin: 0 }}>Show views / materialized views</span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={showEnums} onChange={(e) => setShowEnums(e.target.checked)} />
-          <span className="field-label" style={{ margin: 0 }}>Show enums (sidebar)</span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={showFunctions} onChange={(e) => setShowFunctions(e.target.checked)} />
-          <span className="field-label" style={{ margin: 0 }}>Show functions (sidebar)</span>
-        </label>
-
-        {error ? (
-          <div className="alert warn">
-            <div style={{ fontWeight: 800 }}>Schema load failed</div>
-            <div className="hint" style={{ marginTop: 6 }}>
-              {error}
+              <div className="field">
+                <div className="field-label">Format</div>
+                <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
+                  <option value="png">PNG</option>
+                  <option value="jpg">JPG</option>
+                  <option value="pdf">PDF</option>
+                </select>
+              </div>
+              <div className="field">
+                <div className="field-label">Scope</div>
+                <select value={exportScope} onChange={(e) => setExportScope(e.target.value)}>
+                  <option value="viewport">Visible viewport</option>
+                  <option value="entire">Entire diagram</option>
+                </select>
+              </div>
+              <div className="field">
+                <div className="field-label">Scale</div>
+                <select value={exportScale} onChange={(e) => setExportScale(Number(e.target.value))}>
+                  <option value={2}>2x</option>
+                  <option value={3}>3x</option>
+                  <option value={4}>4x</option>
+                </select>
+              </div>
             </div>
           </div>
-        ) : null}
 
-        <div className="divider" />
+          {error ? (
+            <div className="alert warn">
+              <div style={{ fontWeight: 800 }}>Schema load failed</div>
+              <div className="hint" style={{ marginTop: 6 }}>
+                {error}
+              </div>
+            </div>
+          ) : null}
 
-        <div className="hint" style={{ marginTop: 6 }}>
-          Details
-        </div>
-        <div className="card" style={{ padding: 12, height: 420, overflow: 'auto' }}>
+          {/* Details */}
+          <div className="section">
+            <div className="section-title">Details</div>
+            <div className="card" style={{ padding: 12, height: 420, overflow: 'auto' }}>
           {loading ? (
             <div className="hint">Loading…</div>
           ) : !selectedTableId ? (
@@ -566,51 +947,173 @@ export default function SchemaScreen() {
               );
             })()
           )}
+            </div>
+          </div>
+
+          {/* Enums + Functions */}
+          {showEnums && snapshot?.enums?.length ? (
+            <div className="section">
+              <div className="section-title">Enums</div>
+              <div className="card" style={{ padding: 10 }}>
+                {(() => {
+                  const list = snapshot.enums || [];
+                  const LIMIT = 5;
+                  const show = enumsExpanded ? list : list.slice(0, LIMIT);
+                  const more = Math.max(0, list.length - show.length);
+                  return (
+                    <>
+                      <div className="schema-table-scroll">
+                        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: 8, color: 'rgba(238,242,255,0.65)' }}>Schema</th>
+                              <th style={{ textAlign: 'left', padding: 8, color: 'rgba(238,242,255,0.65)' }}>Name</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {show.map((e) => (
+                              <tr key={`${e.schema}.${e.name}`}>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                                  {e.schema}
+                                </td>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                                  {e.name}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {more > 0 ? (
+                        <button className="btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setEnumsExpanded(true)}>
+                          + {more} more…
+                        </button>
+                      ) : null}
+
+                      {enumsExpanded && list.length > LIMIT ? (
+                        <button className="btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setEnumsExpanded(false)}>
+                          Collapse
+                        </button>
+                      ) : null}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          ) : null}
+
+          {showFunctions && snapshot?.functions?.length ? (
+            <div className="section">
+              <div className="section-title">Functions</div>
+              <div className="card" style={{ padding: 10 }}>
+                {(() => {
+                  const list = snapshot.functions || [];
+                  const LIMIT = 5;
+                  const show = functionsExpanded ? list : list.slice(0, LIMIT);
+                  const more = Math.max(0, list.length - show.length);
+                  return (
+                    <>
+                      <div className="hint" style={{ marginBottom: 8 }}>
+                        {functionsExpanded ? `Showing ${list.length} functions` : `Showing first ${show.length} functions`}
+                      </div>
+
+                      <div className="schema-table-scroll">
+                        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: 8, color: 'rgba(238,242,255,0.65)' }}>Schema</th>
+                              <th style={{ textAlign: 'left', padding: 8, color: 'rgba(238,242,255,0.65)' }}>Name</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {show.map((f) => (
+                              <tr key={`${f.schema}.${f.name}`}>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                                  {f.schema}
+                                </td>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                                  {f.name}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {more > 0 ? (
+                        <button className="btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setFunctionsExpanded(true)}>
+                          + {more} more…
+                        </button>
+                      ) : null}
+
+                      {functionsExpanded && list.length > LIMIT ? (
+                        <button className="btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setFunctionsExpanded(false)}>
+                          Collapse
+                        </button>
+                      ) : null}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        {((showEnums && snapshot?.enums?.length) || (showFunctions && snapshot?.functions?.length)) ? <div className="divider" /> : null}
+        <div className="card schema-right" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="schema-flow">
+            {nodes.length === 0 ? (
+              <div className="schema-flow-overlay">
+                <div className="schema-flow-overlay__card">No tables to display for this schema/filter.</div>
+              </div>
+            ) : null}
 
-        {showEnums && snapshot?.enums?.length ? (
-          <>
-            <div className="hint" style={{ fontWeight: 800 }}>Enums</div>
-            <div className="mono" style={{ maxHeight: 140, overflow: 'auto' }}>
-              {snapshot.enums.map((e) => (
-                <div key={`${e.schema}.${e.name}`}>{e.schema}.{e.name}</div>
-              ))}
-            </div>
-          </>
-        ) : null}
+            <ReactFlow
+              nodes={decoratedNodes}
+              edges={decoratedEdges}
+              nodeTypes={nodeTypes}
+              edgeTypes={effectiveEdgeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onMoveEnd={onMoveEnd}
+              onPaneClick={() => {
+                setSelectedTableId(null);
+                setHoveredTableId(null);
+              }}
+              onNodeClick={(_, node) => {
+                // Toggle selection on second click.
+                setSelectedTableId((curr) => (curr === node.id ? null : node.id));
+              }}
+              onInit={(inst) => {
+                window.__rfInstance = inst;
+              }}
+              fitView
+            >
+              <Background gap={18} size={1} color="rgba(255,255,255,0.06)" />
+              <Controls />
+              {showMiniMap ? <MiniMap pannable zoomable /> : null}
+            </ReactFlow>
 
-        {showFunctions && snapshot?.functions?.length ? (
-          <>
-            <div className="hint" style={{ fontWeight: 800, marginTop: 6 }}>Functions</div>
-            <div className="mono" style={{ maxHeight: 140, overflow: 'auto' }}>
-              {snapshot.functions.slice(0, 80).map((f) => (
-                <div key={`${f.schema}.${f.name}`}>{f.schema}.{f.name}</div>
-              ))}
-              {snapshot.functions.length > 80 ? <div className="hint">+ {snapshot.functions.length - 80} more…</div> : null}
-            </div>
-          </>
-        ) : null}
-      </div>
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden', height: '72vh' }}>
-        <ReactFlow
-          nodes={decoratedNodes}
-          edges={decoratedEdges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onInit={(inst) => {
-            window.__rfInstance = inst;
-          }}
-          fitView
-        >
-          <Background gap={18} size={1} color="rgba(255,255,255,0.06)" />
-          <Controls />
-          <MiniMap pannable zoomable />
-        </ReactFlow>
+            {layoutNote && nodes.length ? (
+              <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 30 }}>
+                <div className="schema-flow-overlay__card" style={{ background: 'rgba(17, 24, 42, 0.72)' }}>{layoutNote}</div>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+// React Flow hooks (useReactFlow/useNodesState/etc.) rely on an internal zustand store.
+// When used outside of <ReactFlowProvider>, React Flow throws:
+// "Seems like you have not used zustand provider as an ancestor".
+// We wrap the screen so the provider always exists.
+export function SchemaScreenWithProvider() {
+  return (
+    <ReactFlowProvider>
+      <SchemaScreen />
+    </ReactFlowProvider>
   );
 }

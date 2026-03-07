@@ -5,7 +5,7 @@
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
-    "dev": "concurrently -k \"node src/server.js\" \"vite\"",
+    "dev": "concurrently --kill-others=false \"node src/server.js\" \"vite\"",
     "start": "node src/server.js",
     "build": "vite build",
     "preview": "vite preview",

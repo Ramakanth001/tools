@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import RunScreen from './RunScreen.jsx';
-import SchemaScreen from './SchemaScreen.jsx';
+import { SchemaScreenWithProvider as SchemaScreen } from './SchemaScreen.jsx';
 import HistoryScreen from './HistoryScreen.jsx';
 import SettingsScreen from './SettingsScreen.jsx';
 import LogViewerScreen from './LogViewerScreen.jsx';
