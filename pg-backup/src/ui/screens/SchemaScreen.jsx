@@ -37,10 +37,40 @@ function groupBySchema(tables) {
   return m;
 }
 
+function normalizeNodePositions(list, { margin = 8 } = {}) {
+  const nodes = Array.isArray(list) ? list : [];
+  if (!nodes.length) return nodes;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  for (const n of nodes) {
+    const x = Number(n?.position?.x || 0);
+    const y = Number(n?.position?.y || 0);
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+  }
+
+  // Always normalize diagram origin near the top-left margin.
+  // (If we only shift when min < margin, large positive ELK offsets can leave
+  // huge empty space before the first node.)
+  const shiftX = margin - minX;
+  const shiftY = margin - minY;
+  if (!shiftX && !shiftY) return nodes;
+
+  return nodes.map((n) => ({
+    ...n,
+    position: {
+      x: Number(n?.position?.x || 0) + shiftX,
+      y: Number(n?.position?.y || 0) + shiftY,
+    },
+  }));
+}
+
 export default function SchemaScreen() {
   const { active, setActive } = useActiveConnection();
   const rf = useReactFlow();
   const fitTimerRef = useRef(null);
+  const flowViewportRef = useRef(null);
   const pendingFitRef = useRef(false);
   const pendingFitReasonRef = useRef('');
   const activeLayoutJobRef = useRef(0);
@@ -77,6 +107,11 @@ export default function SchemaScreen() {
   const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState('');
   const [dbSchemas, setDbSchemas] = useState([]);
+  const [flowViewportSize, setFlowViewportSize] = useState({ w: 0, h: 0 });
+  const [minZoomLevel, setMinZoomLevel] = useState(0.1);
+  const [translateExtent, setTranslateExtent] = useState([[-100000, -100000], [100000, 100000]]);
+
+  const [profilesJson, setProfilesJson] = useState('');
 
   // Enums/Functions expand/collapse state
   const [enumsExpanded, setEnumsExpanded] = useState(false);
@@ -97,7 +132,7 @@ export default function SchemaScreen() {
         const list = Array.isArray(nextNodes) ? nextNodes : rf.getNodes();
         if (!list?.length) return setShowMiniMap(false);
 
-        const flowEl = document.querySelector('.react-flow');
+        const flowEl = flowViewportRef.current || document.querySelector('.react-flow');
         if (!flowEl) return;
 
         const vb = { w: flowEl.clientWidth || 0, h: flowEl.clientHeight || 0 };
@@ -114,13 +149,31 @@ export default function SchemaScreen() {
   );
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('pgbackup.profiles');
-      const parsed = raw ? JSON.parse(raw) : [];
-      setProfiles(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      setProfiles([]);
-    }
+    // Profiles are primarily stored in browser localStorage (written on Run tab).
+    // In dev mode, or after clearing site storage, localStorage can be empty.
+    // As a convenience, we fall back to a bundled JSON file in the repo so
+    // users can keep a baseline set of profiles.
+    (async () => {
+      try {
+        const raw = localStorage.getItem('pgbackup.profiles');
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (Array.isArray(parsed) && parsed.length) {
+          setProfiles(parsed);
+          return;
+        }
+      } catch {
+        // ignore; we'll try fallback
+      }
+
+      try {
+        const resp = await fetch('/pgbackup.profiles.json', { cache: 'no-store' });
+        if (!resp.ok) throw new Error('profiles json not found');
+        const parsed = await resp.json();
+        setProfiles(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setProfiles([]);
+      }
+    })();
   }, []);
 
   // Fetch schemas list from DB so dropdown can show all schemas present.
@@ -178,6 +231,42 @@ export default function SchemaScreen() {
     applyProfile(p);
   }
 
+  function normalizeProfiles(input) {
+    if (!Array.isArray(input)) throw new Error('Profiles JSON must be an array');
+    return input
+      .filter((p) => p && typeof p === 'object')
+      .map((p) => ({
+        id: String(p.id || `p_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`),
+        name: String(p.name || 'Unnamed profile'),
+        host: p.host ? String(p.host) : '',
+        port: p.port != null ? Number(p.port) : 5432,
+        user: p.user ? String(p.user) : '',
+        database: p.database ? String(p.database) : '',
+        connectionString: p.connectionString ? String(p.connectionString) : '',
+        createdAt: p.createdAt ? String(p.createdAt) : new Date().toISOString(),
+      }))
+      .slice(0, 50);
+  }
+
+  function loadProfilesFromJsonTextAndApplyFirst() {
+    setError('');
+    try {
+      const parsed = JSON.parse(profilesJson || '[]');
+      const next = normalizeProfiles(parsed);
+      localStorage.setItem('pgbackup.profiles', JSON.stringify(next));
+      setProfiles(next);
+
+      // Auto-select & apply first profile for convenience.
+      const first = next[0];
+      if (first) {
+        setProfileId(first.id);
+        applyProfile(first);
+      }
+    } catch (e) {
+      setError(e?.message || String(e));
+    }
+  }
+
   // Allow entering password here to avoid a dead-end when Schema is opened first.
   useEffect(() => {
     if (!schemaPassword) return;
@@ -228,7 +317,7 @@ export default function SchemaScreen() {
     // Phase 1: instant grid
     const mode = chooseLayoutMode(safeNodes.length);
     setEdgeStyleMode(styleModeFor(safeNodes.length));
-    const gridNodes = computeGridPositions(safeNodes);
+    const gridNodes = normalizeNodePositions(computeGridPositions(safeNodes));
     const gridEdges = mode === 'perf' ? simplifyEdgesForPerf(safeEdges) : safeEdges;
 
     setLayouting(false);
@@ -271,10 +360,12 @@ export default function SchemaScreen() {
       // Ignore stale worker results
       if (activeLayoutJobRef.current !== jobId) return;
 
-      const laidOutNodes = gridNodes.map((n) => {
-        const p = positions[n.id];
-        return p ? { ...n, position: { x: p.x, y: p.y } } : n;
-      });
+      const laidOutNodes = normalizeNodePositions(
+        gridNodes.map((n) => {
+          const p = positions[n.id];
+          return p ? { ...n, position: { x: p.x, y: p.y } } : n;
+        })
+      );
 
       const finalEdges = mode === 'perf' ? simplifyEdgesForPerf(safeEdges) : safeEdges;
       setEdges(finalEdges);
@@ -299,38 +390,125 @@ export default function SchemaScreen() {
   }
 
   async function exportDiagram() {
-    const el = document.querySelector('.react-flow');
-    if (!el) return;
+    const flowEl = document.querySelector('.react-flow');
+    const viewportEl = flowViewportRef.current;
+    const el = exportScope === 'viewport' ? viewportEl || flowEl : flowEl;
+    if (!el || !flowEl) return;
 
     // Default: export visible viewport (what user sees after moving blocks).
     // Optionally: export entire graph by temporarily fitting all nodes.
     const instance = window.__rfInstance;
     const prevViewport = instance?.getViewport?.();
-    const prevWidth = el.style.width;
-    const prevHeight = el.style.height;
+    const prevWidth = flowEl.style.width;
+    const prevHeight = flowEl.style.height;
+
+    function computeCropRectInElementPx({ instance, nodes, elRect, elementWidth, elementHeight, exportScale }) {
+      // Compute node bounds in graph space, then convert to element pixel space
+      // using the current viewport transform.
+      const bounds = getNodesBounds(nodes);
+      if (!bounds?.width || !bounds?.height) return null;
+
+      const vp = instance?.getViewport?.();
+      if (!vp) return null;
+
+      const padRatio = 0.05;
+      const padX = Math.max(24, bounds.width * padRatio);
+      const padY = Math.max(24, bounds.height * padRatio);
+
+      const minX = bounds.x - padX;
+      const minY = bounds.y - padY;
+      const maxX = bounds.x + bounds.width + padX;
+      const maxY = bounds.y + bounds.height + padY;
+
+      // graph -> screen (element local px): screen = graph * zoom + translate
+      const left = minX * vp.zoom + vp.x;
+      const top = minY * vp.zoom + vp.y;
+      const right = maxX * vp.zoom + vp.x;
+      const bottom = maxY * vp.zoom + vp.y;
+
+      // Clamp to captured element box.
+      const cl = Math.max(0, Math.min(elementWidth, left));
+      const ct = Math.max(0, Math.min(elementHeight, top));
+      const cr = Math.max(0, Math.min(elementWidth, right));
+      const cb = Math.max(0, Math.min(elementHeight, bottom));
+
+      const w = Math.max(1, cr - cl);
+      const h = Math.max(1, cb - ct);
+
+      return {
+        cropX: cl * exportScale,
+        cropY: ct * exportScale,
+        cropW: w * exportScale,
+        cropH: h * exportScale,
+      };
+    }
+
+    async function cropDataUrl(dataUrl, { cropX, cropY, cropW, cropH, mimeType, quality }) {
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(cropW));
+      canvas.height = Math.max(1, Math.floor(cropH));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return dataUrl;
+
+      ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL(mimeType, quality);
+    }
 
     try {
+      const elRect = el.getBoundingClientRect();
       if (exportScope === 'entire' && instance) {
         const nodes = instance.getNodes();
         const bounds = getNodesBounds(nodes);
 
         // Compute export canvas size based on node bounds (diagram coords) and desired padding.
-        const padding = 36;
-        const width = Math.max(1, Math.ceil(bounds.width + padding * 2));
-        const height = Math.max(1, Math.ceil(bounds.height + padding * 2));
+        // We want the export to be tightly cropped with ~5% empty space at top/bottom (and left/right)
+        // to avoid large black areas and to maximize readable node area.
+        const padRatio = 0.05;
+        const padX = Math.max(24, Math.ceil(bounds.width * padRatio));
+        const padY = Math.max(24, Math.ceil(bounds.height * padRatio));
+
+        const width = Math.max(1, Math.ceil(bounds.width + padX * 2));
+        const height = Math.max(1, Math.ceil(bounds.height + padY * 2));
 
         // Temporarily resize the react-flow viewport so html-to-image captures the full diagram.
-        el.style.width = `${width}px`;
-        el.style.height = `${height}px`;
+        flowEl.style.width = `${width}px`;
+        flowEl.style.height = `${height}px`;
 
-        const { x, y, zoom } = getTransformForBounds(bounds, width, height, 0.15, 2);
+        // Fit exactly to our computed size. We already baked padding into width/height.
+        const { x, y, zoom } = getTransformForBounds(bounds, width, height, 0, 2);
         instance.setViewport({ x, y, zoom }, { duration: 0 });
       }
 
       const toDataUrl = exportFormat === 'jpg' ? htmlToImage.toJpeg : htmlToImage.toPng;
+
+      // Compute crop rect from graph-space bounds + viewport transform.
+      const cropRect =
+        exportScope === 'entire' && instance
+          ? computeCropRectInElementPx({
+              instance,
+              nodes: instance.getNodes(),
+              elRect,
+              elementWidth: flowEl.clientWidth,
+              elementHeight: flowEl.clientHeight,
+              exportScale,
+            })
+          : null;
+
       const dataUrl = await toDataUrl(el, {
         pixelRatio: exportScale,
         backgroundColor: '#0b0d12',
+        // Help avoid capturing with an inherited transform that can create extra empty areas.
+        style: {
+          transform: 'none',
+          transformOrigin: 'top left',
+        },
         filter: (node) => {
           // Exclude UI chrome inside diagram.
           const cls = node?.classList;
@@ -341,29 +519,42 @@ export default function SchemaScreen() {
         },
       });
 
+      // For entire-diagram exports, crop to the graph bounds + 5% padding.
+      let finalUrl = dataUrl;
+      if (exportScope === 'entire' && cropRect) {
+        finalUrl = await cropDataUrl(dataUrl, {
+          cropX: cropRect.cropX,
+          cropY: cropRect.cropY,
+          cropW: cropRect.cropW,
+          cropH: cropRect.cropH,
+          mimeType: exportFormat === 'jpg' ? 'image/jpeg' : 'image/png',
+          quality: exportFormat === 'jpg' ? 0.95 : undefined,
+        });
+      }
+
       if (exportFormat === 'pdf') {
         // Create a PDF sized to the exported image (high quality single-page).
         const img = new Image();
         await new Promise((resolve, reject) => {
           img.onload = resolve;
           img.onerror = reject;
-          img.src = dataUrl;
+          img.src = finalUrl;
         });
 
         const pdf = new jsPDF({ orientation: img.width >= img.height ? 'landscape' : 'portrait', unit: 'px', format: [img.width, img.height] });
-        pdf.addImage(dataUrl, 'PNG', 0, 0, img.width, img.height);
+        pdf.addImage(finalUrl, 'PNG', 0, 0, img.width, img.height);
         pdf.save('schema.pdf');
       } else {
         const a = document.createElement('a');
         a.download = `schema.${exportFormat}`;
-        a.href = dataUrl;
+        a.href = finalUrl;
         a.click();
       }
     } finally {
       // Restore viewport + size.
       if (exportScope === 'entire') {
-        el.style.width = prevWidth;
-        el.style.height = prevHeight;
+        flowEl.style.width = prevWidth;
+        flowEl.style.height = prevHeight;
         if (instance && prevViewport) instance.setViewport(prevViewport, { duration: 0 });
       }
     }
@@ -528,11 +719,11 @@ export default function SchemaScreen() {
 
     // Fit instantly first (guarantee visible), then optionally animate.
     try {
-      rf.fitView({ nodes, padding: 0.2, duration: 0 });
+      rf.fitView({ nodes, padding: 0, duration: 0, minZoom: minZoomLevel, maxZoom: 2 });
       // A second pass after layout/measurement helps avoid rare empty fits.
       window.setTimeout(() => {
         try {
-          rf.fitView({ nodes, padding: 0.2, duration: 220 });
+          rf.fitView({ nodes, padding: 0, duration: 220, minZoom: minZoomLevel, maxZoom: 2 });
         } catch {
           // ignore
         }
@@ -543,7 +734,7 @@ export default function SchemaScreen() {
 
     updateMiniMapVisibility(nodes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, rf]);
+  }, [nodes, rf, minZoomLevel]);
 
   // Update minimap visibility after manual zoom/pan.
   // (reactflow v11 triggers onMoveEnd after interactions)
@@ -556,6 +747,42 @@ export default function SchemaScreen() {
     return () => {
       if (fitTimerRef.current) window.clearTimeout(fitTimerRef.current);
     };
+  }, []);
+
+  // Keep page-level scrolling disabled while Schema tab is open.
+  // Scrolling should happen inside schema panes only.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // Track schema viewport size so the internal canvas can be tightly sized
+  // to content while never being smaller than visible area.
+  useEffect(() => {
+    const el = flowViewportRef.current;
+    if (!el) return;
+
+    const update = () => {
+      setFlowViewportSize({
+        w: el.clientWidth || 0,
+        h: el.clientHeight || 0,
+      });
+    };
+
+    update();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
   }, []);
 
   const derived = useMemo(() => {
@@ -649,6 +876,58 @@ export default function SchemaScreen() {
     if (edgeStyleMode === 'perf') return {};
     return edgeTypes;
   }, [edgeStyleMode, edgeTypes]);
+
+  const graphBounds = useMemo(() => {
+    if (!nodes.length) return null;
+    const b = getNodesBounds(nodes);
+    const padX = 16;
+    const padY = 8;
+    const minX = Math.floor(b.x - padX);
+    const minY = Math.floor(b.y - padY);
+    const maxX = Math.ceil(b.x + b.width + padX);
+    const maxY = Math.ceil(b.y + b.height + padY);
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY),
+    };
+  }, [nodes]);
+
+  useEffect(() => {
+    if (!graphBounds) return;
+    if (!flowViewportSize.w || !flowViewportSize.h) return;
+
+    // Allow a small fixed vertical breathing room, but prevent massive
+    // top/bottom empty space when zooming out.
+    const VERTICAL_GAP_PX = 18;
+    const visibleHeight = Math.max(1, flowViewportSize.h - VERTICAL_GAP_PX * 2);
+    const heightZoom = visibleHeight / Math.max(1, graphBounds.height);
+    const nextMinZoom = Math.max(0.02, Math.min(2, heightZoom));
+
+    setMinZoomLevel((curr) => (Math.abs(curr - nextMinZoom) < 0.0001 ? curr : nextMinZoom));
+    setTranslateExtent([
+      [graphBounds.minX, graphBounds.minY],
+      [graphBounds.maxX, graphBounds.maxY],
+    ]);
+  }, [graphBounds, flowViewportSize.w, flowViewportSize.h]);
+
+  const flowCanvasStyle = useMemo(() => {
+    if (!nodes.length) {
+      return { width: '100%', height: '100%' };
+    }
+
+    const contentWidth = Math.ceil(Math.max(1, graphBounds?.maxX || 1));
+    const contentHeight = Math.ceil(Math.max(1, graphBounds?.maxY || 1));
+
+    // Never smaller than current viewport, but don't force huge minimums.
+    const width = Math.max(contentWidth, flowViewportSize.w || 0);
+    const height = Math.max(contentHeight, flowViewportSize.h || 0);
+
+    return { width: `${width}px`, height: `${height}px` };
+  }, [nodes, graphBounds, flowViewportSize.w, flowViewportSize.h]);
 
   return (
     <div className="schema-screen">
@@ -863,6 +1142,30 @@ export default function SchemaScreen() {
             </div>
           </div>
 
+          {/* Profiles JSON */}
+          <div className="section">
+            <div className="section-title">Profiles JSON</div>
+            <div className="hint">Paste profiles JSON (connections) here and click “Load profiles”. Password is never stored.</div>
+
+            <div style={{ height: 10 }} />
+
+            <textarea
+              value={profilesJson}
+              onChange={(e) => setProfilesJson(e.target.value)}
+              placeholder="Paste profiles JSON array here…"
+              style={{ minHeight: 140 }}
+            />
+
+            <div className="toolbar" style={{ marginTop: 10, justifyContent: 'flex-start' }}>
+              <button className="btn primary" type="button" onClick={loadProfilesFromJsonTextAndApplyFirst}>
+                Load profiles
+              </button>
+            </div>
+            <div className="field-hint" style={{ marginTop: 8 }}>
+              Stored key: <span className="mono">pgbackup.profiles</span>
+            </div>
+          </div>
+
           {error ? (
             <div className="alert warn">
               <div style={{ fontWeight: 800 }}>Schema load failed</div>
@@ -1060,45 +1363,54 @@ export default function SchemaScreen() {
           ) : null}
         </div>
 
-        <div className="card schema-right" style={{ padding: 0, overflow: 'hidden' }}>
-          <div className="schema-flow">
-            {nodes.length === 0 ? (
-              <div className="schema-flow-overlay">
-                <div className="schema-flow-overlay__card">No tables to display for this schema/filter.</div>
-              </div>
-            ) : null}
+        <div className="card schema-right" style={{ padding: 0 }}>
+          <div className="schema-flow-viewport" ref={flowViewportRef}>
+            <div className="schema-flow-canvas" style={flowCanvasStyle}>
+              <div className="schema-flow">
+                {nodes.length === 0 ? (
+                  <div className="schema-flow-overlay">
+                    <div className="schema-flow-overlay__card">No tables to display for this schema/filter.</div>
+                  </div>
+                ) : null}
 
-            <ReactFlow
-              nodes={decoratedNodes}
-              edges={decoratedEdges}
-              nodeTypes={nodeTypes}
-              edgeTypes={effectiveEdgeTypes}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onMoveEnd={onMoveEnd}
-              onPaneClick={() => {
-                setSelectedTableId(null);
-                setHoveredTableId(null);
-              }}
-              onNodeClick={(_, node) => {
-                // Toggle selection on second click.
-                setSelectedTableId((curr) => (curr === node.id ? null : node.id));
-              }}
-              onInit={(inst) => {
-                window.__rfInstance = inst;
-              }}
-              fitView
-            >
-              <Background gap={18} size={1} color="rgba(255,255,255,0.06)" />
-              <Controls />
-              {showMiniMap ? <MiniMap pannable zoomable /> : null}
-            </ReactFlow>
+                <ReactFlow
+                  nodes={decoratedNodes}
+                  edges={decoratedEdges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={effectiveEdgeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onMoveEnd={onMoveEnd}
+                  onPaneClick={() => {
+                    setSelectedTableId(null);
+                    setHoveredTableId(null);
+                  }}
+                  onNodeClick={(_, node) => {
+                    // Toggle selection on second click.
+                    setSelectedTableId((curr) => (curr === node.id ? null : node.id));
+                  }}
+                  onInit={(inst) => {
+                    window.__rfInstance = inst;
+                  }}
+                  fitView
+                  minZoom={minZoomLevel}
+                  maxZoom={2}
+                  zoomOnScroll={false}
+                  preventScrolling={false}
+                  translateExtent={translateExtent}
+                >
+                  <Background gap={18} size={1} color="rgba(255,255,255,0.06)" />
+                  <Controls />
+                  {showMiniMap ? <MiniMap pannable zoomable /> : null}
+                </ReactFlow>
 
-            {layoutNote && nodes.length ? (
-              <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 30 }}>
-                <div className="schema-flow-overlay__card" style={{ background: 'rgba(17, 24, 42, 0.72)' }}>{layoutNote}</div>
+                {layoutNote && nodes.length ? (
+                  <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 30 }}>
+                    <div className="schema-flow-overlay__card" style={{ background: 'rgba(17, 24, 42, 0.72)' }}>{layoutNote}</div>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
         </div>
       </div>

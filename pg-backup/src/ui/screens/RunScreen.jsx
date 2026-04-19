@@ -43,15 +43,41 @@ function loadProfiles() {
   }
 }
 
+async function loadProfilesWithFallback() {
+  // Primary source: browser localStorage
+  const local = loadProfiles();
+  if (local.length) return local;
+
+  // Fallback: a static file served from /public (useful after clearing site data)
+  try {
+    const resp = await fetch('/pgbackup.profiles.json', { cache: 'no-store' });
+    if (!resp.ok) throw new Error('profiles json not found');
+    const parsed = await resp.json();
+    const list = Array.isArray(parsed) ? parsed : [];
+    if (list.length) saveProfiles(list);
+    return list;
+  } catch {
+    return [];
+  }
+}
+
 function saveProfiles(profiles) {
   localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
 }
 
 export default function RunScreen() {
   const { active, setActive } = useActiveConnection();
-  const [profiles, setProfiles] = useState(() => loadProfiles());
+  const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState('');
   const [profileName, setProfileName] = useState('');
+
+  // Load profiles on mount (localStorage, with fallback file)
+  useEffect(() => {
+    (async () => {
+      const list = await loadProfilesWithFallback();
+      setProfiles(list);
+    })();
+  }, []);
 
   const [connectionString, setConnectionString] = useState(active.connectionString || '');
   const [pooler, setPooler] = useState(active.pooler || {

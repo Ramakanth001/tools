@@ -3,7 +3,11 @@
 // - Optional ELK layout in a web worker
 // - In-memory LRU cache for layouts
 
-import ElkWorker from './elk.worker.js?worker';
+// NOTE: We intentionally avoid Vite's `?worker` default-export constructor form.
+// In some build modes it can yield a non-constructable export, causing:
+//   "Uncaught TypeError: _Worker is not a constructor"
+// Using the standard Worker constructor + `new URL(..., import.meta.url)` is
+// robust across dev/build.
 
 function now() {
   return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
@@ -61,7 +65,22 @@ const cache = new LruCache({ maxEntries: 18 });
 let workerSingleton = null;
 function getWorker() {
   if (workerSingleton) return workerSingleton;
-  workerSingleton = new ElkWorker();
+
+  // Best-effort: if Worker construction is blocked (CSP / browser), callers
+  // should fall back to the fast grid layout.
+  if (typeof Worker === 'undefined') {
+    throw new Error('WebWorkerUnavailable');
+  }
+
+  // Some environments (older Safari / certain CSP setups) are picky about
+  // `{ type: 'module' }`. Try module worker first, then fall back to classic.
+  try {
+    workerSingleton = new Worker(new URL('./elk.worker.js', import.meta.url), {
+      type: 'module',
+    });
+  } catch {
+    workerSingleton = new Worker(new URL('./elk.worker.js', import.meta.url));
+  }
   return workerSingleton;
 }
 
