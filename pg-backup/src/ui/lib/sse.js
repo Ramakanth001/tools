@@ -1,5 +1,7 @@
+import { resolveApiUrl } from './runtime.js';
+
 export function openJobEventSource(jobId, { onLog, onProgress, onStatus } = {}) {
-  const ev = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/events`);
+  const ev = new EventSource(resolveApiUrl(`/jobs/${encodeURIComponent(jobId)}/events`));
 
   ev.addEventListener('log', (e) => {
     try {

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { getStorageKey } from '../lib/runtime.js';
 
 /**
  * In-memory active connection (password is NOT persisted).
@@ -7,8 +8,6 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
  */
 
 const ActiveConnectionContext = createContext(null);
-
-const SESSION_KEY = 'pgbackup.active_connection.session';
 
 function safeJsonParse(s) {
   try {
@@ -20,7 +19,7 @@ function safeJsonParse(s) {
 
 function loadSession() {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = sessionStorage.getItem(getStorageKey('active_connection.session'));
     const parsed = raw ? safeJsonParse(raw) : null;
     if (!parsed || typeof parsed !== 'object') return null;
     return parsed;
@@ -49,7 +48,7 @@ export function ActiveConnectionProvider({ children }) {
     // Persist non-secret parts for the current browser session.
     try {
       sessionStorage.setItem(
-        SESSION_KEY,
+        getStorageKey('active_connection.session'),
         JSON.stringify({
           connectionString: active.connectionString || '',
           pooler: {

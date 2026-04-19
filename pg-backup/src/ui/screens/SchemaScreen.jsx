@@ -5,10 +5,10 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
   getNodesBounds,
   getTransformForBounds,
+  useEdgesState,
+  useNodesState,
   useReactFlow,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -17,14 +17,10 @@ import * as htmlToImage from 'html-to-image';
 import jsPDF from 'jspdf';
 
 import { api } from '../lib/http.js';
-import TableNode from '../schema/nodes/TableNode.jsx';
+import { getStorageKey } from '../lib/runtime.js';
 import FkEdge from '../schema/edges/FkEdge.jsx';
-import {
-  chooseLayoutMode,
-  computeElkPositions,
-  computeGridPositions,
-  styleModeFor,
-} from '../schema/layout/layoutEngine.js';
+import { chooseLayoutMode, computeElkPositions, computeGridPositions, styleModeFor } from '../schema/layout/layoutEngine.js';
+import TableNode from '../schema/nodes/TableNode.jsx';
 import { useActiveConnection } from '../state/ActiveConnectionContext.jsx';
 
 function groupBySchema(tables) {
@@ -50,9 +46,6 @@ function normalizeNodePositions(list, { margin = 8 } = {}) {
     if (y < minY) minY = y;
   }
 
-  // Always normalize diagram origin near the top-left margin.
-  // (If we only shift when min < margin, large positive ELK offsets can leave
-  // huge empty space before the first node.)
   const shiftX = margin - minX;
   const shiftY = margin - minY;
   if (!shiftX && !shiftY) return nodes;
@@ -74,28 +67,23 @@ export default function SchemaScreen() {
   const pendingFitRef = useRef(false);
   const pendingFitReasonRef = useRef('');
   const activeLayoutJobRef = useRef(0);
+
   const [loading, setLoading] = useState(false);
   const [layouting, setLayouting] = useState(false);
   const [layoutNote, setLayoutNote] = useState('');
   const [error, setError] = useState('');
   const [snapshot, setSnapshot] = useState(null);
   const [fullSnapshot, setFullSnapshot] = useState(null);
-  const [sourceMode, setSourceMode] = useState('db'); // db | json
+  const [sourceMode, setSourceMode] = useState('db');
   const [customJson, setCustomJson] = useState('');
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-  const [edgeStyleMode, setEdgeStyleMode] = useState('full'); // full | perf
-
-  const [exportFormat, setExportFormat] = useState('png'); // png | jpg | pdf
-  const [exportScope, setExportScope] = useState('viewport'); // viewport | entire
+  const [edgeStyleMode, setEdgeStyleMode] = useState('full');
+  const [exportFormat, setExportFormat] = useState('png');
+  const [exportScope, setExportScope] = useState('viewport');
   const [exportScale, setExportScale] = useState(3);
-
-  const schemas = useMemo(() => {
-    const tables = snapshot?.tables || [];
-    return Array.from(groupBySchema(tables).keys()).sort();
-  }, [snapshot]);
 
   const [schemaFilter, setSchemaFilter] = useState('__all__');
   const [showViews, setShowViews] = useState(false);
@@ -107,20 +95,19 @@ export default function SchemaScreen() {
   const [profiles, setProfiles] = useState([]);
   const [profileId, setProfileId] = useState('');
   const [dbSchemas, setDbSchemas] = useState([]);
+  const [profilesJson, setProfilesJson] = useState('');
+  const [enumsExpanded, setEnumsExpanded] = useState(false);
+  const [functionsExpanded, setFunctionsExpanded] = useState(false);
+  const [showMiniMap, setShowMiniMap] = useState(false);
   const [flowViewportSize, setFlowViewportSize] = useState({ w: 0, h: 0 });
   const [minZoomLevel, setMinZoomLevel] = useState(0.1);
   const [translateExtent, setTranslateExtent] = useState([[-100000, -100000], [100000, 100000]]);
 
-  const [profilesJson, setProfilesJson] = useState('');
+  const schemas = useMemo(() => {
+    const tables = snapshot?.tables || [];
+    return Array.from(groupBySchema(tables).keys()).sort();
+  }, [snapshot]);
 
-  // Enums/Functions expand/collapse state
-  const [enumsExpanded, setEnumsExpanded] = useState(false);
-  const [functionsExpanded, setFunctionsExpanded] = useState(false);
-
-  // Only show MiniMap when diagram is larger than viewport.
-  const [showMiniMap, setShowMiniMap] = useState(false);
-  // Fit-to-view should only happen after nodes are committed into ReactFlow.
-  // We coordinate it via pendingFitRef + a useEffect on `nodes`.
   const requestFitView = useCallback((reason = '') => {
     pendingFitRef.current = true;
     pendingFitReasonRef.current = reason;
@@ -149,61 +136,52 @@ export default function SchemaScreen() {
   );
 
   useEffect(() => {
-    // Profiles are primarily stored in browser localStorage (written on Run tab).
-    // In dev mode, or after clearing site storage, localStorage can be empty.
-    // As a convenience, we fall back to a bundled JSON file in the repo so
-    // users can keep a baseline set of profiles.
     (async () => {
       try {
-        const raw = localStorage.getItem('pgbackup.profiles');
+        const raw = localStorage.getItem(getStorageKey('profiles'));
         const parsed = raw ? JSON.parse(raw) : null;
         if (Array.isArray(parsed) && parsed.length) {
           setProfiles(parsed);
           return;
         }
       } catch {
-        // ignore; we'll try fallback
+        // ignore
       }
 
       try {
-        const resp = await fetch('/pgbackup.profiles.json', { cache: 'no-store' });
-        if (!resp.ok) throw new Error('profiles json not found');
-        const parsed = await resp.json();
-        setProfiles(Array.isArray(parsed) ? parsed : []);
+        const resp = await api('/profiles-template');
+        setProfiles(Array.isArray(resp.profiles) ? resp.profiles : []);
       } catch {
         setProfiles([]);
       }
     })();
   }, []);
 
-  // Fetch schemas list from DB so dropdown can show all schemas present.
   useEffect(() => {
     if (sourceMode !== 'db') return;
-    if (active.connectionString) {
-      // connection string mode should work without password
-    } else {
-      // pooler mode needs password
+    if (!active.connectionString) {
       const pw = active.pooler?.password || schemaPassword;
       if (!pw) return;
     }
 
     (async () => {
       try {
-        const resp = await api('/api/schema/list-schemas', {
+        const resp = await api('/schema/list-schemas', {
           method: 'POST',
           timeoutMs: 30_000,
           body: {
             connectionString: active.connectionString || '',
-            pooler: active.connectionString ? undefined : { ...(active.pooler || {}), password: active.pooler?.password || schemaPassword || '' },
+            pooler: active.connectionString
+              ? undefined
+              : { ...(active.pooler || {}), password: active.pooler?.password || schemaPassword || '' },
             options: {},
             persist: false,
           },
         });
 
-        const list = Array.isArray(resp.schemas) ? resp.schemas : [];
-        setDbSchemas(list);
+        setDbSchemas(Array.isArray(resp.schemas) ? resp.schemas : []);
       } catch {
-        // ignore: schema snapshot load will still populate the dropdown later
+        // ignore
       }
     })();
   }, [sourceMode, active.connectionString, active.pooler?.host, active.pooler?.port, active.pooler?.user, active.pooler?.database, active.pooler?.password, schemaPassword]);
@@ -219,7 +197,6 @@ export default function SchemaScreen() {
         port: Number(p.port || curr.pooler?.port || 5432),
         user: p.user || curr.pooler?.user,
         database: p.database || curr.pooler?.database,
-        // keep current password (never stored)
         password: curr.pooler?.password || schemaPassword || '',
       },
     }));
@@ -253,10 +230,9 @@ export default function SchemaScreen() {
     try {
       const parsed = JSON.parse(profilesJson || '[]');
       const next = normalizeProfiles(parsed);
-      localStorage.setItem('pgbackup.profiles', JSON.stringify(next));
+      localStorage.setItem(getStorageKey('profiles'), JSON.stringify(next));
       setProfiles(next);
 
-      // Auto-select & apply first profile for convenience.
       const first = next[0];
       if (first) {
         setProfileId(first.id);
@@ -267,7 +243,6 @@ export default function SchemaScreen() {
     }
   }
 
-  // Allow entering password here to avoid a dead-end when Schema is opened first.
   useEffect(() => {
     if (!schemaPassword) return;
     setActive((curr) => ({
@@ -302,8 +277,6 @@ export default function SchemaScreen() {
   async function applyProgressiveLayout({ nextNodes, nextEdges, cacheKey, fit = true }) {
     const safeNodes = Array.isArray(nextNodes) ? nextNodes : [];
     const safeEdges = Array.isArray(nextEdges) ? nextEdges : [];
-
-    // Cancel prior jobs by incrementing job id
     const jobId = ++activeLayoutJobRef.current;
 
     if (!safeNodes.length) {
@@ -314,7 +287,6 @@ export default function SchemaScreen() {
       return;
     }
 
-    // Phase 1: instant grid
     const mode = chooseLayoutMode(safeNodes.length);
     setEdgeStyleMode(styleModeFor(safeNodes.length));
     const gridNodes = normalizeNodePositions(computeGridPositions(safeNodes));
@@ -326,8 +298,6 @@ export default function SchemaScreen() {
     setNodes(gridNodes);
     if (fit) requestFitView('grid');
 
-    // Phase 2: worker ELK (best-effort, strictly time-budgeted)
-    // If it can't finish quickly, we keep the fast grid layout.
     if (mode === 'search') return;
 
     const tooBig = safeNodes.length > 180 || safeEdges.length > 420;
@@ -337,7 +307,6 @@ export default function SchemaScreen() {
       return;
     }
 
-    // Never block the UI. No overlay for refinement.
     setLayouting(false);
     setLayoutNote('Fast layout');
 
@@ -355,9 +324,7 @@ export default function SchemaScreen() {
         window.setTimeout(() => reject(Object.assign(new Error('LAYOUT_BUDGET_EXCEEDED'), { code: 'LAYOUT_BUDGET_EXCEEDED' })), budgetMs)
       );
 
-      const { positions, cached, ms } = await Promise.race([elkPromise, budgetPromise]);
-
-      // Ignore stale worker results
+      const { positions } = await Promise.race([elkPromise, budgetPromise]);
       if (activeLayoutJobRef.current !== jobId) return;
 
       const laidOutNodes = normalizeNodePositions(
@@ -371,20 +338,16 @@ export default function SchemaScreen() {
       setEdges(finalEdges);
       setNodes(laidOutNodes);
       setLayouting(false);
-      setLayoutNote(cached ? '' : '');
-
+      setLayoutNote('');
       if (fit) requestFitView('elk');
     } catch (e) {
       if (activeLayoutJobRef.current !== jobId) return;
       setLayouting(false);
-      // Budget exceeded is expected in "instant always" mode.
       if (e?.code === 'LAYOUT_BUDGET_EXCEEDED' || e?.message === 'LAYOUT_BUDGET_EXCEEDED') {
         setLayoutNote('Fast layout');
         return;
       }
-
       setLayoutNote('Fast layout');
-      // Keep grid layout; surface real errors.
       setError((curr) => curr || (e?.message || String(e)));
     }
   }
@@ -395,16 +358,12 @@ export default function SchemaScreen() {
     const el = exportScope === 'viewport' ? viewportEl || flowEl : flowEl;
     if (!el || !flowEl) return;
 
-    // Default: export visible viewport (what user sees after moving blocks).
-    // Optionally: export entire graph by temporarily fitting all nodes.
     const instance = window.__rfInstance;
     const prevViewport = instance?.getViewport?.();
     const prevWidth = flowEl.style.width;
     const prevHeight = flowEl.style.height;
 
-    function computeCropRectInElementPx({ instance, nodes, elRect, elementWidth, elementHeight, exportScale }) {
-      // Compute node bounds in graph space, then convert to element pixel space
-      // using the current viewport transform.
+    function computeCropRectInElementPx({ instance, nodes, elementWidth, elementHeight, exportScale }) {
       const bounds = getNodesBounds(nodes);
       if (!bounds?.width || !bounds?.height) return null;
 
@@ -420,26 +379,21 @@ export default function SchemaScreen() {
       const maxX = bounds.x + bounds.width + padX;
       const maxY = bounds.y + bounds.height + padY;
 
-      // graph -> screen (element local px): screen = graph * zoom + translate
       const left = minX * vp.zoom + vp.x;
       const top = minY * vp.zoom + vp.y;
       const right = maxX * vp.zoom + vp.x;
       const bottom = maxY * vp.zoom + vp.y;
 
-      // Clamp to captured element box.
       const cl = Math.max(0, Math.min(elementWidth, left));
       const ct = Math.max(0, Math.min(elementHeight, top));
       const cr = Math.max(0, Math.min(elementWidth, right));
       const cb = Math.max(0, Math.min(elementHeight, bottom));
 
-      const w = Math.max(1, cr - cl);
-      const h = Math.max(1, cb - ct);
-
       return {
         cropX: cl * exportScale,
         cropY: ct * exportScale,
-        cropW: w * exportScale,
-        cropH: h * exportScale,
+        cropW: Math.max(1, (cr - cl) * exportScale),
+        cropH: Math.max(1, (cb - ct) * exportScale),
       };
     }
 
@@ -462,39 +416,28 @@ export default function SchemaScreen() {
     }
 
     try {
-      const elRect = el.getBoundingClientRect();
       if (exportScope === 'entire' && instance) {
-        const nodes = instance.getNodes();
-        const bounds = getNodesBounds(nodes);
-
-        // Compute export canvas size based on node bounds (diagram coords) and desired padding.
-        // We want the export to be tightly cropped with ~5% empty space at top/bottom (and left/right)
-        // to avoid large black areas and to maximize readable node area.
+        const exportNodes = instance.getNodes();
+        const bounds = getNodesBounds(exportNodes);
         const padRatio = 0.05;
         const padX = Math.max(24, Math.ceil(bounds.width * padRatio));
         const padY = Math.max(24, Math.ceil(bounds.height * padRatio));
-
         const width = Math.max(1, Math.ceil(bounds.width + padX * 2));
         const height = Math.max(1, Math.ceil(bounds.height + padY * 2));
 
-        // Temporarily resize the react-flow viewport so html-to-image captures the full diagram.
         flowEl.style.width = `${width}px`;
         flowEl.style.height = `${height}px`;
 
-        // Fit exactly to our computed size. We already baked padding into width/height.
         const { x, y, zoom } = getTransformForBounds(bounds, width, height, 0, 2);
         instance.setViewport({ x, y, zoom }, { duration: 0 });
       }
 
       const toDataUrl = exportFormat === 'jpg' ? htmlToImage.toJpeg : htmlToImage.toPng;
-
-      // Compute crop rect from graph-space bounds + viewport transform.
       const cropRect =
         exportScope === 'entire' && instance
           ? computeCropRectInElementPx({
               instance,
               nodes: instance.getNodes(),
-              elRect,
               elementWidth: flowEl.clientWidth,
               elementHeight: flowEl.clientHeight,
               exportScale,
@@ -504,13 +447,11 @@ export default function SchemaScreen() {
       const dataUrl = await toDataUrl(el, {
         pixelRatio: exportScale,
         backgroundColor: '#0b0d12',
-        // Help avoid capturing with an inherited transform that can create extra empty areas.
         style: {
           transform: 'none',
           transformOrigin: 'top left',
         },
         filter: (node) => {
-          // Exclude UI chrome inside diagram.
           const cls = node?.classList;
           if (!cls) return true;
           if (cls.contains('react-flow__minimap')) return false;
@@ -519,7 +460,6 @@ export default function SchemaScreen() {
         },
       });
 
-      // For entire-diagram exports, crop to the graph bounds + 5% padding.
       let finalUrl = dataUrl;
       if (exportScope === 'entire' && cropRect) {
         finalUrl = await cropDataUrl(dataUrl, {
@@ -533,14 +473,12 @@ export default function SchemaScreen() {
       }
 
       if (exportFormat === 'pdf') {
-        // Create a PDF sized to the exported image (high quality single-page).
         const img = new Image();
         await new Promise((resolve, reject) => {
           img.onload = resolve;
           img.onerror = reject;
           img.src = finalUrl;
         });
-
         const pdf = new jsPDF({ orientation: img.width >= img.height ? 'landscape' : 'portrait', unit: 'px', format: [img.width, img.height] });
         pdf.addImage(finalUrl, 'PNG', 0, 0, img.width, img.height);
         pdf.save('schema.pdf');
@@ -551,7 +489,6 @@ export default function SchemaScreen() {
         a.click();
       }
     } finally {
-      // Restore viewport + size.
       if (exportScope === 'entire') {
         flowEl.style.width = prevWidth;
         flowEl.style.height = prevHeight;
@@ -563,7 +500,6 @@ export default function SchemaScreen() {
   async function applySnapshotToGraph(snap, { fit = true } = {}) {
     if (!snap) return;
 
-    // Clear selection if the selected table no longer exists after schema changes.
     const nextTableIds = new Set((snap.tables || []).map((t) => t.id));
     setSelectedTableId((curr) => (curr && nextTableIds.has(curr) ? curr : null));
 
@@ -581,7 +517,7 @@ export default function SchemaScreen() {
       if (!columnsByTableId.has(c.tableId)) columnsByTableId.set(c.tableId, []);
       columnsByTableId.get(c.tableId).push(c);
     }
-    for (const [k, list] of columnsByTableId) list.sort((a, b) => (a.attnum || 0) - (b.attnum || 0));
+    for (const [, list] of columnsByTableId) list.sort((a, b) => (a.attnum || 0) - (b.attnum || 0));
 
     const fkColsByTableId = new Map();
     for (const fk of fks) {
@@ -598,14 +534,12 @@ export default function SchemaScreen() {
     const nextNodes = tables.map((t) => ({
       id: t.id,
       type: 'table',
-      // Temporary position near origin; ELK will override.
       position: { x: 0, y: 0 },
       data: {
         table: t,
         columns: columnsByTableId.get(t.id) || [],
         fkColumns: fkColsByTableId.get(t.id) || new Set(),
         indexedColumns: indexedColsByTableId.get(t.id) || new Set(),
-        // Selection is handled via ReactFlow `onNodeClick` (supports toggle).
         onSelect: undefined,
         onHover: (id) => setHoveredTableId(id),
         selected: selectedTableId === t.id,
@@ -619,7 +553,7 @@ export default function SchemaScreen() {
       .filter((fk) => {
         if (schemaFilter === '__all__') return true;
         if (!schemaFilter) return true;
-        return fk.fromTableId?.startsWith(schemaFilter + '.') || fk.toTableId?.startsWith(schemaFilter + '.');
+        return fk.fromTableId?.startsWith(`${schemaFilter}.`) || fk.toTableId?.startsWith(`${schemaFilter}.`);
       })
       .map((fk) => ({
         id: fk.id,
@@ -648,7 +582,6 @@ export default function SchemaScreen() {
 
     setSnapshot(snap);
 
-    // Ensure viewport doesn't stay far away from origin if a prior fit went wrong.
     try {
       rf.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 });
     } catch {
@@ -658,7 +591,6 @@ export default function SchemaScreen() {
     const cacheKey = JSON.stringify({
       schema: schemaFilter,
       showViews,
-      // bump if layout algo changes
       v: 1,
       nodeCount: nextNodes.length,
       edgeCount: nextEdges.length,
@@ -677,12 +609,14 @@ export default function SchemaScreen() {
         setFullSnapshot(parsed);
         await applySnapshotToGraph(parsed, { fit: true });
       } else {
-        const resp = await api('/api/schema/snapshot', {
+        const resp = await api('/schema/snapshot', {
           method: 'POST',
           timeoutMs: 60_000,
           body: {
             connectionString: active.connectionString || '',
-            pooler: active.connectionString ? undefined : { ...(active.pooler || {}), password: (active.pooler?.password || schemaPassword || '') },
+            pooler: active.connectionString
+              ? undefined
+              : { ...(active.pooler || {}), password: active.pooler?.password || schemaPassword || '' },
             options: {
               schemaInclude: schemaFilter === '__all__' ? '' : schemaFilter,
             },
@@ -700,30 +634,24 @@ export default function SchemaScreen() {
     }
   }
 
-  // When filters/toggles change, re-filter locally (no DB hit).
   useEffect(() => {
     if (!fullSnapshot) return;
-    // On schema filter changes, we must immediately show nodes; always fit.
     void applySnapshotToGraph(fullSnapshot, { fit: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schemaFilter, showViews, showEnums, showFunctions]);
 
-  // Perform pending fit-to-view after nodes are committed.
   useEffect(() => {
     if (!pendingFitRef.current) return;
     if (!nodes?.length) return;
 
     pendingFitRef.current = false;
-    const reason = pendingFitReasonRef.current;
     pendingFitReasonRef.current = '';
 
-    // Fit instantly first (guarantee visible), then optionally animate.
     try {
-      rf.fitView({ nodes, padding: 0, duration: 0, minZoom: minZoomLevel, maxZoom: 2 });
-      // A second pass after layout/measurement helps avoid rare empty fits.
+      rf.fitView({ nodes, padding: 0.02, duration: 0, minZoom: minZoomLevel, maxZoom: 2 });
       window.setTimeout(() => {
         try {
-          rf.fitView({ nodes, padding: 0, duration: 220, minZoom: minZoomLevel, maxZoom: 2 });
+          rf.fitView({ nodes, padding: 0.02, duration: 220, minZoom: minZoomLevel, maxZoom: 2 });
         } catch {
           // ignore
         }
@@ -733,26 +661,20 @@ export default function SchemaScreen() {
     }
 
     updateMiniMapVisibility(nodes);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, rf, minZoomLevel]);
+  }, [nodes, rf, minZoomLevel, updateMiniMapVisibility]);
 
-  // Update minimap visibility after manual zoom/pan.
-  // (reactflow v11 triggers onMoveEnd after interactions)
   const onMoveEnd = useCallback(() => {
     updateMiniMapVisibility();
   }, [updateMiniMapVisibility]);
 
-  // Cleanup delayed fit timers.
   useEffect(() => {
     return () => {
       if (fitTimerRef.current) window.clearTimeout(fitTimerRef.current);
     };
   }, []);
 
-  // Keep page-level scrolling disabled while Schema tab is open.
-  // Scrolling should happen inside schema panes only.
   useEffect(() => {
-    if (typeof document === 'undefined') return;
+    if (typeof document === 'undefined') return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
@@ -760,17 +682,12 @@ export default function SchemaScreen() {
     };
   }, []);
 
-  // Track schema viewport size so the internal canvas can be tightly sized
-  // to content while never being smaller than visible area.
   useEffect(() => {
     const el = flowViewportRef.current;
-    if (!el) return;
+    if (!el) return undefined;
 
     const update = () => {
-      setFlowViewportSize({
-        w: el.clientWidth || 0,
-        h: el.clientHeight || 0,
-      });
+      setFlowViewportSize({ w: el.clientWidth || 0, h: el.clientHeight || 0 });
     };
 
     update();
@@ -799,7 +716,7 @@ export default function SchemaScreen() {
       if (!columnsByTableId.has(c.tableId)) columnsByTableId.set(c.tableId, []);
       columnsByTableId.get(c.tableId).push(c);
     }
-    for (const [k, list] of columnsByTableId) list.sort((a, b) => (a.attnum || 0) - (b.attnum || 0));
+    for (const [, list] of columnsByTableId) list.sort((a, b) => (a.attnum || 0) - (b.attnum || 0));
 
     const outgoingByTableId = new Map();
     const incomingByTableId = new Map();
@@ -869,13 +786,7 @@ export default function SchemaScreen() {
     });
   }, [edges, focusId]);
 
-  // In performance mode we avoid the expensive FK edge label collision logic
-  // (FkEdge does rf.getNodes() + geometry for every edge).
-  // Instead, we downgrade edges to default to keep interactions smooth.
-  const effectiveEdgeTypes = useMemo(() => {
-    if (edgeStyleMode === 'perf') return {};
-    return edgeTypes;
-  }, [edgeStyleMode, edgeTypes]);
+  const effectiveEdgeTypes = useMemo(() => (edgeStyleMode === 'perf' ? {} : edgeTypes), [edgeStyleMode, edgeTypes]);
 
   const graphBounds = useMemo(() => {
     if (!nodes.length) return null;
@@ -900,10 +811,8 @@ export default function SchemaScreen() {
     if (!graphBounds) return;
     if (!flowViewportSize.w || !flowViewportSize.h) return;
 
-    // Allow a small fixed vertical breathing room, but prevent massive
-    // top/bottom empty space when zooming out.
-    const VERTICAL_GAP_PX = 18;
-    const visibleHeight = Math.max(1, flowViewportSize.h - VERTICAL_GAP_PX * 2);
+    const verticalGapPx = 18;
+    const visibleHeight = Math.max(1, flowViewportSize.h - verticalGapPx * 2);
     const heightZoom = visibleHeight / Math.max(1, graphBounds.height);
     const nextMinZoom = Math.max(0.02, Math.min(2, heightZoom));
 
@@ -915,17 +824,12 @@ export default function SchemaScreen() {
   }, [graphBounds, flowViewportSize.w, flowViewportSize.h]);
 
   const flowCanvasStyle = useMemo(() => {
-    if (!nodes.length) {
-      return { width: '100%', height: '100%' };
-    }
+    if (!nodes.length) return { width: '100%', height: '100%' };
 
     const contentWidth = Math.ceil(Math.max(1, graphBounds?.maxX || 1));
     const contentHeight = Math.ceil(Math.max(1, graphBounds?.maxY || 1));
-
-    // Never smaller than current viewport, but don't force huge minimums.
     const width = Math.max(contentWidth, flowViewportSize.w || 0);
     const height = Math.max(contentHeight, flowViewportSize.h || 0);
-
     return { width: `${width}px`, height: `${height}px` };
   }, [nodes, graphBounds, flowViewportSize.w, flowViewportSize.h]);
 
@@ -933,13 +837,11 @@ export default function SchemaScreen() {
     <div className="schema-screen">
       <div className="schema-layout">
         <div className="card schema-left" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Heading + description */}
           <div className="section">
             <h3 style={{ margin: 0 }}>Schema visualizer</h3>
             <div className="hint">Loads schema metadata from PostgreSQL catalogs and renders tables + FK relations.</div>
           </div>
 
-          {/* Source */}
           <div className="section">
             <div className="section-title">Source</div>
             <div className="seg" role="radiogroup" aria-label="Schema source">
@@ -966,12 +868,7 @@ export default function SchemaScreen() {
               <div className="form-grid schema-source-json" style={{ marginTop: 10 }}>
                 <div className="field full">
                   <div className="field-label">Snapshot JSON</div>
-                  <textarea
-                    value={customJson}
-                    onChange={(e) => setCustomJson(e.target.value)}
-                    placeholder="Paste /api/schema/snapshot response.snapshot JSON here…"
-                    style={{ minHeight: 140 }}
-                  />
+                  <textarea value={customJson} onChange={(e) => setCustomJson(e.target.value)} placeholder="Paste /api/schema/snapshot response.snapshot JSON here…" style={{ minHeight: 140 }} />
                   <div className="field-hint">Tip: You can fetch a snapshot via API or reuse a previously persisted snapshot file.</div>
                 </div>
                 <div className="field full">
@@ -993,20 +890,16 @@ export default function SchemaScreen() {
             )}
           </div>
 
-          {/* Connection */}
           {sourceMode === 'db' ? (
             <div className="section">
               <div className="section-title">Connection</div>
-
               <div className="form-grid">
                 <div className="field full">
                   <div className="field-label">Profile</div>
                   <select value={profileId} onChange={(e) => onSelectProfile(e.target.value)}>
                     <option value="">— Select profile —</option>
                     {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
+                      <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
                   <div className="field-hint">Uses profiles from Run tab (stored in localStorage). Password is never stored.</div>
@@ -1015,12 +908,7 @@ export default function SchemaScreen() {
                 {!active.connectionString ? (
                   <div className="field full">
                     <div className="field-label">Pooler password</div>
-                    <input
-                      type="password"
-                      value={schemaPassword}
-                      onChange={(e) => setSchemaPassword(e.target.value)}
-                      placeholder="Enter password to load schema…"
-                    />
+                    <input type="password" value={schemaPassword} onChange={(e) => setSchemaPassword(e.target.value)} placeholder="Enter password to load schema…" />
                     <div className="field-hint">Password is kept in memory only (not saved to disk / profiles).</div>
                   </div>
                 ) : (
@@ -1033,15 +921,12 @@ export default function SchemaScreen() {
               {!active.connectionString && !schemaPassword ? (
                 <div className="alert warn" style={{ marginTop: 10 }}>
                   <div style={{ fontWeight: 800 }}>Pooler password required</div>
-                  <div className="hint" style={{ marginTop: 6 }}>
-                    Enter the pooler password above (or paste a full connection string in Run, then return).
-                  </div>
+                  <div className="hint" style={{ marginTop: 6 }}>Enter the pooler password above (or paste a full connection string in Run, then return).</div>
                 </div>
               ) : null}
             </div>
           ) : null}
 
-          {/* Actions (after Connection; before Schema & advanced) */}
           {sourceMode === 'db' ? (
             <div className="section">
               <div className="section-title">Actions</div>
@@ -1064,7 +949,6 @@ export default function SchemaScreen() {
             </div>
           ) : null}
 
-          {/* Schema + Advanced */}
           <div className="section">
             <div className="section-title">Schema & advanced</div>
             <div className="form-grid">
@@ -1076,9 +960,7 @@ export default function SchemaScreen() {
                   {(dbSchemas.length ? dbSchemas : schemas)
                     .filter((s) => s !== 'public')
                     .map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
+                      <option key={s} value={s}>{s}</option>
                     ))}
                 </select>
               </div>
@@ -1086,35 +968,24 @@ export default function SchemaScreen() {
 
             <label className="check">
               <input type="checkbox" checked={showViews} onChange={(e) => setShowViews(e.target.checked)} />
-              <span className="field-label" style={{ margin: 0 }}>
-                Show views / materialized views
-              </span>
+              <span className="field-label" style={{ margin: 0 }}>Show views / materialized views</span>
             </label>
             <label className="check">
               <input type="checkbox" checked={showEnums} onChange={(e) => setShowEnums(e.target.checked)} />
-              <span className="field-label" style={{ margin: 0 }}>
-                Show enums (sidebar)
-              </span>
+              <span className="field-label" style={{ margin: 0 }}>Show enums (sidebar)</span>
             </label>
             <label className="check">
               <input type="checkbox" checked={showFunctions} onChange={(e) => setShowFunctions(e.target.checked)} />
-              <span className="field-label" style={{ margin: 0 }}>
-                Show functions (sidebar)
-              </span>
+              <span className="field-label" style={{ margin: 0 }}>Show functions (sidebar)</span>
             </label>
           </div>
 
-          {/* Export */}
           <div className="section">
             <div className="section-title">Export</div>
             <div className="form-grid">
               <div className="field full">
-                <button className="btn" type="button" onClick={exportDiagram} disabled={nodes.length === 0}>
-                  Export
-                </button>
-                <div className="field-hint" style={{ marginTop: 6 }}>
-                  Tip: choose “Entire diagram” to export all nodes (it temporarily resizes the viewport to capture everything).
-                </div>
+                <button className="btn" type="button" onClick={exportDiagram} disabled={nodes.length === 0}>Export</button>
+                <div className="field-hint" style={{ marginTop: 6 }}>Tip: choose “Entire diagram” to export all nodes (it temporarily resizes the viewport to capture everything).</div>
               </div>
               <div className="field">
                 <div className="field-label">Format</div>
@@ -1142,126 +1013,117 @@ export default function SchemaScreen() {
             </div>
           </div>
 
-          {/* Profiles JSON */}
           <div className="section">
             <div className="section-title">Profiles JSON</div>
             <div className="hint">Paste profiles JSON (connections) here and click “Load profiles”. Password is never stored.</div>
 
             <div style={{ height: 10 }} />
 
-            <textarea
-              value={profilesJson}
-              onChange={(e) => setProfilesJson(e.target.value)}
-              placeholder="Paste profiles JSON array here…"
-              style={{ minHeight: 140 }}
-            />
+            <textarea value={profilesJson} onChange={(e) => setProfilesJson(e.target.value)} placeholder="Paste profiles JSON array here…" style={{ minHeight: 140 }} />
 
             <div className="toolbar" style={{ marginTop: 10, justifyContent: 'flex-start' }}>
-              <button className="btn primary" type="button" onClick={loadProfilesFromJsonTextAndApplyFirst}>
-                Load profiles
-              </button>
+              <button className="btn primary" type="button" onClick={loadProfilesFromJsonTextAndApplyFirst}>Load profiles</button>
             </div>
             <div className="field-hint" style={{ marginTop: 8 }}>
-              Stored key: <span className="mono">pgbackup.profiles</span>
+              Stored key: <span className="mono">{getStorageKey('profiles')}</span>
             </div>
           </div>
 
           {error ? (
             <div className="alert warn">
               <div style={{ fontWeight: 800 }}>Schema load failed</div>
-              <div className="hint" style={{ marginTop: 6 }}>
-                {error}
-              </div>
+              <div className="hint" style={{ marginTop: 6 }}>{error}</div>
             </div>
           ) : null}
 
-          {/* Details */}
           <div className="section">
             <div className="section-title">Details</div>
             <div className="card" style={{ padding: 12, height: 420, overflow: 'auto' }}>
-          {loading ? (
-            <div className="hint">Loading…</div>
-          ) : !selectedTableId ? (
-            <div className="hint">Click a table card to see details.</div>
-          ) : (
-            (() => {
-              const t = derived.tableById.get(selectedTableId);
-              if (!t) return <div className="hint">Unknown table: {selectedTableId}</div>;
-              const cols = derived.columnsByTableId.get(selectedTableId) || [];
-              const outFks = derived.outgoingByTableId.get(selectedTableId) || [];
-              const inFks = derived.incomingByTableId.get(selectedTableId) || [];
-              const idxs = derived.indexesByTableId.get(selectedTableId) || [];
-              const rls = t.rls;
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div>
-                    <div style={{ fontWeight: 900 }}>{t.schema}.{t.name}</div>
-                    <div className="hint" style={{ marginTop: 4 }}>
-                      Columns: {cols.length} • PK: {t.primaryKeyColumns?.length ? t.primaryKeyColumns.join(', ') : '—'}
-                    </div>
-                  </div>
-
-                  <div className="hint" style={{ fontWeight: 800 }}>Foreign keys (outgoing)</div>
-                  {outFks.length ? (
-                    <div className="mono">
-                      {outFks.map((fk) => (
-                        <div key={fk.id} style={{ marginBottom: 8 }}>
-                          {fk.name}
-                          {'\n'}({(fk.fromColumns || []).join(', ')}) → {fk.toTableId}({(fk.toColumns || []).join(', ')})
+              {loading ? (
+                <div className="hint">Loading…</div>
+              ) : !selectedTableId ? (
+                <div className="hint">Click a table card to see details.</div>
+              ) : (
+                (() => {
+                  const t = derived.tableById.get(selectedTableId);
+                  if (!t) return <div className="hint">Unknown table: {selectedTableId}</div>;
+                  const cols = derived.columnsByTableId.get(selectedTableId) || [];
+                  const outFks = derived.outgoingByTableId.get(selectedTableId) || [];
+                  const inFks = derived.incomingByTableId.get(selectedTableId) || [];
+                  const idxs = derived.indexesByTableId.get(selectedTableId) || [];
+                  const rls = t.rls;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div>
+                        <div style={{ fontWeight: 900 }}>{t.schema}.{t.name}</div>
+                        <div className="hint" style={{ marginTop: 4 }}>
+                          Columns: {cols.length} • PK: {t.primaryKeyColumns?.length ? t.primaryKeyColumns.join(', ') : '—'}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="hint">—</div>
-                  )}
+                      </div>
 
-                  <div className="hint" style={{ fontWeight: 800 }}>Foreign keys (incoming)</div>
-                  {inFks.length ? (
-                    <div className="mono">
-                      {inFks.map((fk) => (
-                        <div key={fk.id} style={{ marginBottom: 8 }}>
-                          {fk.fromTableId} → ({(fk.fromColumns || []).join(', ')})
-                          {'\n'}{fk.name}
+                      <div className="hint" style={{ fontWeight: 800 }}>Foreign keys (outgoing)</div>
+                      {outFks.length ? (
+                        <div className="mono">
+                          {outFks.map((fk) => (
+                            <div key={fk.id} style={{ marginBottom: 8 }}>
+                              {fk.name}
+                              {'\n'}({(fk.fromColumns || []).join(', ')}) → {fk.toTableId}({(fk.toColumns || []).join(', ')})
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="hint">—</div>
-                  )}
+                      ) : (
+                        <div className="hint">—</div>
+                      )}
 
-                  <div className="hint" style={{ fontWeight: 800 }}>Indexes</div>
-                  {idxs.length ? (
-                    <div className="mono">
-                      {idxs.map((i) => (
-                        <div key={i.name} style={{ marginBottom: 8 }}>
-                          {i.name}{i.isPrimary ? ' [PK]' : ''}{i.isUnique ? ' [UNIQUE]' : ''}
+                      <div className="hint" style={{ fontWeight: 800 }}>Foreign keys (incoming)</div>
+                      {inFks.length ? (
+                        <div className="mono">
+                          {inFks.map((fk) => (
+                            <div key={fk.id} style={{ marginBottom: 8 }}>
+                              {fk.fromTableId} → ({(fk.fromColumns || []).join(', ')})
+                              {'\n'}{fk.name}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="hint">—</div>
-                  )}
+                      ) : (
+                        <div className="hint">—</div>
+                      )}
 
-                  <div className="hint" style={{ fontWeight: 800 }}>RLS</div>
-                  <div className="mono">
-                    enabled: {rls?.enabled ? 'true' : 'false'}{'\n'}forced: {rls?.forced ? 'true' : 'false'}
-                  </div>
-                </div>
-              );
-            })()
-          )}
+                      <div className="hint" style={{ fontWeight: 800 }}>Indexes</div>
+                      {idxs.length ? (
+                        <div className="mono">
+                          {idxs.map((i) => (
+                            <div key={i.name} style={{ marginBottom: 8 }}>
+                              {i.name}
+                              {i.isPrimary ? ' [PK]' : ''}
+                              {i.isUnique ? ' [UNIQUE]' : ''}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="hint">—</div>
+                      )}
+
+                      <div className="hint" style={{ fontWeight: 800 }}>RLS</div>
+                      <div className="mono">
+                        enabled: {rls?.enabled ? 'true' : 'false'}
+                        {'\n'}forced: {rls?.forced ? 'true' : 'false'}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
             </div>
           </div>
 
-          {/* Enums + Functions */}
           {showEnums && snapshot?.enums?.length ? (
             <div className="section">
               <div className="section-title">Enums</div>
               <div className="card" style={{ padding: 10 }}>
                 {(() => {
                   const list = snapshot.enums || [];
-                  const LIMIT = 5;
-                  const show = enumsExpanded ? list : list.slice(0, LIMIT);
+                  const limit = 5;
+                  const show = enumsExpanded ? list : list.slice(0, limit);
                   const more = Math.max(0, list.length - show.length);
                   return (
                     <>
@@ -1276,12 +1138,8 @@ export default function SchemaScreen() {
                           <tbody>
                             {show.map((e) => (
                               <tr key={`${e.schema}.${e.name}`}>
-                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                                  {e.schema}
-                                </td>
-                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                                  {e.name}
-                                </td>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{e.schema}</td>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{e.name}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1294,7 +1152,7 @@ export default function SchemaScreen() {
                         </button>
                       ) : null}
 
-                      {enumsExpanded && list.length > LIMIT ? (
+                      {enumsExpanded && list.length > limit ? (
                         <button className="btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setEnumsExpanded(false)}>
                           Collapse
                         </button>
@@ -1312,8 +1170,8 @@ export default function SchemaScreen() {
               <div className="card" style={{ padding: 10 }}>
                 {(() => {
                   const list = snapshot.functions || [];
-                  const LIMIT = 5;
-                  const show = functionsExpanded ? list : list.slice(0, LIMIT);
+                  const limit = 5;
+                  const show = functionsExpanded ? list : list.slice(0, limit);
                   const more = Math.max(0, list.length - show.length);
                   return (
                     <>
@@ -1332,12 +1190,8 @@ export default function SchemaScreen() {
                           <tbody>
                             {show.map((f) => (
                               <tr key={`${f.schema}.${f.name}`}>
-                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                                  {f.schema}
-                                </td>
-                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                                  {f.name}
-                                </td>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{f.schema}</td>
+                                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{f.name}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1350,7 +1204,7 @@ export default function SchemaScreen() {
                         </button>
                       ) : null}
 
-                      {functionsExpanded && list.length > LIMIT ? (
+                      {functionsExpanded && list.length > limit ? (
                         <button className="btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setFunctionsExpanded(false)}>
                           Collapse
                         </button>
@@ -1386,7 +1240,6 @@ export default function SchemaScreen() {
                     setHoveredTableId(null);
                   }}
                   onNodeClick={(_, node) => {
-                    // Toggle selection on second click.
                     setSelectedTableId((curr) => (curr === node.id ? null : node.id));
                   }}
                   onInit={(inst) => {
@@ -1418,10 +1271,6 @@ export default function SchemaScreen() {
   );
 }
 
-// React Flow hooks (useReactFlow/useNodesState/etc.) rely on an internal zustand store.
-// When used outside of <ReactFlowProvider>, React Flow throws:
-// "Seems like you have not used zustand provider as an ancestor".
-// We wrap the screen so the provider always exists.
 export function SchemaScreenWithProvider() {
   return (
     <ReactFlowProvider>

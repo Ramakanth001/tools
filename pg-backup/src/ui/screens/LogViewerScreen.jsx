@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 import { openJobEventSource } from '../lib/sse.js';
+import { getHomeUrl } from '../lib/runtime.js';
 
 function useQuery() {
   return useMemo(() => new URLSearchParams(window.location.search), []);
@@ -78,7 +79,7 @@ export default function LogViewerScreen() {
           <button className="btn danger" onClick={() => setLogs('')}>
             Clear
           </button>
-          <a className="btn" href="/">
+          <a className="btn" href={getHomeUrl()}>
             Back
           </a>
         </div>

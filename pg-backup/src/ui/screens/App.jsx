@@ -4,6 +4,7 @@ import { SchemaScreenWithProvider as SchemaScreen } from './SchemaScreen.jsx';
 import HistoryScreen from './HistoryScreen.jsx';
 import SettingsScreen from './SettingsScreen.jsx';
 import LogViewerScreen from './LogViewerScreen.jsx';
+import { getStorageKey, isLogsPath } from '../lib/runtime.js';
 
 const TABS = [
   { id: 'run', label: 'Run' },
@@ -13,15 +14,16 @@ const TABS = [
 ];
 
 export default function App() {
-  const isLogs = typeof window !== 'undefined' && window.location.pathname === '/logs';
+  const isLogs = typeof window !== 'undefined' && isLogsPath(window.location.pathname);
   if (isLogs) return <LogViewerScreen />;
 
-  const [tab, setTab] = useState(() => localStorage.getItem('pgbackup.tab') || 'run');
+  const tabKey = getStorageKey('tab');
+  const [tab, setTab] = useState(() => localStorage.getItem(tabKey) || 'run');
   const active = useMemo(() => (TABS.some((t) => t.id === tab) ? tab : 'run'), [tab]);
 
   function setActive(next) {
     setTab(next);
-    localStorage.setItem('pgbackup.tab', next);
+    localStorage.setItem(tabKey, next);
   }
 
   return (

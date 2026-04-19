@@ -1,11 +1,63 @@
-pg-backup project:-
+TOOLS USAGE GUIDE
 
-Commands:
-- Dev:
+1) pg-backup only
 
-  - Terminal A: `cd tools/pg-backup && node src/server.js`
-  - Terminal B: `cd tools/pg-backup && npx vite`
+From repo root:
+- Dev: `npm run dev:pg-backup`
+- Build: `npm run build:pg-backup`
+- Start built app: `npm run start:pg-backup`
 
-- Prod:
-  - `cd tools/pg-backup && npm run build && node src/server.js`
+Directly from folder:
+- `cd tools/pg-backup && npm run dev`
+- `cd tools/pg-backup && npm run build && npm run start`
+
+Default ports:
+- UI (dev): `http://localhost:5173`
+- API / built app: `http://localhost:8787`
+
+
+2) mysql-tool only
+
+From repo root:
+- Dev: `npm run dev:mysql-tool`
+- Build: `npm run build:mysql-tool`
+- Start built app: `npm run start:mysql-tool`
+
+Directly from folder:
+- `cd tools/mysql-tool && npm run dev`
+- `cd tools/mysql-tool && npm run build && npm run start`
+
+Default ports:
+- UI (dev): `http://localhost:5174`
+- API / built app: `http://localhost:8788`
+
+
+3) all-tools host (pg-backup + mysql-tool together)
+
+From repo root:
+- Dev: `npm run dev:all`
+- Build: `npm run build:all`
+- Start built host: `npm run start:all`
+
+Also available:
+- `npm run dev` → same as `npm run dev:all`
+- `npm run build` → same as `npm run build:all`
+- `npm run start` → same as `npm run start:all`
+
+Default ports:
+- Host UI (dev): `http://localhost:5173`
+- Host API / built app: `http://localhost:8787`
+
+Routes inside all-tools host:
+- pg-backup: `http://localhost:5173/tools/pg-backup`
+- mysql-tool: `http://localhost:5173/tools/mysql-tool`
+
+
+Notes
+
+- `pg-backup` needs PostgreSQL client tools (`pg_dump`, `psql`).
+- `mysql-tool` needs MySQL client tools (`mysqldump`, `mysql`).
+- For mysql-tool, you can also set:
+  - `MYSQL_PATH`
+  - `MYSQLDUMP_PATH`
 

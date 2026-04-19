@@ -1,0 +1,44 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "npm run dev:all",
+    "start": "npm run start:all",
+    "build": "npm run build:all",
+    "preview": "npm run preview:all",
+    "dev:all": "node ./pg-backup/node_modules/concurrently/dist/bin/concurrently.js --kill-others=false \"node src/server.js\" \"node ./pg-backup/node_modules/vite/bin/vite.js\"",
+    "start:all": "node src/server.js",
+    "build:all": "node ./pg-backup/node_modules/vite/bin/vite.js build",
+    "preview:all": "node ./pg-backup/node_modules/vite/bin/vite.js preview",
+    "dev:pg-backup": "npm --prefix ./pg-backup run dev",
+    "start:pg-backup": "npm --prefix ./pg-backup run start",
+    "build:pg-backup": "npm --prefix ./pg-backup run build",
+    "preview:pg-backup": "npm --prefix ./pg-backup run preview",
+    "dev:mysql-tool": "npm --prefix ./mysql-tool run dev",
+    "start:mysql-tool": "npm --prefix ./mysql-tool run start",
+    "build:mysql-tool": "npm --prefix ./mysql-tool run build",
+    "preview:mysql-tool": "npm --prefix ./mysql-tool run preview"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "elkjs": "^0.11.0",
+    "express": "^5.2.1",
+    "html-to-image": "^1.11.13",
+    "jspdf": "^4.2.0",
+    "jszip": "^3.10.1",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "reactflow": "^11.11.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "eslint-plugin-react": "^7.37.5",
+    "vite": "^7.3.1"
+  }
+}

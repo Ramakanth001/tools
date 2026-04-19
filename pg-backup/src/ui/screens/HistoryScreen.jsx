@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 import { api } from '../lib/http.js';
+import { resolveApiUrl } from '../lib/runtime.js';
 
 function formatBytes(n) {
   const num = Number(n || 0);
@@ -25,7 +26,7 @@ export default function HistoryScreen() {
   async function refresh() {
     setError('');
     try {
-      const data = await api(`/api/jobs?limit=50&q=${encodeURIComponent(q)}`);
+      const data = await api(`/jobs?limit=50&q=${encodeURIComponent(q)}`);
       setJobs(data.jobs || []);
     } catch (e) {
       setError(e?.message || String(e));
@@ -40,7 +41,7 @@ export default function HistoryScreen() {
   async function del(id) {
     if (!confirm(`Delete job ${id}? This removes the folder + zip.`)) return;
     try {
-      await api(`/api/jobs/${encodeURIComponent(id)}/delete`, { method: 'POST' });
+      await api(`/jobs/${encodeURIComponent(id)}/delete`, { method: 'POST' });
       await refresh();
     } catch (e) {
       setError(e?.message || String(e));
@@ -50,7 +51,7 @@ export default function HistoryScreen() {
   async function cleanup() {
     setError('');
     try {
-      await api('/api/cleanup', { method: 'POST', body: { days, keep } });
+      await api('/cleanup', { method: 'POST', body: { days, keep } });
       await refresh();
     } catch (e) {
       setError(e?.message || String(e));
@@ -118,7 +119,7 @@ export default function HistoryScreen() {
                 <td style={{ padding: 10, textAlign: 'right', borderTop: '1px solid rgba(255,255,255,0.06)' }}>{j.zipBytes != null ? formatBytes(j.zipBytes) : '—'}</td>
                 <td style={{ padding: 10, textAlign: 'right', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                   <div className="toolbar" style={{ justifyContent: 'flex-end' }}>
-                    <a className="tab" style={{ border: '1px solid rgba(255,255,255,0.12)' }} href={`/api/jobs/${encodeURIComponent(j.id)}/download`}>
+                    <a className="tab" style={{ border: '1px solid rgba(255,255,255,0.12)' }} href={resolveApiUrl(`/jobs/${encodeURIComponent(j.id)}/download`)}>
                       Download
                     </a>
                     <button className="btn danger" onClick={() => del(j.id)}>

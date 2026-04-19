@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/http.js';
 import { openJobEventSource } from '../lib/sse.js';
 import { useActiveConnection } from '../state/ActiveConnectionContext.jsx';
+import { getLogsUrl, getPgBackupRuntime, getStorageKey, resolveApiUrl } from '../lib/runtime.js';
 
 function nowISO() {
   return new Date().toISOString();
@@ -31,11 +32,13 @@ function buildPoolerConnectionString(pooler) {
   return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
 }
 
-const PROFILES_KEY = 'pgbackup.profiles';
+function getProfilesKey() {
+  return getStorageKey('profiles');
+}
 
 function loadProfiles() {
   try {
-    const raw = localStorage.getItem(PROFILES_KEY);
+    const raw = localStorage.getItem(getProfilesKey());
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -50,10 +53,8 @@ async function loadProfilesWithFallback() {
 
   // Fallback: a static file served from /public (useful after clearing site data)
   try {
-    const resp = await fetch('/pgbackup.profiles.json', { cache: 'no-store' });
-    if (!resp.ok) throw new Error('profiles json not found');
-    const parsed = await resp.json();
-    const list = Array.isArray(parsed) ? parsed : [];
+    const resp = await api('/profiles-template');
+    const list = Array.isArray(resp.profiles) ? resp.profiles : [];
     if (list.length) saveProfiles(list);
     return list;
   } catch {
@@ -62,7 +63,7 @@ async function loadProfilesWithFallback() {
 }
 
 function saveProfiles(profiles) {
-  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+  localStorage.setItem(getProfilesKey(), JSON.stringify(profiles));
 }
 
 export default function RunScreen() {
@@ -192,7 +193,7 @@ export default function RunScreen() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'pgbackup.profiles.json';
+    a.download = `${getPgBackupRuntime().toolId}.profiles.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -244,7 +245,7 @@ export default function RunScreen() {
     setTestStatus('Testing…');
     try {
       if (!effectiveConnString) throw new Error('Missing connection details');
-      await api('/api/test-connection', { method: 'POST', body: { connectionString: effectiveConnString }, timeoutMs: 30_000 });
+      await api('/test-connection', { method: 'POST', body: { connectionString: effectiveConnString }, timeoutMs: 30_000 });
       setTestStatus('OK');
     } catch (e) {
       setTestStatus('FAILED');
@@ -267,7 +268,7 @@ export default function RunScreen() {
         options,
       };
 
-      const resp = await api('/api/backup', { method: 'POST', body, timeoutMs: 60_000 });
+      const resp = await api('/backup', { method: 'POST', body, timeoutMs: 60_000 });
       setJobId(resp.jobId);
 
       const nextEv = openJobEventSource(resp.jobId, {
@@ -287,7 +288,7 @@ export default function RunScreen() {
           if (s.status === 'done') {
             setRunStatus('Done');
             setProgress((p) => ({ ...p, percent: 100, phase: 'done' }));
-            setDownloadUrl(`/api/jobs/${encodeURIComponent(resp.jobId)}/download`);
+            setDownloadUrl(resolveApiUrl(`/jobs/${encodeURIComponent(resp.jobId)}/download`));
           } else if (s.status === 'cancelled') {
             setRunStatus('Cancelled');
           } else {
@@ -309,7 +310,7 @@ export default function RunScreen() {
   async function cancel() {
     if (!jobId || jobId === '—') return;
     try {
-      await api(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', timeoutMs: 10_000 });
+      await api(`/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', timeoutMs: 10_000 });
     } catch (e) {
       setError(e?.message || String(e));
     }
@@ -437,7 +438,7 @@ export default function RunScreen() {
           style={{ minHeight: 180 }}
         />
         <div className="field-hint" style={{ marginTop: 8 }}>
-          Stored key: <span className="mono">{PROFILES_KEY}</span> • Max 50 profiles.
+          Stored key: <span className="mono">{getProfilesKey()}</span> • Max 50 profiles.
         </div>
       </div>
 
@@ -497,7 +498,7 @@ export default function RunScreen() {
             <button
               className="btn"
               type="button"
-              onClick={() => window.open(`/logs?jobId=${encodeURIComponent(jobId || '')}`, '_blank', 'noopener,noreferrer')}
+              onClick={() => window.open(getLogsUrl(jobId || ''), '_blank', 'noopener,noreferrer')}
               disabled={!jobId || jobId === '—'}
             >
               Open in new window
