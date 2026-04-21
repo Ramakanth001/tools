@@ -1,4 +1,5 @@
-const { Client } = require('pg');
+const { requireToolDep } = require('../../requireToolDep');
+const { Client } = requireToolDep('pg');
 const crypto = require('node:crypto');
 
 function buildPostgresConnectionString(connection) {

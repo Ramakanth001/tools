@@ -32,7 +32,33 @@ Default ports:
 - API / built app: `http://localhost:8788`
 
 
-3) all-tools host (pg-backup + mysql-tool together)
+3) mysql-pg-migrate only
+
+From repo root:
+- `npm --prefix ./mysql-pg-migrate run dev`
+- `npm --prefix ./mysql-pg-migrate run build`
+- `npm --prefix ./mysql-pg-migrate run start`
+- `npm --prefix ./mysql-pg-migrate run preview`
+
+Directly from folder:
+- `cd tools/mysql-pg-migrate && npm run dev`
+- `cd tools/mysql-pg-migrate && npm run build && npm run start`
+- `cd tools/mysql-pg-migrate && npm run preview`
+
+Default ports:
+- UI (dev): `http://localhost:5175`
+- API / built app: `http://localhost:8789`
+
+Useful URLs:
+- Dev UI: `http://localhost:5175`
+- Standalone API health: `http://localhost:8789/api/health`
+
+Notes:
+- This tool currently runs as a standalone app.
+- It is not yet listed inside the shared all-tools host routes in the current setup.
+
+
+4) all-tools host (pg-backup + mysql-tool together)
 
 From repo root:
 - Dev: `npm run dev:all`
@@ -57,6 +83,7 @@ Notes
 
 - `pg-backup` needs PostgreSQL client tools (`pg_dump`, `psql`).
 - `mysql-tool` needs MySQL client tools (`mysqldump`, `mysql`).
+- `mysql-pg-migrate` connects to MySQL and PostgreSQL directly from Node-based tool code.
 - For mysql-tool, you can also set:
   - `MYSQL_PATH`
   - `MYSQLDUMP_PATH`
