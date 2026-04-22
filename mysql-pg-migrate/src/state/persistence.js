@@ -60,6 +60,12 @@ function createPersistence({ rootDir }) {
     async saveReport(report) {
       return writeJson(jsonPath(rootDir, 'reports', report.id), report);
     },
+    async saveReplay(replay) {
+      return writeJson(jsonPath(rootDir, 'replays', replay.id), replay);
+    },
+    async listReplays(runId) {
+      return (await listJson(path.join(rootDir, 'replays'))).filter((item) => item.runId === runId);
+    },
     async saveError(errorRecord) {
       return writeJson(jsonPath(rootDir, 'errors', errorRecord.id), errorRecord);
     },

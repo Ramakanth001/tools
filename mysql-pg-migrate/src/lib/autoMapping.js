@@ -105,6 +105,28 @@ function buildColumnMappings(sourceTable, targetTable) {
   });
 }
 
+function inferConflictKeys(sourceTable, targetTable, columnMappings) {
+  const mappedPairs = new Map((columnMappings || []).filter((item) => item.targetColumn).map((item) => [item.sourceColumn, item.targetColumn]));
+  const sourcePrimaryKey = sourceTable?.primaryKey || [];
+  const mappedPrimaryKey = sourcePrimaryKey.map((column) => mappedPairs.get(column)).filter(Boolean);
+  if (mappedPrimaryKey.length === sourcePrimaryKey.length && mappedPrimaryKey.length) return mappedPrimaryKey;
+
+  const targetPrimaryKey = targetTable?.primaryKey || [];
+  if (targetPrimaryKey.length) {
+    const sourceColumnsByTarget = new Map((columnMappings || []).filter((item) => item.targetColumn).map((item) => [item.targetColumn, item.sourceColumn]));
+    const covered = targetPrimaryKey.every((column) => sourceColumnsByTarget.has(column));
+    if (covered) return [...targetPrimaryKey];
+  }
+
+  for (const key of targetTable?.uniqueKeys || []) {
+    const sourceColumnsByTarget = new Map((columnMappings || []).filter((item) => item.targetColumn).map((item) => [item.targetColumn, item.sourceColumn]));
+    const covered = (key.columns || []).every((column) => sourceColumnsByTarget.has(column));
+    if (covered && key.columns?.length) return [...key.columns];
+  }
+
+  return [];
+}
+
 function buildAutoMapping({ sourceCatalog, targetCatalog }) {
   const targetTables = targetCatalog.tables || [];
   const tableMappings = (sourceCatalog.tables || []).map((sourceTable, index) => {
@@ -116,6 +138,8 @@ function buildAutoMapping({ sourceCatalog, targetCatalog }) {
       }
     }
     const selectedTarget = best && best.candidate.score >= 0.45 ? best.targetTable : null;
+    const columnMappings = selectedTarget ? buildColumnMappings(sourceTable, selectedTarget) : [];
+    const inferredConflictKeys = selectedTarget ? inferConflictKeys(sourceTable, selectedTarget, columnMappings) : [];
     return {
       id: `${sourceTable.name}:${index}`,
       sourceTable: sourceTable.name,
@@ -124,11 +148,11 @@ function buildAutoMapping({ sourceCatalog, targetCatalog }) {
       rationale: best ? best.candidate.reasons : [],
       enabled: true,
       conflictStrategy: 'insert',
-      conflictKeys: [],
+      conflictKeys: inferredConflictKeys,
       chunkSize: 500,
       writeMode: 'append',
       order: index,
-      columnMappings: selectedTarget ? buildColumnMappings(sourceTable, selectedTarget) : [],
+      columnMappings,
     };
   });
   const matched = tableMappings.filter((mapping) => mapping.targetTable).length;
@@ -143,4 +167,4 @@ function buildAutoMapping({ sourceCatalog, targetCatalog }) {
   };
 }
 
-module.exports = { normalizeName, singularize, buildAutoMapping, scoreTableMatch, scoreColumnMatch };
+module.exports = { normalizeName, singularize, buildAutoMapping, scoreTableMatch, scoreColumnMatch, inferConflictKeys };

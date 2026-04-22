@@ -1,79 +1,63 @@
 # mysql-pg-migrate
 
-Beginner-friendly web UI and API for planning and managing a **MySQL → PostgreSQL migration workflow**.
+Web UI and API for planning, validating, provisioning, and executing **MySQL -> PostgreSQL** migrations.
 
-This tool helps you:
+This project is no longer just a planner. It already supports:
 
-- connect to a source MySQL database
-- connect to a target PostgreSQL database
-- inspect schemas on both sides
-- generate automatic table/column mapping suggestions
-- review and edit mappings
-- run preflight checks
-- build dry-run previews
-- start and monitor migration runs
-- resume or rerun failed runs
-- export and import project mapping JSON
+- MySQL and PostgreSQL connection setup
+- schema introspection on both sides
+- automatic table and column mapping suggestions
+- editable mappings with per-table write settings
+- preflight validation and dry-run previews
+- target schema provisioning for missing tables/columns
+- real data movement from MySQL into PostgreSQL
+- checkpointed execution, resume, rerun-failed, and run history
+- error capture and basic post-run verification
 
----
+It is best described today as:
 
-## Important: what this tool can and cannot do today
-
-Before you use the tool, please understand one very important limitation:
-
-### What works today
-
-The tool **does provide a real UI and API workflow** for:
-
-- schema introspection
-- automatic mapping generation
-- project persistence
-- mapping review/editing
-- preflight analysis
-- dry-run preview generation
-- run orchestration
-- run history/report viewing
-
-### What does not fully work yet
-
-The current backend execution engine is **still a simulation**.
-
-That means:
-
-- the UI behaves like a migration tool
-- runs are created and tracked
-- progress/log/status events are emitted
-- checkpoints/reports are stored
-- but the backend does **not yet perform real row-by-row data copy from MySQL into PostgreSQL**
-
-So today, you should treat this tool as:
-
-> a migration planning, validation, mapping, and workflow management tool — **not yet a final production-grade data mover**
-
-If you are a beginner, this is still very useful because it helps you understand and prepare the migration process safely.
+> a working MySQL -> PostgreSQL migration workbench with a practical execution engine — useful now, but not yet a fully hardened enterprise ETL platform
 
 ---
 
 ## Table of contents
 
-1. [Who this tool is for](#who-this-tool-is-for)
-2. [What you need before starting](#what-you-need-before-starting)
-3. [Project structure and ports](#project-structure-and-ports)
-4. [How to run the tool](#how-to-run-the-tool)
-5. [First-time quick start](#first-time-quick-start)
-6. [Full UI guide](#full-ui-guide)
-   - [Workspace tab](#workspace-tab)
-   - [Mapping tab](#mapping-tab)
-   - [Validate & Run tab](#validate--run-tab)
-   - [History tab](#history-tab)
-   - [Settings tab](#settings-tab)
-7. [Understanding the migration workflow](#understanding-the-migration-workflow)
-8. [Example beginner workflow](#example-beginner-workflow)
-9. [API overview](#api-overview)
-10. [Files created by the tool](#files-created-by-the-tool)
-11. [Troubleshooting](#troubleshooting)
-12. [Safety tips](#safety-tips)
-13. [Current limitations](#current-limitations)
+1. [What the tool does today](#what-the-tool-does-today)
+2. [Who this tool is for](#who-this-tool-is-for)
+3. [Current maturity](#current-maturity)
+4. [What you need before starting](#what-you-need-before-starting)
+5. [Project structure and ports](#project-structure-and-ports)
+6. [How to run the tool](#how-to-run-the-tool)
+7. [Quick start](#quick-start)
+8. [Workflow overview](#workflow-overview)
+9. [Current implemented capabilities](#current-implemented-capabilities)
+10. [Current real gaps](#current-real-gaps)
+11. [API overview](#api-overview)
+12. [Files created by the tool](#files-created-by-the-tool)
+13. [Safety tips](#safety-tips)
+14. [Recommended next steps](#recommended-next-steps)
+
+---
+
+## What the tool does today
+
+`mysql-pg-migrate` helps you move from a source MySQL schema to a target PostgreSQL schema with a guided workflow:
+
+1. connect to source and target databases
+2. introspect schemas and table metadata
+3. generate automatic mappings
+4. review and edit mappings manually
+5. validate compatibility before execution
+6. preview transformed rows with dry-run samples
+7. provision missing PostgreSQL tables/columns when needed
+8. execute the migration in chunks
+9. resume interrupted runs and inspect reports/errors
+
+This makes it useful both as:
+
+- a migration planning tool
+- a migration execution tool
+- an ETL-style validation and run console
 
 ---
 
@@ -82,11 +66,59 @@ If you are a beginner, this is still very useful because it helps you understand
 This tool is meant for:
 
 - developers moving an app from MySQL to PostgreSQL
-- engineers who want to inspect schema compatibility
-- beginners who need help understanding how a migration should be organized
-- anyone who wants a UI around migration planning instead of only raw scripts
+- engineers who want a UI around schema comparison and data movement
+- teams that want to review mappings before loading data
+- anyone building a repeatable migration workflow instead of one-off scripts
 
-You **do not need to be a database expert** to start using it.
+You do **not** need to be a PostgreSQL expert to start using it, but you should still validate migrations carefully before production cutover.
+
+---
+
+## Current maturity
+
+The README previously understated several capabilities that are already implemented.
+
+### What is already working
+
+The current implementation already includes:
+
+- **driver-based MySQL access via `mysql2`**
+- **PostgreSQL access via `pg`**
+- **schema introspection** for MySQL and PostgreSQL
+- **automatic mapping generation**
+- **preflight validation** with blockers and warnings
+- **dry-run previews** using transformed sample rows
+- **real data writes to PostgreSQL**
+- **checkpoint persistence**
+- **resume support**
+- **keyset resume for single-column primary-key tables**
+- **table-scoped consistent-read execution sessions when enabled**
+- **FK-aware execution ordering**
+- **basic target schema provisioning**
+- **run reports, stored errors, and row-count verification support**
+- **conflict-key inference from mapped PK/unique key candidates**
+- **row filters and conditional transform support**
+- **constraint-planning visibility for schema provisioning**
+- **guarded execution using verification fingerprints**
+- **cutover-readiness reporting**
+- **throughput telemetry per processed table**
+- **execution metadata for write-mode guarantees and reconciliation summaries**
+
+### What it still is not
+
+This is still **not yet a fully production-hardened migration platform**.
+
+The biggest remaining gaps are around:
+
+- consistency guarantees while source data is changing
+- stronger idempotent resume semantics
+- advanced reconciliation and validation
+- richer ETL transforms
+- throughput/parallelism at larger scale
+
+So the right framing today is:
+
+> practical and useful for real migrations, but still in the hardening phase for large, high-risk, or near-zero-downtime workloads
 
 ---
 
@@ -129,7 +161,7 @@ If the credentials are wrong, schema listing and introspection will fail.
 
 ### 5. A test/staging target is strongly recommended
 
-Even though the execution engine is currently simulated, it is best practice to test all database migration work on non-production systems first.
+Even though the execution engine can now move real data, it is still best practice to test all database migration work on non-production systems first.
 
 ---
 
@@ -226,7 +258,7 @@ Open:
 
 ---
 
-## First-time quick start
+## Quick start
 
 If you are completely new, do this first:
 
@@ -267,7 +299,157 @@ If you are completely new, do this first:
 
 12. If everything looks good, start a run with **Execute migration**.
 
-Again: today, this final run is a **workflow simulation**, not a real full data transfer.
+---
+
+## Workflow overview
+
+### 1. Workspace
+
+Use this tab to:
+
+- define project name
+- enter MySQL and PostgreSQL connection information
+- load available schemas
+- introspect both catalogs
+- create a persisted project with auto-generated mappings
+
+### 2. Mapping
+
+Use this tab to:
+
+- review table matches
+- enable or disable tables
+- set target tables
+- choose write mode
+- set conflict keys for upsert flows
+- tune chunk size
+- adjust per-column mappings and transforms
+- save or regenerate mappings
+
+### 3. Validate & Run
+
+Use this tab to:
+
+- run preflight analysis
+- inspect dry-run previews
+- configure run options
+- execute migration
+- resume interrupted runs
+- rerun failed work
+- watch live logs and progress events
+
+### 4. History
+
+Use this tab to:
+
+- browse saved projects
+- export/import mapping JSON
+- inspect previous runs and reports
+
+### 5. Settings
+
+Use this tab to communicate operational expectations and current tool status.
+
+---
+
+## Current implemented capabilities
+
+### Connectivity and introspection
+
+- MySQL connectivity uses **`mysql2/promise`**
+- PostgreSQL connectivity uses **`pg`**
+- source and target schemas can be listed from the UI/API
+- schema introspection captures tables, columns, indexes, and foreign keys
+
+### Mapping and planning
+
+- automatic table and column mapping suggestions
+- editable mappings with enable/disable support
+- configurable write mode and conflict keys
+- persisted project state and mapping export/import
+
+### Validation and dry-run
+
+- preflight compatibility analysis
+- blocker and warning reporting
+- transform validation against sample rows
+- dry-run previews showing transformed output shape
+- transform presets plus richer transform types including lookup, expression, concat, coalesce, and conditional
+- row-filter evaluation for preview and execution
+
+### Execution engine
+
+- real row reads from MySQL
+- chunked writes to PostgreSQL
+- append, truncate-style, and upsert-oriented flows
+- checkpoint persistence
+- resume support for interrupted runs
+- rerun-failed workflow
+- quarantine-style row handling through stored error records
+- chunk fingerprint tracking for basic duplicate-replay protection
+- execution-profile metadata that records run mode, error policy, selected tables, and consistent-read settings
+- configurable concurrency and batched PostgreSQL writes
+- pooled PostgreSQL writes and dependency-layered execution
+- watermark-filtered incremental reads with tie-breaker handling groundwork
+- guarded execution using verification fingerprints
+- throughput rows/second telemetry per table
+
+### Execution planning
+
+- FK-aware table ordering is already implemented
+- dependency cycles are detected and surfaced as warnings
+- single-column primary key tables can use **keyset-based progression/resume**
+- other tables fall back to offset-based paging
+
+### Target schema provisioning
+
+- MySQL columns can be mapped into PostgreSQL column definitions
+- the tool can generate provisioning plans for missing target tables/columns
+- the tool can generate and apply basic `CREATE TABLE` / `ALTER TABLE ADD COLUMN` statements
+- provisioning now also plans secondary indexes, unique constraints, foreign-key follow-up actions, and enum migration notes for created tables
+
+### Verification and reporting
+
+- run records, reports, checkpoints, and error records are persisted on disk
+- basic post-run verification can compare source and target row counts
+- per-table statuses, inserted counts, and rejected counts are recorded
+- reconciliation summaries now include mismatch counts, anomaly rollups, and consistency mode labels
+- audit reporting includes confidence scoring and actionable recommendations
+- cutover-readiness reports summarize readiness state, mismatches, replayable errors, consistency mode, and CDC mode
+
+### Rejected-row workflows
+
+- row-level write/transform failures retain row payload context where available
+- stored errors can be inspected per run
+- errors can be exported as JSON for offline repair/replay workflows
+- replay guidance now identifies replayable write failures and produces a manual replay plan
+- corrected replay payloads can now be imported and replayed into the target database
+- replay history is now persisted and visible per run
+- replay records now retain replay classifications for better remediation context
+
+### Consistent-read groundwork
+
+- source connections can optionally request a MySQL **consistent read** session
+- current implementation supports transaction start with `REPEATABLE READ` / `START TRANSACTION WITH CONSISTENT SNAPSHOT` groundwork
+- this is an operational foundation, not yet a full CDC or cross-run snapshot orchestration layer
+
+### Wave-3 operational controls
+
+- configurable execution concurrency
+- batched target writes
+- CDC mode flags (`off`, `snapshot-only`, `watermark`) for workflow expansion
+- cutover mode flags (`manual`, `guarded`) surfaced in execution metadata and reports
+- dependency-layered scheduler groundwork for safer parallelism
+- watermark execution now requires a stable tie-breaker column
+- guarded execution now rejects stale verification state
+- cutover-readiness summary endpoint and UI support
+
+### Incremental execution relevance
+
+- when `cdcMode=watermark`, source reads use saved high watermark plus tie-breaker state to fetch only newer rows
+- checkpoints persist `highWatermark` and `highWatermarkTieBreaker` values per table
+- preflight warns when watermark mode lacks a suitable source column or stable PK tie-breaker
+- run reports surface replay counts, scheduler mode, execution layers, watermark metadata, concurrency, batching details, and throughput metrics
 
 ---
 
@@ -579,9 +761,9 @@ At the moment, execution:
 - stores checkpoints
 - stores reportable state
 
-but **does not yet perform a true full data move into PostgreSQL**.
+but it still has important operational limitations and should be validated carefully before production use.
 
-Treat it as a run workflow simulator for now.
+Treat it as an early-stage migration engine for now.
 
 ---
 
@@ -696,7 +878,7 @@ They help you catch problems early.
 
 ### Step 5: Run the workflow
 
-Currently this simulates a migration run and tracks execution state.
+Currently this performs real migration work, but still with important operational limitations.
 
 ### Step 6: Inspect reports/history
 
@@ -989,14 +1171,18 @@ What to do:
 
 ---
 
-### 6. Execute run completes but target database did not really change
+### 6. Execute run completed, but the result is not what I expected
 
 This is expected with the current implementation.
 
-Why:
+Possible reasons:
 
-- the execution engine is still simulated
-- it tracks workflow state but does not yet do real copy into PostgreSQL
+- mappings were incorrect
+- required target columns were not mapped properly
+- transform errors caused rejected rows
+- upsert/conflict key setup was wrong
+- source data changed during the run
+- chunk-level progress completed, but the migrated result still needs verification
 
 ---
 
@@ -1027,57 +1213,255 @@ Even beginners should follow these rules:
 
 ---
 
-## Current limitations
+## Current real gaps
 
 This section is especially important.
 
-### Limitation 1: execution is simulated
+### 1. No full run-wide consistent snapshot strategy yet
 
-The biggest limitation today is that execution tracking exists, but true row transfer logic is not fully implemented.
+The tool now supports **table-scoped** MySQL consistent-read execution sessions when enabled, which is a meaningful correctness improvement for individual table loads.
 
-### Limitation 2: not yet integrated into shared host routes
+Still missing:
 
-At the moment this tool is standalone.
+- coordinated **cross-table** snapshot semantics for a whole run
+- run-wide snapshot orchestration across all tables
+- CDC or catch-up flows for low-downtime cutover
 
-It is not yet wired into routes like:
+Wave-4 improvement already added:
 
-- `/tools/pg-backup`
-- `/tools/mysql-tool`
+- dependency-layered scheduler groundwork
+- watermark-column tracking in checkpoints/report metadata
+- watermark-based filtered reads for incremental catch-up groundwork
 
-### Limitation 3: mapping suggestions are heuristic
+### 2. Resume semantics are better defined, but not fully hardened
 
-Suggestions are helpful, but they are not guaranteed to be correct.
+Resume is better than before because checkpoints exist, some tables can use keyset progress, deterministic chunk ids are now persisted, and write-mode safety metadata is recorded. It is still not enterprise-grade.
 
-### Limitation 4: project import accepts JSON as-is
+Wave-1 improvement already added:
 
-You should only import JSON you trust.
+- duplicate chunk replay detection using chunk fingerprints at checkpoint boundaries
+- deterministic chunk ids persisted in checkpoints
+- write-mode safety metadata persisted for recovery decisions
+
+Still missing:
+
+- stronger end-to-end idempotency guarantees
+- safer replay handling after partial writes at target transaction boundaries
+- deterministic recovery under source churn across full multi-table runs
+
+### 3. Reconciliation is stronger, but still not comprehensive
+
+The tool already supports row-count-style validation, but not a full trust-building reconciliation framework.
+
+Wave-1 improvement already added:
+
+- anomaly rollups
+- mismatch counts
+- execution-profile and consistency-mode reporting
+- confidence / trust-level reporting in audit output
+- cutover-readiness summaries and trust states in validation output
+
+Still missing:
+
+- real checksums or hashes
+- real aggregate parity checks
+- FK integrity validation after load
+- deeper cutover-readiness scoring backed by stronger reconciliation rules
+
+### 4. Transform support is richer, but not full ETL-grade
+
+Current built-in transforms include:
+
+- direct
+- string
+- number
+- boolean
+- json
+- date
+- datetime
+- constant
+- null
+- template
+- lookup
+- expression
+- concat
+- coalesce
+- conditional
+
+The tool now also supports:
+
+- row filtering using table-level expressions
+- transform presets with richer metadata
+- transform rule validation during preflight/dry-run
+
+Still missing:
+
+- reusable transform libraries/presets
+- advanced multi-column derivations
+- row filtering and conditional routing
+
+### 5. Upsert behavior is better, but still not fully automatic
+
+Upsert exists, and the tool now infers conflict-key candidates from mapped primary keys / unique keys where possible. Operators still need to verify the inferred result.
+
+Still missing:
+
+- richer merge/update policies
+- conditional upsert strategies
+- stronger runtime proof that inferred keys match the intended business key
+
+### 6. Schema migration support is still partial
+
+The tool can already provision missing tables and columns, and it now plans unique constraints and foreign-key follow-up actions. It is still not yet a full schema migration engine.
+
+Still missing:
+
+- full index and constraint parity with safe dependency orchestration
+- native enum strategies
+- sequence/identity migration refinements
+- trigger/function/procedure migration
+- richer default-expression compatibility handling
+
+### 7. Constraint-sensitive loading is incomplete
+
+There is already FK-aware ordering, which is a good step forward.
+
+Still missing:
+
+- constraint deferral strategies
+- robust handling of cycles
+- phased parent/child loading modes
+
+### 8. Throughput and scale hardening are improving, but still limited
+
+Execution is still primarily table-by-table and chunk-by-chunk.
+
+Wave-3 improvement already added:
+
+- configurable concurrency for table execution
+- configurable batch size for PostgreSQL writes
+- per-table throughput telemetry
+- cutover/guarded execution metadata
+
+Still missing:
+
+- tunable concurrency
+- streaming-oriented optimizations
+- richer batching and connection reuse strategies
+
+### 9. Error recovery UX is still basic
+
+The tool stores error records and can continue in quarantine-style paths, but the operator experience is still minimal.
+
+Wave-4 improvement already added:
+
+- replay import endpoint
+- replay history persistence
+- corrected-row replay workflow against the target
+
+Still missing:
+
+- rejected-row inspection workflows
+- dead-letter style handling
+- corrected-row reprocessing
+
+Current note:
+
+- replay now exists, but it still depends on manually prepared correction payload JSON rather than a first-class guided repair UI
+
+### 10. Imported project JSON is trusted too easily
+
+Import/export is useful, but project import is not yet hardened with stronger validation or policy controls.
+
+---
+
+## Recommended next steps
+
+If the goal is to turn this into a best-in-class MySQL -> PostgreSQL ETL tool, prioritize work in this order.
+
+### P0 - correctness and trust
+
+1. **Harden resume and idempotency semantics**
+   - persist high-watermark state more explicitly
+   - make partial reruns deterministic
+   - reduce duplicate-write risk after interruption
+
+2. **Add stronger reconciliation**
+   - row counts per table
+   - checksums/hashes on key columns
+   - anomaly summaries for mismatches
+
+3. **Formalize execution guarantees by write mode**
+   - append
+   - truncate-load
+   - upsert
+   - each should clearly state recovery behavior and operator expectations
+
+4. **Add consistent-read strategy for MySQL**
+   - transaction/snapshot approach where feasible
+   - documented operational mode for stable migrations
+
+### P1 - ETL depth
+
+1. **Build a richer transform framework**
+   - expression transforms
+   - lookup transforms
+   - reusable named presets
+   - conditional transforms and row filters
+
+2. **Extend schema provisioning**
+   - indexes
+   - constraints
+   - enum handling
+   - identity/sequence parity
+
+3. **Improve rejected-row workflows**
+   - export rejected rows
+   - inspect and repair failures
+   - replay corrected rows
+
+4. **Improve reporting UX**
+   - cutover confidence summary
+   - per-table readiness indicators
+   - downloadable migration audit report
+
+### P2 - scale and cutover readiness
+
+1. **Add parallel execution**
+2. **Improve batching and connection reuse**
+3. **Add incremental sync / CDC support**
+4. **Add cutover-oriented validation and operational controls**
+
+---
+
+## Latest status snapshot
+
+As of the latest implementation pass, `mysql-pg-migrate` now includes:
+
+- Wave 1: correctness/trust improvements around consistency, resume semantics, conflict-key inference, and trust reporting
+- Wave 2: transform presets, richer transforms, row filters, schema planning improvements, replay metadata, and import validation hardening
+- Wave 3: concurrency controls, batching, dependency-layered execution, watermark tie-breaker handling, guarded execution, throughput telemetry, and cutover-readiness reporting
+
+That means the product is now best described as:
+
+> a serious migration workbench with practical ETL execution, staged recovery tooling, and early incremental-sync support — but still not a full enterprise-grade CDC/cutover platform
 
 ---
 
 ## Summary
 
-`mysql-pg-migrate` is currently best used as a:
+`mysql-pg-migrate` has already moved beyond a simple planner. It is now a real migration workbench with:
 
-- migration planning tool
-- schema comparison tool
-- mapping editor
-- validation/preflight tool
-- dry-run preview tool
-- run orchestration/history UI
+- planning
+- mapping
+- validation
+- provisioning
+- execution
+- resume
+- reporting
 
-If you are a beginner, the best path is:
+The next leap is not “make it work at all” — it already works.
 
-1. connect databases
-2. introspect schemas
-3. create project
-4. review mappings
-5. run preflight
-6. inspect dry-run
-7. use execution/history for workflow validation
+The next leap is:
 
-If you want, I can also create:
-
-- a **short quickstart version** of this guide
-- an **API-only usage guide**
-- a **step-by-step tutorial with sample MySQL/Postgres schemas**
-- a **screenshots-ready user manual format**
+> make it trustworthy, repeatable, reconcilable, and scalable enough for serious production migrations
