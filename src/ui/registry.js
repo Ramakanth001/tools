@@ -1,5 +1,6 @@
 import PgBackupTool from '../../pg-backup/src/ui/PgBackupTool.jsx';
 import MysqlTool from '../../mysql-tool/src/ui/MysqlTool.jsx';
+import MysqlPgMigrateTool from '../../mysql-pg-migrate/src/ui/main.jsx';
 
 export const TOOLS = [
   {
@@ -30,6 +31,21 @@ export const TOOLS = [
       homePath: '/tools/mysql-tool',
       logsPath: '/tools/mysql-tool/logs',
       storagePrefix: 'tools.mysql-tool',
+    },
+  },
+  {
+    id: 'mysql-pg-migrate',
+    name: 'mysql-pg-migrate',
+    description: 'MySQL to PostgreSQL schema discovery, mapping, validation, and resumable migration runs.',
+    path: '/tools/mysql-pg-migrate',
+    logsPath: '/tools/mysql-pg-migrate/logs',
+    component: MysqlPgMigrateTool,
+    runtime: {
+      toolId: 'mysql-pg-migrate',
+      apiBasePath: '/api/tools/mysql-pg-migrate',
+      homePath: '/tools/mysql-pg-migrate',
+      logsPath: '/tools/mysql-pg-migrate/logs',
+      storagePrefix: 'tools.mysql-pg-migrate',
     },
   },
 ];

@@ -7,15 +7,17 @@ const express = toolRequire('express');
 
 const pgBackupManifest = require('../pg-backup/tool.manifest.js');
 const mysqlToolManifest = require('../mysql-tool/tool.manifest.js');
+const mysqlPgMigrateManifest = require('../mysql-pg-migrate/tool.manifest.js');
 const { registerPgBackupRoutes } = require('../pg-backup/src/registerRoutes.js');
 const { registerMysqlToolRoutes } = require('../mysql-tool/src/registerRoutes.js');
+const { registerMysqlPgMigrateRoutes } = require('../mysql-pg-migrate/src/registerRoutes.js');
 
 const app = express();
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DIST_INDEX = path.join(PUBLIC_DIR, 'index.html');
 
-const manifests = [pgBackupManifest, mysqlToolManifest];
+const manifests = [pgBackupManifest, mysqlToolManifest, mysqlPgMigrateManifest];
 
 app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, app: 'tools', tools: manifests.map((m) => ({ id: m.id, name: m.name })) });
@@ -35,6 +37,7 @@ app.get('/api/tools', async (_req, res) => {
 
 registerPgBackupRoutes(app, { basePath: pgBackupManifest.apiBasePath });
 registerMysqlToolRoutes(app, { basePath: mysqlToolManifest.apiBasePath });
+registerMysqlPgMigrateRoutes(app, { basePath: mysqlPgMigrateManifest.apiBasePath });
 
 app.use(express.static(PUBLIC_DIR));
 

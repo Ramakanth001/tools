@@ -24,6 +24,7 @@ const STATE_DIR = path.join(ROOT_DIR, 'state');
 const persistence = createPersistence({ rootDir: STATE_DIR });
 const executionEngine = createExecutionEngine({ persistence });
 const runStreams = new Map();
+const MASKED_CONNECTION_STRING = '[provided]';
 
 function getRunChannel(runId) {
   let channel = runStreams.get(runId);
@@ -185,15 +186,25 @@ function resolveRuntimeConnections(project, overrides = {}) {
   };
 }
 
+function hasMysqlPassword(connection) {
+  return String(connection?.password || '').length > 0;
+}
+
 function ensureMysqlPassword(connection, res) {
-  if (String(connection.password || '').length > 0) return true;
+  if (hasMysqlPassword(connection)) return true;
   res.status(400).json({ ok: false, error: 'Source MySQL password is required' });
   return false;
 }
 
+function hasPostgresCredentials(connection) {
+  const connectionString = String(connection?.connectionString || '').trim();
+  if (connectionString && connectionString !== MASKED_CONNECTION_STRING) return true;
+  if (String(connection?.pooler?.password || '').length > 0) return true;
+  return false;
+}
+
 function ensurePostgresPassword(connection, res) {
-  if (String(connection.connectionString || '').trim()) return true;
-  if (String(connection.pooler?.password || '').length > 0) return true;
+  if (hasPostgresCredentials(connection)) return true;
   res.status(400).json({ ok: false, error: 'Target PostgreSQL password or connection string is required' });
   return false;
 }
@@ -273,7 +284,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         sourceConnection: { ...payload.sourceConnection, password: undefined, ref: payload.sourceConnection.ref || summarizeConnectionRefs({ sourceConnection: payload.sourceConnection }).source || payload.sourceConnection.database },
-        targetConnection: { ...payload.targetConnection, connectionString: payload.targetConnection.connectionString ? '[provided]' : '', pooler: payload.targetConnection.pooler ? { ...payload.targetConnection.pooler, password: undefined } : undefined, ref: payload.targetConnection.ref || summarizeConnectionRefs({ targetConnection: payload.targetConnection }).target || payload.targetConnection.pooler?.database || 'target' },
+        targetConnection: { ...payload.targetConnection, connectionString: '', pooler: payload.targetConnection.pooler ? { ...payload.targetConnection.pooler, password: undefined } : undefined, ref: payload.targetConnection.ref || summarizeConnectionRefs({ targetConnection: payload.targetConnection }).target || payload.targetConnection.pooler?.database || 'target' },
         sourceSchema: payload.sourceSchema,
         targetSchema: payload.targetSchema,
         includeViews: payload.includeViews,
@@ -429,11 +440,15 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     }
   });
 
-  router.get('/runs/:id/cutover-readiness', async (req, res) => {
+  async function buildCutoverReadinessPayload(req, res) {
     const run = await persistence.getRun(req.params.id);
     if (!run) return res.status(404).json({ ok: false, error: 'Run not found' });
     const project = await persistence.getProject(run.projectId);
     if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const runtime = resolveRuntimeConnections(project || {}, {
+      sourceConnection: req.body?.sourceConnection,
+      targetConnection: req.body?.targetConnection,
+    });
 
     const schemaPlan = buildProvisioningPlan({
       sourceCatalog: project.sourceCatalog,
@@ -450,16 +465,23 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
       report: verificationReport,
       pendingSchemaActions: schemaPlan.tables.filter((table) => ['create_table', 'alter_table_add_columns'].includes(table.action)),
     };
-    const runtime = resolveRuntimeConnections(project || {}, {});
     const runReport = await validateRunReport({
       run,
       persistence,
       project,
-      countSourceRows: project ? async (tableName) => countMysqlRows(runtime.sourceConnection || project.sourceConnection, project.sourceSchema, tableName) : undefined,
-      countTargetRows: project ? async (tableName) => countPostgresRows(runtime.targetConnection || project.targetConnection, project.targetSchema, tableName) : undefined,
+      countSourceRows: project && hasMysqlPassword(runtime.sourceConnection) ? async (tableName) => countMysqlRows(runtime.sourceConnection, project.sourceSchema, tableName) : undefined,
+      countTargetRows: project && hasPostgresCredentials(runtime.targetConnection) ? async (tableName) => countPostgresRows(runtime.targetConnection, project.targetSchema, tableName) : undefined,
     });
     const cutover = buildCutoverReadinessReport({ verification, runReport, project });
-    res.json({ ok: true, cutover });
+    return res.json({ ok: true, cutover });
+  }
+
+  router.get('/runs/:id/cutover-readiness', async (req, res) => {
+    return buildCutoverReadinessPayload(req, res);
+  });
+
+  router.post('/runs/:id/cutover-readiness', async (req, res) => {
+    return buildCutoverReadinessPayload(req, res);
   });
 
   router.post('/projects/:id/dry-run', async (req, res) => {
@@ -563,9 +585,16 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     if (!run) return res.status(404).json({ ok: false, error: 'Run not found' });
     const project = await persistence.getProject(run.projectId);
     if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
+    if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
+    if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
     res.json({ ok: true, runId: run.id, status: 'resume-scheduled' });
     setImmediate(async () => {
-      await executionEngine.resumeRun({ runId: run.id, project, publish(event, data) { publishRunEvent(run.id, event, data); } });
+      await executionEngine.resumeRun({
+        runId: run.id,
+        project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
+        publish(event, data) { publishRunEvent(run.id, event, data); },
+      });
     });
   });
 
@@ -575,6 +604,9 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     const failedTables = (run.tableStatuses || []).filter((table) => table.status === 'error').map((table) => table.tableName);
     const project = await persistence.getProject(run.projectId);
     if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
+    if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
+    if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
     const rerunId = makeId('run');
     await persistence.saveRun({
       id: rerunId,
@@ -598,7 +630,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     setImmediate(async () => {
       await executionEngine.executeRun({
         runId: rerunId,
-        project,
+        project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
         options: { mode: 'selected', selectedTables: failedTables, dryRun: false, errorPolicy: run.errorPolicy || 'fail-fast' },
         publish(event, data) {
           publishRunEvent(rerunId, event, data);
@@ -618,19 +650,30 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     res.json({ ok: true, run });
   });
 
-  router.get('/runs/:id/report', async (req, res) => {
+  async function buildRunReportPayload(req, res) {
     const run = await persistence.getRun(req.params.id);
     if (!run) return res.status(404).json({ ok: false, error: 'Run not found' });
     const project = await persistence.getProject(run.projectId);
-    const runtime = resolveRuntimeConnections(project || {}, {});
+    const runtime = resolveRuntimeConnections(project || {}, {
+      sourceConnection: req.body?.sourceConnection,
+      targetConnection: req.body?.targetConnection,
+    });
     const report = await validateRunReport({
       run,
       persistence,
       project,
-      countSourceRows: project ? async (tableName) => countMysqlRows(runtime.sourceConnection || project.sourceConnection, project.sourceSchema, tableName) : undefined,
-      countTargetRows: project ? async (tableName) => countPostgresRows(runtime.targetConnection || project.targetConnection, project.targetSchema, tableName) : undefined,
+      countSourceRows: project && hasMysqlPassword(runtime.sourceConnection) ? async (tableName) => countMysqlRows(runtime.sourceConnection, project.sourceSchema, tableName) : undefined,
+      countTargetRows: project && hasPostgresCredentials(runtime.targetConnection) ? async (tableName) => countPostgresRows(runtime.targetConnection, project.targetSchema, tableName) : undefined,
     });
-    res.json({ ok: true, report });
+    return res.json({ ok: true, report });
+  }
+
+  router.get('/runs/:id/report', async (req, res) => {
+    return buildRunReportPayload(req, res);
+  });
+
+  router.post('/runs/:id/report', async (req, res) => {
+    return buildRunReportPayload(req, res);
   });
 
   router.get('/runs/:id/errors', async (req, res) => {

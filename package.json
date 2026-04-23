@@ -19,7 +19,11 @@
     "dev:mysql-tool": "npm --prefix ./mysql-tool run dev",
     "start:mysql-tool": "npm --prefix ./mysql-tool run start",
     "build:mysql-tool": "npm --prefix ./mysql-tool run build",
-    "preview:mysql-tool": "npm --prefix ./mysql-tool run preview"
+    "preview:mysql-tool": "npm --prefix ./mysql-tool run preview",
+    "dev:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run dev",
+    "start:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run start",
+    "build:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run build",
+    "preview:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run preview"
   },
   "dependencies": {
     "archiver": "^7.0.1",

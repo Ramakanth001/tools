@@ -54,11 +54,10 @@ Useful URLs:
 - Standalone API health: `http://localhost:8789/api/health`
 
 Notes:
-- This tool currently runs as a standalone app.
-- It is not yet listed inside the shared all-tools host routes in the current setup.
+- This tool can run standalone or inside the shared all-tools host.
 
 
-4) all-tools host (pg-backup + mysql-tool together)
+4) all-tools host (pg-backup + mysql-tool + mysql-pg-migrate together)
 
 From repo root:
 - Dev: `npm run dev:all`
@@ -77,6 +76,7 @@ Default ports:
 Routes inside all-tools host:
 - pg-backup: `http://localhost:5173/tools/pg-backup`
 - mysql-tool: `http://localhost:5173/tools/mysql-tool`
+- mysql-pg-migrate: `http://localhost:5173/tools/mysql-pg-migrate`
 
 
 Notes

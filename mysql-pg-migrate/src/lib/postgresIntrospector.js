@@ -3,8 +3,11 @@ const { Client, Pool } = requireToolDep('pg');
 const crypto = require('node:crypto');
 const { buildInsertSql, qualifyTable, buildCreateTableSql, buildAlterTableAddColumnsSql, buildAlterTableAddConstraintSql, quoteIdentifier } = require('./sql');
 
+const MASKED_CONNECTION_STRING = '[provided]';
+
 function buildPostgresConnectionString(connection) {
-  if (String(connection.connectionString || '').trim()) return String(connection.connectionString || '').trim();
+  const inlineConnectionString = String(connection.connectionString || '').trim();
+  if (inlineConnectionString && inlineConnectionString !== MASKED_CONNECTION_STRING) return inlineConnectionString;
   const pooler = connection.pooler || {};
   const password = String(pooler.password || '');
   return `postgresql://${encodeURIComponent(pooler.user)}:${encodeURIComponent(password)}@${pooler.host}:${Number(pooler.port || 5432)}/${encodeURIComponent(pooler.database)}?sslmode=${encodeURIComponent(pooler.sslmode || 'require')}`;

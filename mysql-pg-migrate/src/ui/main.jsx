@@ -9,6 +9,15 @@ const DEFAULT_RUNTIME = {
   storagePrefix: 'mysql-pg-migrate',
 };
 
+const STANDALONE_RUNTIME = {
+  toolId: 'mysql-pg-migrate',
+  apiBasePath: '/api',
+  homePath: '/',
+  storagePrefix: 'mysql-pg-migrate.standalone',
+};
+
+const MASKED_CONNECTION_STRING = '[provided]';
+
 let runtime = { ...DEFAULT_RUNTIME };
 
 function setRuntime(next = {}) {
@@ -173,6 +182,63 @@ function defaultContextState() {
   };
 }
 
+function isUsableConnectionString(value) {
+  const input = String(value || '').trim();
+  return Boolean(input) && input !== MASKED_CONNECTION_STRING;
+}
+
+function mergeSourceConnection(saved = {}, current = {}) {
+  const merged = {
+    ...defaultSourceConnection(),
+    ...current,
+    ...saved,
+  };
+  merged.password = String(current.password || '');
+  merged.connectionString = isUsableConnectionString(current.connectionString) ? String(current.connectionString) : '';
+  merged.consistentRead = {
+    ...defaultSourceConnection().consistentRead,
+    ...(current.consistentRead || {}),
+    ...(saved.consistentRead || {}),
+  };
+  return merged;
+}
+
+function mergeTargetConnection(saved = {}, current = {}) {
+  const merged = {
+    ...defaultTargetConnection(),
+    ...current,
+    ...saved,
+    pooler: {
+      ...defaultTargetConnection().pooler,
+      ...(current.pooler || {}),
+      ...(saved.pooler || {}),
+    },
+  };
+  merged.connectionString = isUsableConnectionString(current.connectionString) ? String(current.connectionString) : '';
+  merged.pooler.password = String(current.pooler?.password || '');
+  return merged;
+}
+
+function mergeWorkspaceWithProject(project, currentWorkspace) {
+  if (!project) return currentWorkspace;
+  return {
+    ...currentWorkspace,
+    name: project.name || currentWorkspace.name,
+    sourceConnection: mergeSourceConnection(project.sourceConnection || {}, currentWorkspace.sourceConnection || {}),
+    targetConnection: mergeTargetConnection(project.targetConnection || {}, currentWorkspace.targetConnection || {}),
+    sourceSchema: project.sourceSchema || currentWorkspace.sourceSchema || '',
+    targetSchema: project.targetSchema || currentWorkspace.targetSchema || 'public',
+    includeViews: project.includeViews ?? currentWorkspace.includeViews ?? false,
+  };
+}
+
+function buildRuntimeOverrides(workspace, { includeSource = true, includeTarget = true } = {}) {
+  const body = {};
+  if (includeSource) body.sourceConnection = workspace?.sourceConnection || defaultSourceConnection();
+  if (includeTarget) body.targetConnection = workspace?.targetConnection || defaultTargetConnection();
+  return body;
+}
+
 const AppContext = createContext(null);
 
 function AppProvider({ children }) {
@@ -236,6 +302,7 @@ function AppProvider({ children }) {
     const resp = await api(`/projects/${encodeURIComponent(projectId)}`);
     setCurrentProject(resp.project || null);
     setSelectedProjectId(resp.project?.id || '');
+    setWorkspace((curr) => mergeWorkspaceWithProject(resp.project || null, curr));
     return resp.project || null;
   }
 
@@ -252,7 +319,11 @@ function AppProvider({ children }) {
 
   async function loadRunReport(runId) {
     if (!runId) return null;
-    const resp = await api(`/runs/${encodeURIComponent(runId)}/report`);
+    const resp = await api(`/runs/${encodeURIComponent(runId)}/report`, {
+      method: 'POST',
+      body: buildRuntimeOverrides(workspace),
+      timeoutMs: 120000,
+    });
     setRunReport(resp.report || null);
     return resp.report || null;
   }
@@ -506,7 +577,7 @@ function WorkspaceScreen() {
 }
 
 function MappingScreen() {
-  const { currentProject, setCurrentProject, selectedProjectId, projects, setSelectedProjectId, refreshProjects, loadProject, withBusy, busy, setMessage, transformCatalog } = useApp();
+  const { workspace, currentProject, setCurrentProject, selectedProjectId, projects, setSelectedProjectId, refreshProjects, loadProject, withBusy, busy, setMessage, transformCatalog } = useApp();
   const [schemaPlan, setSchemaPlan] = useState(null);
   const [manualAdd, setManualAdd] = useState({ sourceTable: '', targetTable: '', mode: 'existing' });
 
@@ -548,7 +619,7 @@ function MappingScreen() {
     await withBusy('provision-target', async () => {
       const resp = await api(`/projects/${encodeURIComponent(currentProject.id)}/provision-target`, {
         method: 'POST',
-        body: { targetConnection: currentProject.targetConnection },
+        body: { targetConnection: workspace.targetConnection },
         timeoutMs: 120000,
       });
       setSchemaPlan(resp.plan || null);
@@ -868,7 +939,7 @@ function MappingScreen() {
 }
 
 function ValidateRunScreen() {
-  const { currentProject, currentRun, preflightReport, setPreflightReport, dryRunPreview, setDryRunPreview, runReport, cutoverReport, setCutoverReport, selectedProjectId, selectedRunId, setSelectedRunId, runs, loadRun, loadRunReport, refreshRuns, streamRun, logs, setLogs, withBusy, busy, setMessage } = useApp();
+  const { workspace, currentProject, currentRun, preflightReport, setPreflightReport, dryRunPreview, setDryRunPreview, runReport, cutoverReport, setCutoverReport, selectedProjectId, selectedRunId, setSelectedRunId, runs, loadRun, loadRunReport, refreshRuns, streamRun, logs, setLogs, withBusy, busy, setMessage } = useApp();
   const [runErrors, setRunErrors] = useState([]);
   const [replayPlan, setReplayPlan] = useState(null);
   const [replayImportJson, setReplayImportJson] = useState('');
@@ -890,7 +961,7 @@ function ValidateRunScreen() {
   async function runPreflight() {
     if (!selectedProjectId) return;
     await withBusy('preflight', async () => {
-      const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/preflight`, { method: 'POST', body: { sourceConnection: currentProject?.sourceConnection }, timeoutMs: 120000 });
+      const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/preflight`, { method: 'POST', body: buildRuntimeOverrides(workspace, { includeTarget: false }), timeoutMs: 120000 });
       setPreflightReport(resp.report || null);
       setMessage('Preflight analysis completed');
     });
@@ -899,7 +970,7 @@ function ValidateRunScreen() {
   async function runDryRun() {
     if (!selectedProjectId) return;
     await withBusy('dry-run', async () => {
-      const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/dry-run`, { method: 'POST', body: { sourceConnection: currentProject?.sourceConnection }, timeoutMs: 120000 });
+      const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/dry-run`, { method: 'POST', body: buildRuntimeOverrides(workspace, { includeTarget: false }), timeoutMs: 120000 });
       setDryRunPreview(resp.preview || null);
       setMessage('Dry run preview generated');
     });
@@ -908,7 +979,7 @@ function ValidateRunScreen() {
   async function verifyProject() {
     if (!selectedProjectId) return;
     await withBusy('verify', async () => {
-      const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/verify`, { method: 'POST', body: { sourceConnection: currentProject?.sourceConnection }, timeoutMs: 120000 });
+      const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/verify`, { method: 'POST', body: buildRuntimeOverrides(workspace, { includeTarget: false }), timeoutMs: 120000 });
       setVerification(resp.verification || null);
       setExecuteOptions((curr) => ({ ...curr, verificationFingerprint: resp.verification?.verificationFingerprint || '' }));
       setMessage(resp.verification?.readyToLoad ? 'Verification passed — ready to load' : 'Verification completed with issues to review');
@@ -917,7 +988,11 @@ function ValidateRunScreen() {
 
   async function loadCutoverReadiness(runId) {
     if (!runId) return;
-    const resp = await api(`/runs/${encodeURIComponent(runId)}/cutover-readiness`);
+    const resp = await api(`/runs/${encodeURIComponent(runId)}/cutover-readiness`, {
+      method: 'POST',
+      body: buildRuntimeOverrides(workspace),
+      timeoutMs: 120000,
+    });
     setCutoverReport(resp.cutover || null);
   }
 
@@ -952,6 +1027,8 @@ function ValidateRunScreen() {
           cutoverMode: executeOptions.cutoverMode,
           watermarkColumn: executeOptions.watermarkColumn || undefined,
           verificationFingerprint: executeOptions.verificationFingerprint || undefined,
+          sourceConnection: workspace.sourceConnection,
+          targetConnection: workspace.targetConnection,
         },
         timeoutMs: 120000,
       });
@@ -966,7 +1043,11 @@ function ValidateRunScreen() {
   async function resumeRun() {
     if (!selectedRunId) return;
     await withBusy('resume-run', async () => {
-      await api(`/runs/${encodeURIComponent(selectedRunId)}/resume`, { method: 'POST', timeoutMs: 120000 });
+      await api(`/runs/${encodeURIComponent(selectedRunId)}/resume`, {
+        method: 'POST',
+        body: buildRuntimeOverrides(workspace),
+        timeoutMs: 120000,
+      });
       streamRun(selectedRunId);
       setMessage(`Resume scheduled for ${selectedRunId}`);
     });
@@ -975,7 +1056,11 @@ function ValidateRunScreen() {
   async function rerunFailed() {
     if (!selectedRunId) return;
     await withBusy('rerun-failed', async () => {
-      const resp = await api(`/runs/${encodeURIComponent(selectedRunId)}/rerun-failed`, { method: 'POST', timeoutMs: 120000 });
+      const resp = await api(`/runs/${encodeURIComponent(selectedRunId)}/rerun-failed`, {
+        method: 'POST',
+        body: buildRuntimeOverrides(workspace),
+        timeoutMs: 120000,
+      });
       setSelectedRunId(resp.runId || '');
       await refreshRuns();
       await loadRun(resp.runId);
@@ -1000,7 +1085,11 @@ function ValidateRunScreen() {
   async function importReplayCorrections() {
     if (!selectedRunId || !replayImportJson.trim()) return;
     const parsed = JSON.parse(replayImportJson);
-    const resp = await api(`/runs/${encodeURIComponent(selectedRunId)}/replay-import`, { method: 'POST', body: parsed, timeoutMs: 120000 });
+    const resp = await api(`/runs/${encodeURIComponent(selectedRunId)}/replay-import`, {
+      method: 'POST',
+      body: { ...parsed, targetConnection: workspace.targetConnection },
+      timeoutMs: 120000,
+    });
     setReplayImportJson('');
     const replayHistory = await api(`/runs/${encodeURIComponent(selectedRunId)}/replays`).catch(() => ({ replays: [] }));
     setReplays(replayHistory.replays || []);
@@ -1430,12 +1519,21 @@ function App() {
   );
 }
 
-setRuntime();
-
-createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
+export default function MysqlPgMigrateTool({ runtime: toolRuntime }) {
+  setRuntime(toolRuntime || STANDALONE_RUNTIME);
+  return (
     <AppProvider>
       <App />
     </AppProvider>
-  </React.StrictMode>
-);
+  );
+}
+
+const standaloneRoot = typeof document !== 'undefined' ? document.getElementById('root') : null;
+
+if (standaloneRoot?.dataset?.tool === 'mysql-pg-migrate') {
+  createRoot(standaloneRoot).render(
+    <React.StrictMode>
+      <MysqlPgMigrateTool runtime={STANDALONE_RUNTIME} />
+    </React.StrictMode>
+  );
+}
