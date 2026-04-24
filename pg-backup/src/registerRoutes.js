@@ -105,7 +105,15 @@ function withSslModeRequireIfMissing(cs) {
   if (!s) return s;
   if (!s.startsWith('postgres://') && !s.startsWith('postgresql://')) return s;
   if (s.includes('sslmode=')) return s;
-  return s.includes('?') ? `${s}&sslmode=require` : `${s}?sslmode=require`;
+  try {
+    const url = new URL(s);
+    const host = String(url.hostname || '').trim().toLowerCase();
+    const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    const sslmode = isLocalHost ? 'disable' : 'require';
+    return s.includes('?') ? `${s}&sslmode=${sslmode}` : `${s}?sslmode=${sslmode}`;
+  } catch {
+    return s.includes('?') ? `${s}&sslmode=require` : `${s}?sslmode=require`;
+  }
 }
 
 function buildPoolerConnectionString(pooler) {

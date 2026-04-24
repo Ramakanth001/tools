@@ -1,5 +1,16 @@
 [
   {
+    "id": "p_07810a726f182_19dc0871047",
+    "name": "local-dev",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "shop_pg_user",
+    "database": "shop_pg",
+    "sslmode": "disable",
+    "connectionString": "",
+    "createdAt": "2026-04-24T17:26:10.247Z"
+  },
+  {
     "id": "p_1472b2fb07be1_19cb2025eaa",
     "name": "Supabase-bkp",
     "host": "aws-1-ap-south-1.pooler.supabase.com",

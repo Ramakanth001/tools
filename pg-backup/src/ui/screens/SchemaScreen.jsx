@@ -23,6 +23,26 @@ import { chooseLayoutMode, computeElkPositions, computeGridPositions, styleModeF
 import TableNode from '../schema/nodes/TableNode.jsx';
 import { useActiveConnection } from '../state/ActiveConnectionContext.jsx';
 
+function buildEffectiveConnectionString(active, schemaPassword = '') {
+  const rawConnectionString = String(active?.connectionString || '').trim();
+  if (rawConnectionString) {
+    if (rawConnectionString.includes('sslmode=')) return rawConnectionString;
+    const isLocal = rawConnectionString.includes('@127.0.0.1:') || rawConnectionString.includes('@localhost:') || rawConnectionString.includes('@[::1]');
+    return rawConnectionString.includes('?')
+      ? `${rawConnectionString}&sslmode=${isLocal ? 'disable' : 'require'}`
+      : `${rawConnectionString}?sslmode=${isLocal ? 'disable' : 'require'}`;
+  }
+
+  const host = String(active?.pooler?.host || '').trim();
+  const port = Number(active?.pooler?.port || 5432);
+  const user = String(active?.pooler?.user || '').trim();
+  const database = String(active?.pooler?.database || '').trim();
+  const password = String(active?.pooler?.password || schemaPassword || '');
+  const sslmode = String(active?.pooler?.sslmode || '').trim() || (host === '127.0.0.1' || host === 'localhost' || host === '::1' ? 'disable' : 'require');
+  if (!host || !user || !database) return '';
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=${encodeURIComponent(sslmode)}`;
+}
+
 function groupBySchema(tables) {
   const m = new Map();
   for (const t of tables) {
@@ -100,8 +120,9 @@ export default function SchemaScreen() {
   const [functionsExpanded, setFunctionsExpanded] = useState(false);
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [flowViewportSize, setFlowViewportSize] = useState({ w: 0, h: 0 });
-  const [minZoomLevel, setMinZoomLevel] = useState(0.1);
-  const [translateExtent, setTranslateExtent] = useState([[-100000, -100000], [100000, 100000]]);
+  const [minZoomLevel, setMinZoomLevel] = useState(0.02);
+  const [translateExtent, setTranslateExtent] = useState([[-250000, -250000], [250000, 250000]]);
+  const [layoutPreference, setLayoutPreference] = useState('fast');
 
   const schemas = useMemo(() => {
     const tables = snapshot?.tables || [];
@@ -159,10 +180,8 @@ export default function SchemaScreen() {
 
   useEffect(() => {
     if (sourceMode !== 'db') return;
-    if (!active.connectionString) {
-      const pw = active.pooler?.password || schemaPassword;
-      if (!pw) return;
-    }
+    const effectiveConnectionString = buildEffectiveConnectionString(active, schemaPassword);
+    if (!effectiveConnectionString) return;
 
     (async () => {
       try {
@@ -170,10 +189,8 @@ export default function SchemaScreen() {
           method: 'POST',
           timeoutMs: 30_000,
           body: {
-            connectionString: active.connectionString || '',
-            pooler: active.connectionString
-              ? undefined
-              : { ...(active.pooler || {}), password: active.pooler?.password || schemaPassword || '' },
+            connectionString: effectiveConnectionString,
+            pooler: undefined,
             options: {},
             persist: false,
           },
@@ -184,7 +201,7 @@ export default function SchemaScreen() {
         // ignore
       }
     })();
-  }, [sourceMode, active.connectionString, active.pooler?.host, active.pooler?.port, active.pooler?.user, active.pooler?.database, active.pooler?.password, schemaPassword]);
+  }, [sourceMode, active, schemaPassword]);
 
   function applyProfile(p) {
     if (!p) return;
@@ -239,7 +256,12 @@ export default function SchemaScreen() {
         applyProfile(first);
       }
     } catch (e) {
-      setError(e?.message || String(e));
+      const message = e?.message || String(e);
+      if (message === 'WebWorkerUnavailable') {
+        setLayoutNote('Fast layout');
+        return;
+      }
+      setError((curr) => curr || message);
     }
   }
 
@@ -287,7 +309,7 @@ export default function SchemaScreen() {
       return;
     }
 
-    const mode = chooseLayoutMode(safeNodes.length);
+    const mode = layoutPreference === 'better' ? chooseLayoutMode(safeNodes.length) : 'perf';
     setEdgeStyleMode(styleModeFor(safeNodes.length));
     const gridNodes = normalizeNodePositions(computeGridPositions(safeNodes));
     const gridEdges = mode === 'perf' ? simplifyEdgesForPerf(safeEdges) : safeEdges;
@@ -298,6 +320,7 @@ export default function SchemaScreen() {
     setNodes(gridNodes);
     if (fit) requestFitView('grid');
 
+    if (layoutPreference !== 'better') return;
     if (mode === 'search') return;
 
     const tooBig = safeNodes.length > 180 || safeEdges.length > 420;
@@ -343,12 +366,17 @@ export default function SchemaScreen() {
     } catch (e) {
       if (activeLayoutJobRef.current !== jobId) return;
       setLayouting(false);
-      if (e?.code === 'LAYOUT_BUDGET_EXCEEDED' || e?.message === 'LAYOUT_BUDGET_EXCEEDED') {
+      const message = e?.message || String(e);
+      if (e?.code === 'LAYOUT_BUDGET_EXCEEDED' || message === 'LAYOUT_BUDGET_EXCEEDED') {
+        setLayoutNote('Fast layout');
+        return;
+      }
+      if (message === 'WebWorkerUnavailable') {
         setLayoutNote('Fast layout');
         return;
       }
       setLayoutNote('Fast layout');
-      setError((curr) => curr || (e?.message || String(e)));
+      setError((curr) => curr || message);
     }
   }
 
@@ -609,14 +637,14 @@ export default function SchemaScreen() {
         setFullSnapshot(parsed);
         await applySnapshotToGraph(parsed, { fit: true });
       } else {
+        const effectiveConnectionString = buildEffectiveConnectionString(active, schemaPassword);
+        if (!effectiveConnectionString) throw new Error('Missing connection details');
         const resp = await api('/schema/snapshot', {
           method: 'POST',
           timeoutMs: 60_000,
           body: {
-            connectionString: active.connectionString || '',
-            pooler: active.connectionString
-              ? undefined
-              : { ...(active.pooler || {}), password: active.pooler?.password || schemaPassword || '' },
+            connectionString: effectiveConnectionString,
+            pooler: undefined,
             options: {
               schemaInclude: schemaFilter === '__all__' ? '' : schemaFilter,
             },
@@ -811,15 +839,11 @@ export default function SchemaScreen() {
     if (!graphBounds) return;
     if (!flowViewportSize.w || !flowViewportSize.h) return;
 
-    const verticalGapPx = 18;
-    const visibleHeight = Math.max(1, flowViewportSize.h - verticalGapPx * 2);
-    const heightZoom = visibleHeight / Math.max(1, graphBounds.height);
-    const nextMinZoom = Math.max(0.02, Math.min(2, heightZoom));
-
-    setMinZoomLevel((curr) => (Math.abs(curr - nextMinZoom) < 0.0001 ? curr : nextMinZoom));
+    const pad = 2000;
+    setMinZoomLevel(0.02);
     setTranslateExtent([
-      [graphBounds.minX, graphBounds.minY],
-      [graphBounds.maxX, graphBounds.maxY],
+      [graphBounds.minX - pad, graphBounds.minY - pad],
+      [graphBounds.maxX + pad, graphBounds.maxY + pad],
     ]);
   }, [graphBounds, flowViewportSize.w, flowViewportSize.h]);
 
@@ -907,7 +931,7 @@ export default function SchemaScreen() {
 
                 {!active.connectionString ? (
                   <div className="field full">
-                    <div className="field-label">Pooler password</div>
+                    <div className="field-label">Database password</div>
                     <input type="password" value={schemaPassword} onChange={(e) => setSchemaPassword(e.target.value)} placeholder="Enter password to load schema…" />
                     <div className="field-hint">Password is kept in memory only (not saved to disk / profiles).</div>
                   </div>
@@ -920,8 +944,8 @@ export default function SchemaScreen() {
 
               {!active.connectionString && !schemaPassword ? (
                 <div className="alert warn" style={{ marginTop: 10 }}>
-                  <div style={{ fontWeight: 800 }}>Pooler password required</div>
-                  <div className="hint" style={{ marginTop: 6 }}>Enter the pooler password above (or paste a full connection string in Run, then return).</div>
+                  <div style={{ fontWeight: 800 }}>Database password required</div>
+                  <div className="hint" style={{ marginTop: 6 }}>Enter the database password above (or paste a full connection string in Run, then return).</div>
                 </div>
               ) : null}
             </div>
@@ -963,6 +987,14 @@ export default function SchemaScreen() {
                       <option key={s} value={s}>{s}</option>
                     ))}
                 </select>
+              </div>
+              <div className="field full">
+                <div className="field-label">Layout mode</div>
+                <select value={layoutPreference} onChange={(e) => setLayoutPreference(e.target.value)}>
+                  <option value="fast">Fast layout</option>
+                  <option value="better">Better layout</option>
+                </select>
+                <div className="field-hint">Fast layout keeps the graph immediately usable. Better layout tries the richer layout path when available.</div>
               </div>
             </div>
 
@@ -1015,7 +1047,7 @@ export default function SchemaScreen() {
 
           <div className="section">
             <div className="section-title">Profiles JSON</div>
-            <div className="hint">Paste profiles JSON (connections) here and click “Load profiles”. Password is never stored.</div>
+            <div className="hint">Advanced only. Paste saved profiles JSON here if you want to import connection profiles. Password is never stored.</div>
 
             <div style={{ height: 10 }} />
 
@@ -1023,9 +1055,6 @@ export default function SchemaScreen() {
 
             <div className="toolbar" style={{ marginTop: 10, justifyContent: 'flex-start' }}>
               <button className="btn primary" type="button" onClick={loadProfilesFromJsonTextAndApplyFirst}>Load profiles</button>
-            </div>
-            <div className="field-hint" style={{ marginTop: 8 }}>
-              Stored key: <span className="mono">{getStorageKey('profiles')}</span>
             </div>
           </div>
 
@@ -1248,9 +1277,11 @@ export default function SchemaScreen() {
                   fitView
                   minZoom={minZoomLevel}
                   maxZoom={2}
-                  zoomOnScroll={false}
+                  zoomOnScroll
                   preventScrolling={false}
                   translateExtent={translateExtent}
+                  panOnScroll
+                  panOnDrag
                 >
                   <Background gap={18} size={1} color="rgba(255,255,255,0.06)" />
                   <Controls />
