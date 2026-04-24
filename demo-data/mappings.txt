@@ -1,0 +1,56 @@
+Yes — for the sample migration I created, the mappings can be described at two levels: table mappings and column mappings.
+
+Table mappings:
+- `customers` (MySQL) -> `customers` (PostgreSQL)
+- `products` (MySQL) -> `products` (PostgreSQL)
+- `orders` (MySQL) -> `orders` (PostgreSQL)
+- `order_items` (MySQL) -> `order_items` (PostgreSQL)
+
+Suggested column mappings:
+
+`customers`
+- `id` -> `id`
+- `name` -> `full_name`
+- `email` -> `email`
+- `phone` -> `phone`
+- `city` -> `city`
+- `state_code` -> `state_code`
+- `loyalty_tier` -> `loyalty_tier`
+- `created_at` -> `created_at`
+
+`products`
+- `id` -> `id`
+- `sku` -> `sku`
+- `name` -> `product_name`
+- `category` -> `category`
+- `price` -> `price`
+- `stock_qty` -> `stock_qty`
+- `created_at` -> `created_at`
+
+`orders`
+- `id` -> `id`
+- `customer_id` -> `customer_id`
+- `order_number` -> `order_number`
+- `status` -> `status`
+- `total_amount` -> `total_amount`
+- `created_at` -> `created_at`
+
+`order_items`
+- `id` -> `id`
+- `order_id` -> `order_id`
+- `product_id` -> `product_id`
+- `quantity` -> `quantity`
+- `unit_price` -> `unit_price`
+- `line_total` -> `line_total`
+
+The two important manual mappings to watch are:
+- `customers.name` -> `customers.full_name`
+- `products.name` -> `products.product_name`
+
+Type-wise, these are also good expected matches:
+- MySQL `INT` -> PostgreSQL `INTEGER`
+- MySQL `VARCHAR(...)` -> PostgreSQL `TEXT` or `VARCHAR`
+- MySQL `DATETIME` -> PostgreSQL `TIMESTAMP`
+- MySQL `DECIMAL(10,2)` / `DECIMAL(12,2)` -> PostgreSQL `NUMERIC(10,2)` / `NUMERIC(12,2)`
+
+In `mysql-pg-migrate`, these are the mappings I’d expect auto-mapping to get mostly right, with the two `name` fields being the most likely ones you may need to fix manually in the Mapping tab.
