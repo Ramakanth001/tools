@@ -122,7 +122,11 @@ function buildPoolerConnectionString(pooler) {
   const user = String(pooler.user || '').trim();
   const database = String(pooler.database || '').trim();
   const password = String(pooler.password || '');
-  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=require`;
+  const explicitSslMode = String(pooler.sslmode || '').trim();
+  const normalizedHost = host.toLowerCase();
+  const isLocalHost = normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '::1';
+  const sslmode = explicitSslMode || (isLocalHost ? 'disable' : 'require');
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}?sslmode=${encodeURIComponent(sslmode)}`;
 }
 
 const TestConnectionRequest = z.object({

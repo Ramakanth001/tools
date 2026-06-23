@@ -2,6 +2,8 @@
 
 Web UI and API for planning, validating, provisioning, and executing **MySQL -> PostgreSQL** migrations.
 
+> New here? Start with the full workflow guide: [USAGE.md](./USAGE.md)
+
 This project is no longer just a planner. It already supports:
 
 - MySQL and PostgreSQL connection setup

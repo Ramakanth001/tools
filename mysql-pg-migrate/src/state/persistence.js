@@ -78,6 +78,32 @@ function createPersistence({ rootDir }) {
     async listCheckpoints(runId) {
       return (await listJson(path.join(rootDir, 'checkpoints'))).filter((item) => item.runId === runId);
     },
+    async saveWatermarks(projectId, watermarks) {
+      return writeJson(jsonPath(rootDir, 'watermarks', projectId), {
+        projectId,
+        ...(watermarks || {}),
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    async getWatermarks(projectId) {
+      return readJson(jsonPath(rootDir, 'watermarks', projectId));
+    },
+    async updateTableWatermark(projectId, tableName, patch) {
+      const existing = (await readJson(jsonPath(rootDir, 'watermarks', projectId))) || { projectId, tables: {}, createdAt: new Date().toISOString() };
+      const tables = { ...(existing.tables || {}) };
+      tables[tableName] = {
+        ...(tables[tableName] || {}),
+        ...(patch || {}),
+        updatedAt: new Date().toISOString(),
+      };
+      return writeJson(jsonPath(rootDir, 'watermarks', projectId), { ...existing, projectId, tables, updatedAt: new Date().toISOString() });
+    },
+    async resetTableWatermark(projectId, tableName) {
+      const existing = (await readJson(jsonPath(rootDir, 'watermarks', projectId))) || { projectId, tables: {}, createdAt: new Date().toISOString() };
+      const tables = { ...(existing.tables || {}) };
+      delete tables[tableName];
+      return writeJson(jsonPath(rootDir, 'watermarks', projectId), { ...existing, projectId, tables, updatedAt: new Date().toISOString() });
+    },
   };
 }
 

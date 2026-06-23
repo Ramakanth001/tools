@@ -162,6 +162,7 @@ function transformRow({ row, tableMapping }) {
   const output = {};
   for (const mapping of tableMapping.columnMappings || []) {
     if (mapping.enabled === false) continue;
+    if (mapping.targetColumnMode === 'ignore') continue;
     if (!mapping.targetColumn) continue;
     const rawValue = row?.[mapping.sourceColumn];
     output[mapping.targetColumn] = applyTransform({ value: rawValue, transform: mapping.transform, sourceRow: row });

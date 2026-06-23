@@ -11,7 +11,6 @@ const { z } = requireToolDep('zod');
 const { createPersistence } = require('./state/persistence');
 const { introspectMysqlSchema, listMysqlSchemas, sampleMysqlTableRows, countMysqlRows } = require('./lib/mysqlIntrospector');
 const { introspectPostgresSchema, listPostgresSchemas, samplePostgresTableRows, buildProvisioningPlan, createTargetTables, countPostgresRows } = require('./lib/postgresIntrospector');
-const { buildAutoMapping } = require('./lib/autoMapping');
 const { analyzePreflight, buildDryRunPreview, validateRunReport } = require('./lib/preflight');
 const { createExecutionEngine } = require('./lib/executionEngine');
 const { listTransformPresets } = require('./lib/transformCatalog');
@@ -86,7 +85,7 @@ const PostgresConnectionSchema = z.object({
     user: z.string().min(1),
     database: z.string().min(1),
     password: z.string().optional(),
-    sslmode: z.string().default('require'),
+    sslmode: z.enum(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full', 'no-verify']).default('prefer'),
   }).optional(),
 });
 
@@ -114,10 +113,35 @@ const RowFilterSchema = z.object({
   config: z.record(z.any()).default({}),
 });
 
+const SourceFilterSchema = z.object({
+  enabled: z.boolean().default(false),
+  column: z.string().default(''),
+  operator: z.enum(['=', '!=', '>', '>=', '<', '<=', 'between', 'like', 'is_null', 'is_not_null']).default('>='),
+  value: z.any().optional(),
+  valueTo: z.any().optional(),
+});
+
+const LoadStrategySchema = z.object({
+  mode: z.enum(['historical_full', 'historical_filtered', 'incremental_watermark', 'historical_then_incremental']).default('historical_full'),
+  historicalFilter: SourceFilterSchema.optional(),
+  watermarkColumn: z.string().optional(),
+  tieBreakerColumn: z.string().optional(),
+  baselineWatermark: z.any().optional(),
+  baselineTieBreaker: z.any().optional(),
+  lookbackAmount: z.coerce.number().nonnegative().default(0).optional(),
+  lookbackUnit: z.enum(['minutes', 'hours', 'days']).default('minutes').optional(),
+  persistWatermark: z.boolean().default(true).optional(),
+  deleteHandling: z.object({
+    mode: z.enum(['none', 'soft_delete']).default('none'),
+    column: z.string().optional(),
+  }).optional(),
+}).optional();
+
 const ColumnMappingSchema = z.object({
   id: z.string(),
   sourceColumn: z.string(),
   targetColumn: z.string().nullable().optional(),
+  targetColumnMode: z.enum(['existing', 'create_new', 'ignore']).optional(),
   transform: TransformRuleSchema.default({ type: 'direct', config: {} }),
   enabled: z.boolean().default(true),
   notes: z.string().optional(),
@@ -134,6 +158,7 @@ const TableMappingSchema = z.object({
   conflictKeys: z.array(z.string()).default([]),
   chunkSize: z.coerce.number().int().positive().default(500),
   watermarkColumn: z.string().optional(),
+  loadStrategy: LoadStrategySchema,
   rowFilter: RowFilterSchema.optional(),
   writeMode: z.enum(['append', 'truncate', 'upsert']).default('append'),
   order: z.coerce.number().int().default(0),
@@ -152,7 +177,6 @@ const ProjectImportSchema = z.object({
   tableMappings: z.array(TableMappingSchema).default([]),
   sourceCatalog: z.any().optional(),
   targetCatalog: z.any().optional(),
-  autoMappingSummary: z.any().optional(),
   versions: z.array(z.any()).optional(),
   schemaVersion: z.coerce.number().int().default(2),
 });
@@ -161,6 +185,11 @@ const ProjectUpdateSchema = z.object({
   name: z.string().optional(),
   tableMappings: z.array(TableMappingSchema).optional(),
   notes: z.string().optional(),
+  sourceSchema: z.string().optional(),
+  targetSchema: z.string().optional(),
+  includeViews: z.boolean().optional(),
+  sourceCatalog: z.any().optional(),
+  targetCatalog: z.any().optional(),
 });
 
 const ExecuteSchema = z.object({
@@ -172,6 +201,7 @@ const ExecuteSchema = z.object({
   concurrency: z.coerce.number().int().positive().default(1),
   batchSize: z.coerce.number().int().positive().default(1000),
   cdcMode: z.enum(['off', 'snapshot-only', 'watermark']).default('off'),
+  loadPhase: z.enum(['configured', 'historical', 'incremental']).default('configured'),
   cutoverMode: z.enum(['manual', 'guarded']).default('manual'),
   watermarkColumn: z.string().optional(),
   verificationFingerprint: z.string().optional(),
@@ -201,6 +231,39 @@ function hasPostgresCredentials(connection) {
   if (connectionString && connectionString !== MASKED_CONNECTION_STRING) return true;
   if (String(connection?.pooler?.password || '').length > 0) return true;
   return false;
+}
+
+function applyWatermarkLookback(value, strategy = {}) {
+  const amount = Number(strategy.lookbackAmount || 0);
+  if (!amount || value == null) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const unit = strategy.lookbackUnit || 'minutes';
+  const multiplier = unit === 'days' ? 86400000 : unit === 'hours' ? 3600000 : 60000;
+  return new Date(date.getTime() - amount * multiplier).toISOString();
+}
+
+function buildSampleOptionsForMapping(mapping = {}, { watermarks, loadPhase = 'configured' } = {}) {
+  const strategy = mapping.loadStrategy || { mode: 'historical_full' };
+  const state = watermarks?.tables?.[mapping.sourceTable] || {};
+  let effectiveMode = strategy.mode || 'historical_full';
+  if (loadPhase === 'historical') {
+    effectiveMode = strategy.mode === 'historical_filtered' || (strategy.mode === 'historical_then_incremental' && strategy.historicalFilter?.enabled) ? 'historical_filtered' : 'historical_full';
+  } else if (loadPhase === 'incremental') {
+    effectiveMode = 'incremental_watermark';
+  } else if (effectiveMode === 'historical_then_incremental') {
+    effectiveMode = state.lastWatermark != null ? 'incremental_watermark' : (strategy.historicalFilter?.enabled ? 'historical_filtered' : 'historical_full');
+  }
+
+  const sourceFilter = effectiveMode === 'historical_filtered' && strategy.historicalFilter?.enabled ? strategy.historicalFilter : undefined;
+  const watermarkColumn = strategy.watermarkColumn || mapping.watermarkColumn || state.watermarkColumn || null;
+  const tieBreakerColumn = strategy.tieBreakerColumn || state.tieBreakerColumn || null;
+  const watermarkValue = applyWatermarkLookback(state.lastWatermark ?? strategy.baselineWatermark ?? null, strategy);
+  const tieBreakerValue = state.lastTieBreaker ?? strategy.baselineTieBreaker ?? null;
+  const keyset = effectiveMode === 'incremental_watermark' && watermarkColumn
+    ? { watermarkColumn, watermarkValue, tieBreakerColumn, tieBreakerValue }
+    : undefined;
+  return { sourceFilter, keyset };
 }
 
 function ensurePostgresPassword(connection, res) {
@@ -277,7 +340,6 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     try {
       const sourceCatalog = await introspectMysqlSchema(payload.sourceConnection, { schema: payload.sourceSchema, includeViews: payload.includeViews });
       const targetCatalog = await introspectPostgresSchema(payload.targetConnection, { schema: payload.targetSchema, includeViews: payload.includeViews });
-      const suggestions = buildAutoMapping({ sourceCatalog, targetCatalog });
       const project = await persistence.saveProject({
         id: makeId('project'),
         name: payload.name,
@@ -292,9 +354,14 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         targetFingerprint: fingerprint(targetCatalog),
         sourceCatalog,
         targetCatalog,
-        tableMappings: suggestions.tableMappings,
-        autoMappingSummary: suggestions.summary,
-        versions: [{ createdAt: new Date().toISOString(), tableMappings: suggestions.tableMappings }],
+        tableMappings: [],
+        mappingSummary: {
+          mode: 'manual',
+          sourceTables: sourceCatalog.tables?.length || 0,
+          targetTables: targetCatalog.tables?.length || 0,
+          mappedTables: 0,
+        },
+        versions: [{ createdAt: new Date().toISOString(), tableMappings: [] }],
       });
       res.json({ ok: true, project });
     } catch (error) {
@@ -329,15 +396,6 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     };
     const project = await persistence.saveProject(next);
     res.json({ ok: true, project });
-  });
-
-  router.post('/projects/:id/auto-map', async (req, res) => {
-    const project = await persistence.getProject(req.params.id);
-    if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
-    const suggestions = buildAutoMapping({ sourceCatalog: project.sourceCatalog, targetCatalog: project.targetCatalog });
-    const next = { ...project, tableMappings: suggestions.tableMappings, autoMappingSummary: suggestions.summary, updatedAt: new Date().toISOString() };
-    await persistence.saveProject(next);
-    res.json({ ok: true, project: next, suggestions });
   });
 
   router.post('/projects/:id/preflight', async (req, res) => {
@@ -378,6 +436,35 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message || String(error) });
     }
+  });
+
+  router.get('/projects/:id/watermarks', async (req, res) => {
+    const project = await persistence.getProject(req.params.id);
+    if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const watermarks = await persistence.getWatermarks(project.id) || { projectId: project.id, tables: {} };
+    res.json({ ok: true, watermarks });
+  });
+
+  router.put('/projects/:id/watermarks/:tableName', async (req, res) => {
+    const project = await persistence.getProject(req.params.id);
+    if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const tableName = req.params.tableName;
+    const patch = {
+      watermarkColumn: req.body?.watermarkColumn || null,
+      tieBreakerColumn: req.body?.tieBreakerColumn || null,
+      lastWatermark: req.body?.lastWatermark ?? null,
+      lastTieBreaker: req.body?.lastTieBreaker ?? null,
+      manuallySet: true,
+    };
+    const watermarks = await persistence.updateTableWatermark(project.id, tableName, patch);
+    res.json({ ok: true, watermarks });
+  });
+
+  router.delete('/projects/:id/watermarks/:tableName', async (req, res) => {
+    const project = await persistence.getProject(req.params.id);
+    if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const watermarks = await persistence.resetTableWatermark(project.id, req.params.tableName);
+    res.json({ ok: true, watermarks });
   });
 
   router.post('/projects/:id/provision-target', async (req, res) => {
@@ -490,9 +577,17 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     try {
       const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
       if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
+      const watermarks = await persistence.getWatermarks(project.id) || { projectId: project.id, tables: {} };
+      const loadPhase = req.body?.loadPhase || 'configured';
       const preview = await buildDryRunPreview({
         project,
-        sampleSourceRows: async (tableName, limit) => sampleMysqlTableRows(runtime.sourceConnection, project.sourceSchema, tableName, limit || 5),
+        sampleSourceRows: async (tableName, limit, mapping) => sampleMysqlTableRows(
+          runtime.sourceConnection,
+          project.sourceSchema,
+          tableName,
+          limit || 5,
+          buildSampleOptionsForMapping(mapping, { watermarks, loadPhase }),
+        ),
       });
       await persistence.saveReport({ id: makeId('dryrun'), projectId: project.id, type: 'dry-run', createdAt: new Date().toISOString(), report: preview });
       res.json({ ok: true, preview });
@@ -509,6 +604,11 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     const runtime = resolveRuntimeConnections(project, parsed.data);
     if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
     if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
+
+    const initialPlan = executionEngine.buildExecutionPlan(project, parsed.data);
+    if (!initialPlan.orderedMappings.length) {
+      return res.status(400).json({ ok: false, error: 'No enabled table mappings are selected for execution.' });
+    }
 
     if (parsed.data.cutoverMode === 'guarded') {
       const schemaPlan = buildProvisioningPlan({
@@ -549,6 +649,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         concurrency: parsed.data.concurrency,
         batchSize: parsed.data.batchSize,
         cdcMode: parsed.data.cdcMode,
+        loadPhase: parsed.data.loadPhase,
         cutoverMode: parsed.data.cutoverMode,
         watermarkColumn: parsed.data.watermarkColumn || null,
         consistentRead: runtime.sourceConnection?.consistentRead || { enabled: false },
@@ -590,11 +691,19 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
     res.json({ ok: true, runId: run.id, status: 'resume-scheduled' });
     setImmediate(async () => {
-      await executionEngine.resumeRun({
-        runId: run.id,
-        project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
-        publish(event, data) { publishRunEvent(run.id, event, data); },
-      });
+      try {
+        await executionEngine.resumeRun({
+          runId: run.id,
+          project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
+          publish(event, data) { publishRunEvent(run.id, event, data); },
+        });
+        const finished = await persistence.getRun(run.id);
+        publishRunEvent(run.id, 'status', { status: finished?.status || 'done' });
+      } catch (error) {
+        await persistence.saveRun({ ...(await persistence.getRun(run.id)), status: 'error', error: error.message || String(error), updatedAt: new Date().toISOString() });
+        publishRunEvent(run.id, 'log', { level: 'error', message: error.message || String(error) });
+        publishRunEvent(run.id, 'status', { status: 'error' });
+      }
     });
   });
 
@@ -602,19 +711,27 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     const run = await persistence.getRun(req.params.id);
     if (!run) return res.status(404).json({ ok: false, error: 'Run not found' });
     const failedTables = (run.tableStatuses || []).filter((table) => table.status === 'error').map((table) => table.tableName);
+    if (!failedTables.length) return res.status(400).json({ ok: false, error: 'No failed tables found for this run.' });
     const project = await persistence.getProject(run.projectId);
     if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
     const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
     if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
     if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
     const rerunId = makeId('run');
+    const rerunOptions = {
+      ...(run.executionProfile || {}),
+      mode: 'selected',
+      selectedTables: failedTables,
+      dryRun: false,
+      errorPolicy: run.executionProfile?.errorPolicy || run.errorPolicy || 'fail-fast',
+    };
     await persistence.saveRun({
       id: rerunId,
       projectId: project.id,
       mode: 'selected',
       selectedTables: failedTables,
       dryRun: false,
-      errorPolicy: run.errorPolicy || 'fail-fast',
+      errorPolicy: rerunOptions.errorPolicy,
       status: 'queued',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -622,20 +739,28 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
       tableStatuses: [],
       rerunOf: run.id,
       executionProfile: {
-        ...(run.executionProfile || {}),
+        ...rerunOptions,
         consistencyMode: run.executionProfile?.consistencyMode || 'best-effort',
       },
     });
     res.json({ ok: true, runId: rerunId, selectedTables: failedTables });
     setImmediate(async () => {
-      await executionEngine.executeRun({
-        runId: rerunId,
-        project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
-        options: { mode: 'selected', selectedTables: failedTables, dryRun: false, errorPolicy: run.errorPolicy || 'fail-fast' },
-        publish(event, data) {
-          publishRunEvent(rerunId, event, data);
-        },
-      });
+      try {
+        await executionEngine.executeRun({
+          runId: rerunId,
+          project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
+          options: rerunOptions,
+          publish(event, data) {
+            publishRunEvent(rerunId, event, data);
+          },
+        });
+        const finished = await persistence.getRun(rerunId);
+        publishRunEvent(rerunId, 'status', { status: finished?.status || 'done' });
+      } catch (error) {
+        await persistence.saveRun({ ...(await persistence.getRun(rerunId)), status: 'error', error: error.message || String(error), updatedAt: new Date().toISOString() });
+        publishRunEvent(rerunId, 'log', { level: 'error', message: error.message || String(error) });
+        publishRunEvent(rerunId, 'status', { status: 'error' });
+      }
     });
   });
 

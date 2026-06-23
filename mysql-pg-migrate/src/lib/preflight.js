@@ -1,17 +1,9 @@
 const { supportedTransformTypes, transformRow, validateTransformRule, shouldIncludeRow } = require('./valueTransforms');
 const { buildRunAuditReport } = require('./reporting');
+const { classifyTypeCompatibility: classifyTypeCompatibilityByCatalog } = require('./typeCompatibility');
 
 function classifyTypeCompatibility(sourceColumn, targetColumn) {
-  const sourceType = String(sourceColumn?.dataType || sourceColumn?.fullType || '').toLowerCase();
-  const targetType = String(targetColumn?.dataType || targetColumn?.fullType || '').toLowerCase();
-  if (!targetType) return { status: 'blocker', message: 'missing_target_column' };
-  if (sourceType === targetType) return { status: 'compatible', message: 'exact_type' };
-  if (/tinyint\(1\)|boolean/.test(sourceType) && /bool/.test(targetType)) return { status: 'compatible_with_transform', message: 'boolean_normalization' };
-  if (/json/.test(sourceType) && /json/.test(targetType)) return { status: 'compatible_with_transform', message: 'json_validation' };
-  if (/int|decimal|numeric|float|double/.test(sourceType) && /int|decimal|numeric|float|double/.test(targetType)) return { status: 'risky', message: 'numeric_cast' };
-  if (/char|text|enum|set/.test(sourceType) && /char|text|json/.test(targetType)) return { status: 'compatible_with_transform', message: 'string_cast' };
-  if (/date|time|timestamp|datetime/.test(sourceType) && /date|time|timestamp/.test(targetType)) return { status: 'compatible_with_transform', message: 'temporal_parse' };
-  return { status: 'incompatible', message: `source ${sourceType} -> target ${targetType}` };
+  return classifyTypeCompatibilityByCatalog(sourceColumn, targetColumn);
 }
 
 function collectTargetRequirements(table) {
@@ -51,6 +43,89 @@ function deriveTableCompleteness(columns = []) {
   return { level: 'ready', counts: { total: active.length } };
 }
 
+function isColumnMappingActive(columnMapping) {
+  if (!columnMapping) return false;
+  if (columnMapping.enabled === false) return false;
+  if (columnMapping.targetColumnMode === 'ignore') return false;
+  return true;
+}
+
+function addDuplicateDiagnostics({ mappings, keyFn, kind, target, blockers, warnings, severity = 'blocker' }) {
+  const seen = new Map();
+  for (const mapping of mappings || []) {
+    const key = keyFn(mapping);
+    if (!key) continue;
+    seen.set(key, (seen.get(key) || 0) + 1);
+  }
+  const duplicates = Array.from(seen.entries()).filter(([, count]) => count > 1).map(([key]) => key);
+  if (!duplicates.length) return;
+  const item = { kind, target, duplicates };
+  if (severity === 'warning') warnings.push(item);
+  else blockers.push(item);
+}
+
+function normalizeLoadStrategy(mapping) {
+  return mapping.loadStrategy || { mode: 'historical_full' };
+}
+
+function isIncrementalStrategy(strategy) {
+  return ['incremental_watermark', 'historical_then_incremental'].includes(strategy?.mode || 'historical_full');
+}
+
+function validateHistoricalFilter({ strategy, sourceTable, tableBlockers, tableWarnings, tableName }) {
+  if (strategy?.mode !== 'historical_filtered' && strategy?.mode !== 'historical_then_incremental') return;
+  const filter = strategy?.historicalFilter;
+  if (!filter?.enabled) {
+    if (strategy?.mode === 'historical_filtered') {
+      tableBlockers.push({ kind: 'missing_historical_filter', table: tableName, message: 'Historical filtered load requires a filter column/operator/value.' });
+    }
+    return;
+  }
+  const sourceColumnNames = new Set((sourceTable?.columns || []).map((column) => column.name));
+  if (!filter.column || !sourceColumnNames.has(filter.column)) {
+    tableBlockers.push({ kind: 'invalid_historical_filter_column', table: tableName, column: filter.column || null });
+  }
+  if (!['is_null', 'is_not_null'].includes(filter.operator) && (filter.value == null || filter.value === '')) {
+    tableBlockers.push({ kind: 'missing_historical_filter_value', table: tableName, column: filter.column || null });
+  }
+  if (filter.operator === 'between' && (filter.valueTo == null || filter.valueTo === '')) {
+    tableBlockers.push({ kind: 'missing_historical_filter_end_value', table: tableName, column: filter.column || null });
+  }
+  tableWarnings.push({ kind: 'historical_filter_review', table: tableName, message: 'Review filtered historical loads carefully before execution.' });
+}
+
+function validateIncrementalStrategy({ strategy, sourceTable, mapping, tableBlockers, tableWarnings }) {
+  if (!isIncrementalStrategy(strategy)) return;
+  const sourceColumnNames = new Set((sourceTable?.columns || []).map((column) => column.name));
+  const watermarkColumn = strategy.watermarkColumn || mapping.watermarkColumn;
+  const tieBreakerColumn = strategy.tieBreakerColumn || (sourceTable?.primaryKey || [])[0];
+
+  if (!watermarkColumn || !sourceColumnNames.has(watermarkColumn)) {
+    tableBlockers.push({ kind: 'missing_incremental_watermark_column', table: mapping.sourceTable, watermarkColumn: watermarkColumn || null, message: 'Incremental load requires a valid source watermark column.' });
+  }
+  if (!tieBreakerColumn || !sourceColumnNames.has(tieBreakerColumn)) {
+    tableBlockers.push({ kind: 'missing_incremental_tie_breaker_column', table: mapping.sourceTable, tieBreakerColumn: tieBreakerColumn || null, message: 'Incremental load requires a stable tie-breaker column, preferably a primary key.' });
+  }
+  const watermarkMeta = (sourceTable?.columns || []).find((column) => column.name === watermarkColumn);
+  if (watermarkMeta?.nullable) {
+    tableWarnings.push({ kind: 'nullable_watermark_column', table: mapping.sourceTable, watermarkColumn, message: 'Nullable watermark columns can cause missed or unstable incremental reads.' });
+  }
+  if ((mapping.writeMode || 'append') !== 'upsert') {
+    tableWarnings.push({ kind: 'incremental_without_upsert', table: mapping.sourceTable, message: 'Incremental loads that may update existing rows are safest with write mode upsert and valid conflict keys.' });
+  }
+  if (!(mapping.conflictKeys || []).length) {
+    tableWarnings.push({ kind: 'incremental_without_conflict_keys', table: mapping.sourceTable, message: 'Without conflict keys, incremental replays/lookback can duplicate rows.' });
+  }
+  if (!Number(strategy.lookbackAmount || 0)) {
+    tableWarnings.push({ kind: 'no_incremental_lookback_window', table: mapping.sourceTable, message: 'A small lookback window helps catch late-arriving updates.' });
+  }
+  if (strategy.deleteHandling?.mode !== 'soft_delete') {
+    tableWarnings.push({ kind: 'incremental_hard_deletes_not_captured', table: mapping.sourceTable, message: 'Watermark incremental loads do not capture hard deletes. Use a soft-delete column or manual reconciliation.' });
+  } else if (strategy.deleteHandling?.column && !sourceColumnNames.has(strategy.deleteHandling.column)) {
+    tableBlockers.push({ kind: 'missing_soft_delete_column', table: mapping.sourceTable, column: strategy.deleteHandling.column });
+  }
+}
+
 async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
   const sourceTables = new Map((project.sourceCatalog.tables || []).map((table) => [table.name, table]));
   const targetTables = new Map((project.targetCatalog.tables || []).map((table) => [table.name, table]));
@@ -58,8 +133,37 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
   const tableReports = [];
   const blockers = [];
   const warnings = [];
+  const activeTableMappings = (project.tableMappings || []).filter((mapping) => mapping.enabled !== false);
+
+  if (!activeTableMappings.length) {
+    blockers.push({ kind: 'no_enabled_table_mappings', message: 'At least one enabled table mapping is required before verification or execution.' });
+  }
+
+  addDuplicateDiagnostics({
+    mappings: activeTableMappings,
+    keyFn: (mapping) => mapping.sourceTable,
+    kind: 'duplicate_source_table_mapping',
+    target: 'project',
+    blockers,
+    warnings,
+  });
 
   for (const mapping of project.tableMappings || []) {
+    if (mapping.enabled === false) {
+      tableReports.push({
+        tableMappingId: mapping.id,
+        sourceTable: mapping.sourceTable,
+        targetTable: mapping.targetTable,
+        blockers: [],
+        warnings: [{ kind: 'table_mapping_disabled', table: mapping.sourceTable }],
+        columns: [],
+        completeness: { level: 'disabled', counts: { total: 0 } },
+        readiness: { level: 'disabled', reasons: ['Table mapping is disabled'] },
+        schemaAction: null,
+      });
+      continue;
+    }
+
     const sourceTable = sourceTables.get(mapping.sourceTable);
     const targetTable = mapping.targetTable ? targetTables.get(mapping.targetTable) : null;
     const schemaEntry = schemaPlanByTarget.get(mapping.targetTable || mapping.sourceTable) || null;
@@ -72,6 +176,11 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
     const tableWarnings = [];
     const targetWillBeCreated = mapping.createTargetTable === true || mapping.targetTableMode === 'create_new';
     const primaryKeyColumns = sourceTable?.primaryKey || [];
+    const loadStrategy = normalizeLoadStrategy(mapping);
+    if (!sourceTable) tableBlockers.push({ kind: 'missing_source_table', table: mapping.sourceTable || null });
+    validateHistoricalFilter({ strategy: loadStrategy, sourceTable, tableBlockers, tableWarnings, tableName: mapping.sourceTable });
+    validateIncrementalStrategy({ strategy: loadStrategy, sourceTable, mapping, tableBlockers, tableWarnings });
+    if (targetWillBeCreated && !String(mapping.targetTable || '').trim()) tableBlockers.push({ kind: 'missing_new_target_table_name', table: mapping.sourceTable, message: 'Create-new target table mappings require a target table name' });
     if (!targetTable && !targetWillBeCreated) tableBlockers.push({ kind: 'missing_target_table', table: mapping.sourceTable, target: mapping.targetTable || null });
     if (!targetTable && targetWillBeCreated) tableWarnings.push({ kind: 'target_table_will_be_created', table: mapping.sourceTable, target: mapping.targetTable || mapping.sourceTable });
     if (mapping.writeMode === 'upsert' && !(mapping.conflictKeys || []).length) tableBlockers.push({ kind: 'missing_conflict_keys', table: mapping.sourceTable, target: mapping.targetTable || null });
@@ -93,6 +202,27 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
       }
     }
 
+    const activeColumnMappings = (mapping.columnMappings || []).filter(isColumnMappingActive);
+    if (!activeColumnMappings.some((column) => column.targetColumn)) {
+      tableBlockers.push({ kind: 'no_enabled_column_mappings', table: mapping.sourceTable, message: 'At least one enabled source column must map to a target column.' });
+    }
+    addDuplicateDiagnostics({
+      mappings: activeColumnMappings,
+      keyFn: (column) => column.sourceColumn,
+      kind: 'duplicate_source_column_mapping',
+      target: mapping.sourceTable,
+      blockers: tableBlockers,
+      warnings: tableWarnings,
+    });
+    addDuplicateDiagnostics({
+      mappings: activeColumnMappings,
+      keyFn: (column) => column.targetColumn,
+      kind: 'duplicate_target_column_mapping',
+      target: mapping.targetTable,
+      blockers: tableBlockers,
+      warnings: tableWarnings,
+    });
+
     const mappedTargetColumns = new Set();
     const columnReports = [];
     let readiness = schemaEntry?.readiness?.level || 'ready';
@@ -101,6 +231,28 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
     for (const columnMapping of mapping.columnMappings || []) {
       const sourceColumn = (sourceTable?.columns || []).find((column) => column.name === columnMapping.sourceColumn);
       const targetColumn = columnMapping.targetColumn ? targetColumns.get(columnMapping.targetColumn) : null;
+      const columnActive = isColumnMappingActive(columnMapping);
+
+      if (!columnActive) {
+        columnReports.push({
+          sourceColumn: columnMapping.sourceColumn,
+          targetColumn: columnMapping.targetColumn || null,
+          compatibility: { status: 'disabled', message: columnMapping.targetColumnMode === 'ignore' ? 'ignored_by_mapping' : 'disabled_mapping' },
+          state: 'disabled',
+          columnState: 'disabled',
+          mappingEnabled: false,
+          transformType: columnMapping.transform?.type || 'direct',
+        });
+        continue;
+      }
+
+      if (!String(columnMapping.targetColumn || '').trim()) {
+        tableBlockers.push({ kind: 'missing_target_column_mapping', sourceColumn: columnMapping.sourceColumn, message: 'Enabled column mappings require a target column or must be marked ignore.' });
+      }
+
+      if (columnMapping.targetColumnMode === 'create_new' && !String(columnMapping.targetColumn || '').trim()) {
+        tableBlockers.push({ kind: 'missing_new_target_column_name', sourceColumn: columnMapping.sourceColumn });
+      }
 
       if (!sourceColumn) {
         tableBlockers.push({ kind: 'missing_source_column', column: columnMapping.sourceColumn });
@@ -116,7 +268,8 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
         continue;
       }
 
-      if (!targetColumn && !targetWillBeCreated) {
+      const targetColumnWillBeCreated = columnMapping.targetColumnMode === 'create_new' || targetWillBeCreated || schemaEntry?.action === 'alter_table_add_columns';
+      if (!targetColumn && !targetColumnWillBeCreated) {
         tableBlockers.push({ kind: 'missing_target_column', column: columnMapping.targetColumn, sourceColumn: sourceColumn.name });
       }
 
@@ -170,7 +323,7 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
     try {
       const sampleRows = await sampleSourceRows(mapping.sourceTable, 1);
       if (sampleRows.length) {
-        for (const columnMapping of mapping.columnMappings || []) {
+        for (const columnMapping of activeColumnMappings) {
           validateTransformRule(columnMapping.transform, { value: sampleRows[0]?.[columnMapping.sourceColumn], row: sampleRows[0] });
         }
         shouldIncludeRow({ row: sampleRows[0], tableMapping: mapping });
@@ -224,8 +377,8 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
 
 async function buildDryRunPreview({ project, sampleSourceRows }) {
   const previews = [];
-  for (const mapping of project.tableMappings || []) {
-    const rows = await sampleSourceRows(mapping.sourceTable, 5);
+  for (const mapping of (project.tableMappings || []).filter((item) => item.enabled !== false)) {
+    const rows = await sampleSourceRows(mapping.sourceTable, 5, mapping);
     previews.push({
       sourceTable: mapping.sourceTable,
       targetTable: mapping.targetTable,
@@ -250,11 +403,20 @@ async function validateRunReport({ run, persistence, project, countSourceRows, c
     let sourceRowCount = null;
     let targetRowCount = null;
     let rowCountMatch = null;
+    let rowCountScope = 'not_checked';
     if (project && table.tableName && table.targetTable && typeof countSourceRows === 'function' && typeof countTargetRows === 'function') {
       try {
         sourceRowCount = await countSourceRows(table.tableName);
         targetRowCount = await countTargetRows(table.targetTable);
-        rowCountMatch = sourceRowCount === targetRowCount;
+        const writeMode = table.writeDisposition?.writeMode || table.writeMode || null;
+        const fullReplacement = writeMode === 'truncate' && (table.loadStrategy || 'historical_full') === 'historical_full';
+        if (fullReplacement) {
+          rowCountScope = 'full_replacement_table_count';
+          rowCountMatch = targetRowCount === (table.inserted || 0) && sourceRowCount === (table.totalRows || 0);
+        } else {
+          rowCountScope = 'informational_total_table_count';
+          rowCountMatch = null;
+        }
       } catch {
         rowCountMatch = null;
       }
@@ -271,8 +433,9 @@ async function validateRunReport({ run, persistence, project, countSourceRows, c
       sourceRowCount,
       targetRowCount,
       rowCountMatch,
-      aggregateMatch: rowCountMatch,
-      keyCoverageMatch: rowCountMatch,
+      rowCountScope,
+      aggregateMatch: null,
+      keyCoverageMatch: null,
       trustLevel: rowCountMatch === false || table.status === 'error' ? 'needs_manual_review' : ((table.rejected || 0) > 0 ? 'verified_with_warnings' : 'verified'),
     };
   }));
@@ -302,7 +465,7 @@ async function validateRunReport({ run, persistence, project, countSourceRows, c
       tablesDone: tableVerification.filter((table) => table.status === 'done').length,
       tablesPartial: tableVerification.filter((table) => table.status === 'partial').length,
       tablesErrored: tableVerification.filter((table) => table.status === 'error').length,
-      consistencyMode: run.executionProfile?.consistentRead?.enabled ? 'consistent-read' : 'best-effort',
+      consistencyMode: run.executionProfile?.consistencyMode || (run.executionProfile?.consistentRead?.enabled ? 'consistent-read' : 'best-effort'),
       concurrency: run.executionProfile?.concurrency || 1,
       batchSize: run.executionProfile?.batchSize || null,
       cdcMode: run.executionProfile?.cdcMode || 'off',

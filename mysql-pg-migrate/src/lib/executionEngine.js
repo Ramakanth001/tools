@@ -77,6 +77,60 @@ function createExecutionEngine({ persistence }) {
     };
   }
 
+  function normalizeLoadStrategy(tableMapping, options = {}, watermarks = {}) {
+    const configured = tableMapping.loadStrategy || { mode: 'historical_full' };
+    const tableWatermark = watermarks?.tables?.[tableMapping.sourceTable] || {};
+    let phaseMode = configured.mode || 'historical_full';
+    if (options.loadPhase === 'historical') {
+      phaseMode = configured.mode === 'historical_filtered' || (configured.mode === 'historical_then_incremental' && configured.historicalFilter?.enabled) ? 'historical_filtered' : 'historical_full';
+    } else if (options.loadPhase === 'incremental') {
+      phaseMode = 'incremental_watermark';
+    } else if (phaseMode === 'historical_then_incremental') {
+      phaseMode = tableWatermark.lastWatermark != null ? 'incremental_watermark' : (configured.historicalFilter?.enabled ? 'historical_filtered' : 'historical_full');
+    }
+
+    return {
+      ...configured,
+      effectiveMode: phaseMode,
+      tableWatermark,
+      watermarkColumn: configured.watermarkColumn || tableMapping.watermarkColumn || options.watermarkColumn || tableWatermark.watermarkColumn || null,
+      tieBreakerColumn: configured.tieBreakerColumn || tableWatermark.tieBreakerColumn || null,
+      sourceFilter: phaseMode === 'historical_filtered' && configured.historicalFilter?.enabled ? configured.historicalFilter : null,
+      persistWatermark: configured.persistWatermark !== false,
+    };
+  }
+
+  async function loadProjectWatermarks(project) {
+    if (typeof persistence.getWatermarks !== 'function') return { projectId: project.id, tables: {} };
+    return (await persistence.getWatermarks(project.id)) || { projectId: project.id, tables: {} };
+  }
+
+  function applyLookback(value, strategy) {
+    const amount = Number(strategy.lookbackAmount || 0);
+    if (!amount || value == null) return value;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const unit = strategy.lookbackUnit || 'minutes';
+    const multiplier = unit === 'days' ? 86400000 : unit === 'hours' ? 3600000 : 60000;
+    return new Date(date.getTime() - amount * multiplier).toISOString();
+  }
+
+  function updateWatermarkFromRows({ rows, watermarkColumn, tieBreakerColumn, highWatermark, highWatermarkTieBreaker }) {
+    if (!watermarkColumn) return { highWatermark, highWatermarkTieBreaker };
+    let nextWatermark = highWatermark ?? null;
+    let nextTieBreaker = highWatermarkTieBreaker ?? null;
+    for (const row of rows || []) {
+      const candidateWatermark = row?.[watermarkColumn] ?? null;
+      const candidateTieBreaker = tieBreakerColumn ? (row?.[tieBreakerColumn] ?? null) : null;
+      const watermarkComparison = compareCursorValues(candidateWatermark, nextWatermark);
+      if (watermarkComparison > 0 || (watermarkComparison === 0 && compareCursorValues(candidateTieBreaker, nextTieBreaker) > 0)) {
+        nextWatermark = candidateWatermark;
+        nextTieBreaker = candidateTieBreaker;
+      }
+    }
+    return { highWatermark: nextWatermark, highWatermarkTieBreaker: nextTieBreaker };
+  }
+
   function detectResumeStrategy(project, tableMapping) {
     const sourceTable = (project.sourceCatalog?.tables || []).find((table) => table.name === tableMapping.sourceTable);
     const primaryKeyColumns = sourceTable?.primaryKey || [];
@@ -104,10 +158,10 @@ function createExecutionEngine({ persistence }) {
     const eligible = (project.tableMappings || []).filter((table) => table.enabled !== false && (!selected || selected.has(table.sourceTable)));
 
     const mappingBySource = new Map(eligible.map((table) => [table.sourceTable, table]));
-    const incomingCount = new Map();
+    const baseIncomingCount = new Map();
     const outgoing = new Map();
     for (const mapping of eligible) {
-      incomingCount.set(mapping.sourceTable, 0);
+      baseIncomingCount.set(mapping.sourceTable, 0);
       outgoing.set(mapping.sourceTable, new Set());
     }
 
@@ -119,13 +173,14 @@ function createExecutionEngine({ persistence }) {
         if (parent === mapping.sourceTable) continue;
         if (!outgoing.get(parent).has(mapping.sourceTable)) {
           outgoing.get(parent).add(mapping.sourceTable);
-          incomingCount.set(mapping.sourceTable, (incomingCount.get(mapping.sourceTable) || 0) + 1);
+          baseIncomingCount.set(mapping.sourceTable, (baseIncomingCount.get(mapping.sourceTable) || 0) + 1);
         }
       }
     }
 
+    const orderIncomingCount = new Map(baseIncomingCount);
     const queue = eligible
-      .filter((mapping) => (incomingCount.get(mapping.sourceTable) || 0) === 0)
+      .filter((mapping) => (orderIncomingCount.get(mapping.sourceTable) || 0) === 0)
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
     const ordered = [];
@@ -133,8 +188,8 @@ function createExecutionEngine({ persistence }) {
       const next = queue.shift();
       ordered.push(next);
       for (const child of Array.from(outgoing.get(next.sourceTable) || [])) {
-        incomingCount.set(child, (incomingCount.get(child) || 1) - 1);
-        if ((incomingCount.get(child) || 0) === 0) {
+        orderIncomingCount.set(child, (orderIncomingCount.get(child) || 1) - 1);
+        if ((orderIncomingCount.get(child) || 0) === 0) {
           queue.push(mappingBySource.get(child));
           queue.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
         }
@@ -146,14 +201,15 @@ function createExecutionEngine({ persistence }) {
 
     const layers = [];
     const processedNames = new Set();
+    const layerIncomingCount = new Map(baseIncomingCount);
     while (processedNames.size < orderedMappings.length) {
-      const layer = orderedMappings.filter((mapping) => !processedNames.has(mapping.sourceTable) && (incomingCount.get(mapping.sourceTable) || 0) === 0);
+      const layer = orderedMappings.filter((mapping) => !processedNames.has(mapping.sourceTable) && (layerIncomingCount.get(mapping.sourceTable) || 0) === 0);
       if (!layer.length) break;
       layers.push(layer.map((mapping) => mapping.sourceTable));
       for (const mapping of layer) {
         processedNames.add(mapping.sourceTable);
         for (const child of Array.from(outgoing.get(mapping.sourceTable) || [])) {
-          incomingCount.set(child, Math.max(0, (incomingCount.get(child) || 0) - 1));
+          layerIncomingCount.set(child, Math.max(0, (layerIncomingCount.get(child) || 0) - 1));
         }
       }
     }
@@ -210,7 +266,7 @@ function createExecutionEngine({ persistence }) {
         conflictKeys: tableMapping.conflictKeys || [],
         batchSize: options.batchSize,
       });
-      return { inserted: result.rowCount || transformed.length, rejected: rejected.length };
+      return { inserted: result.rowCount ?? transformed.length, rejected: rejected.length };
     } catch (error) {
       if (options.errorPolicy === 'fail-fast') throw error;
       let inserted = 0;
@@ -223,7 +279,7 @@ function createExecutionEngine({ persistence }) {
             mode: tableMapping.writeMode === 'upsert' ? 'upsert' : 'append',
             conflictKeys: tableMapping.conflictKeys || [],
           });
-          inserted += result.rowCount || 1;
+          inserted += result.rowCount ?? 1;
         } catch (singleError) {
           await saveError(runId, tableMapping.sourceTable, singleError, { phase: 'write', row });
           publish('log', { level: 'warn', message: `Rejected row during write for ${tableMapping.sourceTable}: ${singleError.message}` });
@@ -235,33 +291,44 @@ function createExecutionEngine({ persistence }) {
 
   async function executeTable({ runId, tableMapping, publish, project, options }) {
     if (!tableMapping.targetTable) throw new Error(`Missing target table for source table ${tableMapping.sourceTable}`);
-    const enabledMappings = (tableMapping.columnMappings || []).filter((column) => column.enabled !== false && column.targetColumn);
+    const enabledMappings = (tableMapping.columnMappings || []).filter((column) => column.enabled !== false && column.targetColumnMode !== 'ignore' && column.targetColumn);
     if (!enabledMappings.length) throw new Error(`No enabled mapped columns for source table ${tableMapping.sourceTable}`);
 
-    publish('log', { level: 'info', message: `Processing table ${tableMapping.sourceTable} -> ${tableMapping.targetTable}` });
+    const projectWatermarks = options.projectWatermarks || {};
+    const loadStrategy = normalizeLoadStrategy(tableMapping, options, projectWatermarks);
+    const isIncremental = loadStrategy.effectiveMode === 'incremental_watermark';
+    publish('log', { level: 'info', message: `Processing table ${tableMapping.sourceTable} -> ${tableMapping.targetTable} (${loadStrategy.effectiveMode})` });
     const chunkSize = Math.max(1, Number(tableMapping.chunkSize || 500));
     const startedAtMs = Date.now();
-    const totalRows = await countMysqlRows(project.runtimeSourceConnection || project.sourceConnection, project.sourceSchema, tableMapping.sourceTable);
     const checkpoint = await latestCheckpoint(runId, tableMapping.sourceTable);
     const resumeStrategy = detectResumeStrategy(project, tableMapping);
-    let offset = Number(checkpoint?.offset || 0);
+    let offset = isIncremental ? 0 : Number(checkpoint?.offset || 0);
     let inserted = Number(checkpoint?.rowsInserted || 0);
     let rejected = Number(checkpoint?.rowsRejected || 0);
     let truncated = Boolean(checkpoint?.truncated);
-    let lastValue = checkpoint?.keyset?.lastValue ?? null;
+    let lastValue = isIncremental ? null : (checkpoint?.keyset?.lastValue ?? null);
     let lastChunkFingerprint = checkpoint?.lastChunkFingerprint || null;
     let lastChunkId = checkpoint?.lastChunkId || null;
-    const watermarkColumn = tableMapping.watermarkColumn || options.watermarkColumn || null;
-    const tieBreakerColumn = watermarkColumn ? (resumeStrategy.mode === 'keyset' ? resumeStrategy.column : ((project.sourceCatalog?.tables || []).find((table) => table.name === tableMapping.sourceTable)?.primaryKey || [])[0] || null) : null;
-    let highWatermark = checkpoint?.highWatermark ?? null;
-    let highWatermarkTieBreaker = checkpoint?.highWatermarkTieBreaker ?? null;
+    const watermarkColumn = loadStrategy.watermarkColumn;
+    const tieBreakerColumn = watermarkColumn ? (loadStrategy.tieBreakerColumn || (resumeStrategy.mode === 'keyset' ? resumeStrategy.column : ((project.sourceCatalog?.tables || []).find((table) => table.name === tableMapping.sourceTable)?.primaryKey || [])[0] || null)) : null;
+    let highWatermark = isIncremental
+      ? applyLookback(loadStrategy.tableWatermark?.lastWatermark ?? loadStrategy.baselineWatermark ?? null, loadStrategy)
+      : (checkpoint?.highWatermark ?? loadStrategy.baselineWatermark ?? null);
+    let highWatermarkTieBreaker = isIncremental
+      ? (loadStrategy.tableWatermark?.lastTieBreaker ?? loadStrategy.baselineTieBreaker ?? null)
+      : (checkpoint?.highWatermarkTieBreaker ?? loadStrategy.baselineTieBreaker ?? null);
 
-    if (options.cdcMode === 'watermark' && !watermarkColumn) {
+    if (isIncremental && !watermarkColumn) {
       throw new Error(`Watermark mode requires a watermark column for source table ${tableMapping.sourceTable}`);
     }
-    if (options.cdcMode === 'watermark' && !tieBreakerColumn) {
+    if (isIncremental && !tieBreakerColumn) {
       throw new Error(`Watermark mode requires a stable tie-breaker column for source table ${tableMapping.sourceTable}`);
     }
+
+    const initialCountKeyset = isIncremental && watermarkColumn
+      ? { watermarkColumn, watermarkValue: highWatermark, tieBreakerColumn, tieBreakerValue: highWatermarkTieBreaker }
+      : undefined;
+    const totalRows = await countMysqlRows(project.runtimeSourceConnection || project.sourceConnection, project.sourceSchema, tableMapping.sourceTable, { sourceFilter: loadStrategy.sourceFilter, keyset: initialCountKeyset });
 
     const sourceSession = await openMysqlReadSession(project.runtimeSourceConnection || project.sourceConnection, { database: project.sourceSchema });
     publish('log', { level: 'info', message: `Source read consistency for ${tableMapping.sourceTable}: ${sourceSession.consistencyMode}` });
@@ -280,7 +347,7 @@ function createExecutionEngine({ persistence }) {
           ...(watermarkColumn ? [watermarkColumn] : []),
           ...(tieBreakerColumn ? [tieBreakerColumn] : []),
         ]));
-        const keyset = options.cdcMode === 'watermark' && watermarkColumn
+        const keyset = isIncremental && watermarkColumn
           ? { watermarkColumn, watermarkValue: highWatermark, tieBreakerColumn, tieBreakerValue: highWatermarkTieBreaker }
           : (resumeStrategy.mode === 'keyset' ? { column: resumeStrategy.column, lastValue } : undefined);
         const rows = await fetchMysqlRowsPageFromSession(sourceSession, project.sourceSchema, tableMapping.sourceTable, {
@@ -288,6 +355,7 @@ function createExecutionEngine({ persistence }) {
           limit: chunkSize,
           offset: resumeStrategy.mode === 'offset' ? offset : 0,
           keyset,
+          sourceFilter: loadStrategy.sourceFilter,
         });
         if (!rows.length) break;
 
@@ -329,16 +397,7 @@ function createExecutionEngine({ persistence }) {
         if (resumeStrategy.mode === 'keyset') {
           lastValue = rows[rows.length - 1]?.[resumeStrategy.column] ?? lastValue;
         }
-        if (watermarkColumn) {
-          const lastRow = rows[rows.length - 1] || null;
-          const candidateWatermark = lastRow?.[watermarkColumn] ?? null;
-          const candidateTieBreaker = tieBreakerColumn ? (lastRow?.[tieBreakerColumn] ?? null) : null;
-          const watermarkComparison = compareCursorValues(candidateWatermark, highWatermark);
-          if (watermarkComparison > 0 || (watermarkComparison === 0 && compareCursorValues(candidateTieBreaker, highWatermarkTieBreaker) > 0)) {
-            highWatermark = candidateWatermark;
-            highWatermarkTieBreaker = candidateTieBreaker;
-          }
-        }
+        ({ highWatermark, highWatermarkTieBreaker } = updateWatermarkFromRows({ rows, watermarkColumn, tieBreakerColumn, highWatermark, highWatermarkTieBreaker }));
         lastChunkFingerprint = currentChunkFingerprint;
         lastChunkId = currentChunkId;
 
@@ -377,6 +436,18 @@ function createExecutionEngine({ persistence }) {
       await closeMysqlReadSession(sourceSession);
     }
 
+    if (!options.dryRun && loadStrategy.persistWatermark && watermarkColumn && highWatermark != null && typeof persistence.updateTableWatermark === 'function') {
+      await persistence.updateTableWatermark(project.id, tableMapping.sourceTable, {
+        watermarkColumn,
+        tieBreakerColumn,
+        lastWatermark: highWatermark,
+        lastTieBreaker: highWatermarkTieBreaker,
+        loadStrategy: loadStrategy.effectiveMode,
+        sourceFilter: loadStrategy.sourceFilter || null,
+        runId,
+      });
+    }
+
     return {
       tableName: tableMapping.sourceTable,
       targetTable: tableMapping.targetTable,
@@ -389,6 +460,7 @@ function createExecutionEngine({ persistence }) {
       consistencyMode: sourceSession.consistencyMode,
       highWatermark,
       highWatermarkTieBreaker,
+      loadStrategy: loadStrategy.effectiveMode,
       throughputRowsPerSecond: Number((((inserted + rejected) || 0) / Math.max(1, (Date.now() - startedAtMs) / 1000)).toFixed(2)),
       checkpointSafety: writeModeSafety(tableMapping),
       writeDisposition: describeWriteMode(tableMapping),
@@ -397,6 +469,8 @@ function createExecutionEngine({ persistence }) {
 
   async function executeRun({ runId, project, options, publish }) {
     await markRun(runId, { status: 'running' });
+    const projectWatermarks = await loadProjectWatermarks(project);
+    options.projectWatermarks = projectWatermarks;
     const plan = buildExecutionPlan(project, options);
     const tables = plan.orderedMappings;
     const tableStatuses = [];
@@ -482,15 +556,32 @@ function createExecutionEngine({ persistence }) {
   async function resumeRun({ runId, project, publish }) {
     const run = await persistence.getRun(runId);
     if (!run) throw new Error('Run not found');
+    const originalOptions = {
+      mode: run.executionProfile?.mode || run.mode || 'all',
+      selectedTables: run.executionProfile?.selectedTables || run.selectedTables || [],
+      dryRun: Boolean(run.executionProfile?.dryRun ?? run.dryRun),
+      errorPolicy: run.executionProfile?.errorPolicy || run.errorPolicy || 'fail-fast',
+      concurrency: run.executionProfile?.concurrency || 1,
+      batchSize: run.executionProfile?.batchSize || 1000,
+      cdcMode: run.executionProfile?.cdcMode || 'off',
+      loadPhase: run.executionProfile?.loadPhase || 'configured',
+      cutoverMode: run.executionProfile?.cutoverMode || 'manual',
+      watermarkColumn: run.executionProfile?.watermarkColumn || null,
+      verificationFingerprint: run.executionProfile?.verificationFingerprint || null,
+    };
+    if (originalOptions.dryRun) {
+      throw new Error('Dry-run/preview runs cannot be resumed into real writes. Start a new execution run instead.');
+    }
+    originalOptions.projectWatermarks = await loadProjectWatermarks(project);
     const completed = new Set((run.tableStatuses || []).filter((table) => table.status === 'done' || table.status === 'partial').map((table) => table.tableName));
-    const plan = buildExecutionPlan(project, { mode: 'all', selectedTables: [] });
+    const plan = buildExecutionPlan(project, originalOptions);
     const tables = plan.orderedMappings.filter((table) => !completed.has(table.sourceTable));
     let totalInserted = run.counters?.rowsInserted || 0;
     let totalRejected = run.counters?.rowsRejected || 0;
     const tableStatuses = [...(run.tableStatuses || [])];
     await markRun(runId, { status: 'running' });
     for (const table of tables) {
-      const status = await executeTable({ runId, tableMapping: table, publish, project, options: { mode: 'selected', selectedTables: [table.sourceTable], dryRun: false, errorPolicy: run.errorPolicy || 'fail-fast' } });
+      const status = await executeTable({ runId, tableMapping: table, publish, project, options: originalOptions });
       totalInserted += status.inserted;
       totalRejected += status.rejected || 0;
       tableStatuses.push(status);
@@ -504,12 +595,7 @@ function createExecutionEngine({ persistence }) {
       status: 'done',
       counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, tablesCompleted: tableStatuses.length, totalTables: (project.tableMappings || []).length },
       tableStatuses,
-      executionProfile: run.executionProfile || {
-        mode: run.mode,
-        dryRun: Boolean(run.dryRun),
-        errorPolicy: run.errorPolicy || 'fail-fast',
-        selectedTables: run.selectedTables || [],
-      },
+      executionProfile: run.executionProfile || originalOptions,
     });
   }
 

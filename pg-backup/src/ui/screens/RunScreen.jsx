@@ -109,6 +109,34 @@ function getConnectionSummary(mode, effectiveConnString) {
   return 'Using full connection string.';
 }
 
+function setConnectionStringSslMode(connectionString, sslmode) {
+  const raw = String(connectionString || '').trim();
+  const nextSslMode = String(sslmode || '').trim() || 'disable';
+  if (!raw) return raw;
+  try {
+    const url = new URL(raw);
+    url.searchParams.set('sslmode', nextSslMode);
+    return url.toString();
+  } catch {
+    const withoutSslMode = raw
+      .replace(/([?&])sslmode=[^&]*&?/i, '$1')
+      .replace(/[?&]$/, '');
+    return withoutSslMode.includes('?') ? `${withoutSslMode}&sslmode=${encodeURIComponent(nextSslMode)}` : `${withoutSslMode}?sslmode=${encodeURIComponent(nextSslMode)}`;
+  }
+}
+
+function getConnectionStringSslMode(connectionString) {
+  const raw = String(connectionString || '').trim();
+  if (!raw) return 'disable';
+  try {
+    const url = new URL(raw);
+    return url.searchParams.get('sslmode') || 'disable';
+  } catch {
+    const match = raw.match(/[?&]sslmode=([^&]+)/i);
+    return match ? decodeURIComponent(match[1]) : 'disable';
+  }
+}
+
 export default function RunScreen() {
   const { active, setActive } = useActiveConnection();
   const [profiles, setProfiles] = useState([]);
@@ -160,7 +188,7 @@ export default function RunScreen() {
     fullDump: true,
     schemaOnly: true,
     inventory: true,
-    plainSql: false,
+    plainSql: true,
     roles: true,
     schemaInclude: '',
     schemaExclude: '',
@@ -330,8 +358,10 @@ export default function RunScreen() {
 
     try {
       const body = {
-        connectionString: connectionMode === 'connectionString' ? connectionString.trim() || undefined : undefined,
-        pooler: connectionMode === 'connectionString' ? undefined : pooler,
+        // Use the exact same resolved connection string that Test connection uses.
+        // This prevents backup from rebuilding local connections with the wrong SSL mode.
+        connectionString: effectiveConnString || undefined,
+        pooler: undefined,
         options,
       };
 
@@ -446,14 +476,27 @@ export default function RunScreen() {
         <div style={{ height: 10 }} />
 
         {connectionMode === 'connectionString' ? (
-          <div className="field full">
-            <div className="field-label">Full connection string<RequiredStar /></div>
-            <textarea
-              value={connectionString}
-              onChange={(e) => setConnectionString(e.target.value)}
-              placeholder="postgresql://shop_pg_user:password@127.0.0.1:5432/shop_pg?sslmode=disable"
-            />
-            <div className="field-hint">For local PostgreSQL, include <span className="mono">sslmode=disable</span>. If you provide <span className="mono">sslmode</span>, the backend will respect it.</div>
+          <div className="form-grid">
+            <div className="field full">
+              <div className="field-label">Full connection string<RequiredStar /></div>
+              <textarea
+                value={connectionString}
+                onChange={(e) => setConnectionString(e.target.value)}
+                placeholder="postgresql://shop_pg_user:password@127.0.0.1:5432/shop_pg?sslmode=disable"
+              />
+              <div className="field-hint">For local PostgreSQL, use <span className="mono">sslmode=disable</span>. If you provide <span className="mono">sslmode</span>, the backend will respect it.</div>
+            </div>
+            <div className="field">
+              <div className="field-label">SSL mode</div>
+              <select
+                value={getConnectionStringSslMode(connectionString)}
+                onChange={(e) => setConnectionString((current) => setConnectionStringSslMode(current, e.target.value))}
+              >
+                <option value="disable">disable</option>
+                <option value="require">require</option>
+              </select>
+              <div className="field-hint">Use <span className="mono">disable</span> for local PostgreSQL. Use <span className="mono">require</span> for Supabase/remote.</div>
+            </div>
           </div>
         ) : (
           <>
@@ -569,14 +612,21 @@ export default function RunScreen() {
 
       <div className="card">
         <h3>Backup options</h3>
+        <div className="alert" style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 800 }}>Output formats</div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            <span className="mono">db.dump</span> is the safest PostgreSQL restore archive and is restored with <span className="mono">pg_restore</span>.{' '}
+            <span className="mono">db.sql</span> is readable SQL and is restored with <span className="mono">psql</span>. Keeping both is recommended.
+          </div>
+        </div>
         <div className="form-grid">
           {(
             [
-              ['fullDump', 'Full dump (custom)'],
-              ['schemaOnly', 'Schema-only'],
+              ['fullDump', 'Full backup archive (.dump, restore with pg_restore)'],
+              ['schemaOnly', 'Schema-only SQL (schema.sql)'],
               ['inventory', 'Inventory'],
-              ['plainSql', 'Plain SQL dump'],
-              ['roles', 'Roles/privileges'],
+              ['plainSql', 'Readable SQL dump (.sql, restore with psql)'],
+              ['roles', 'Roles/privileges (globals.sql)'],
             ]
           ).map(([k, label]) => (
             <label key={k} className="check" style={{ gridColumn: 'span 6' }}>
@@ -584,6 +634,14 @@ export default function RunScreen() {
               <span className="field-label" style={{ margin: 0 }}>{label}</span>
             </label>
           ))}
+        </div>
+
+        <div style={{ height: 10 }} />
+        <div className="alert" style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 800 }}>How to restore these files</div>
+          <div className="mono" style={{ marginTop: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {`# Restore db.dump\npg_restore --dbname=<target-connection-string> --clean --if-exists --no-owner --no-privileges db.dump\n\n# Restore db.sql\npsql <target-connection-string> -f db.sql`}
+          </div>
         </div>
 
         <div style={{ height: 10 }} />

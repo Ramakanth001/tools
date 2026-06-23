@@ -702,15 +702,6 @@ export default function SchemaScreen() {
   }, []);
 
   useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
-
-  useEffect(() => {
     const el = flowViewportRef.current;
     if (!el) return undefined;
 

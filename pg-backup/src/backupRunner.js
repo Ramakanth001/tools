@@ -50,7 +50,7 @@ function nowStamp() {
 }
 
 function emit(logFn, msg) {
-  logFn(String(msg));
+  logFn(redactConnectionString(String(msg)));
 }
 
 function spawnLogged(cmd, args, { env, cwd, log, onChild, isCancelled }) {
@@ -63,8 +63,8 @@ function spawnLogged(cmd, args, { env, cwd, log, onChild, isCancelled }) {
 
     if (onChild) onChild(child);
 
-    child.stdout.on('data', (d) => log(d.toString()));
-    child.stderr.on('data', (d) => log(d.toString()));
+    child.stdout.on('data', (d) => log(redactConnectionString(d.toString())));
+    child.stderr.on('data', (d) => log(redactConnectionString(d.toString())));
 
     const cancelInterval = setInterval(() => {
       if (!isCancelled) return;
@@ -263,7 +263,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
 
         const ws = fs.createWriteStream(outPath);
         child.stdout.pipe(ws);
-        child.stderr.on('data', (d) => log(d.toString()));
+        child.stderr.on('data', (d) => log(redactConnectionString(d.toString())));
 
         const cancelInterval = setInterval(() => {
           if (!isCancelled) return;
@@ -296,7 +296,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
       emit(log, 'Dumping globals (roles/privileges) via pg_dumpall ...');
       const globalsPath = path.join(jobDir, 'globals.sql');
       await new Promise((resolve, reject) => {
-        const child = spawn(pgDumpAll, ['--globals-only', '--no-role-passwords', connectionString], {
+        const child = spawn(pgDumpAll, ['--globals-only', '--no-role-passwords', `--dbname=${connectionString}`], {
           env,
           cwd: jobDir,
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -305,7 +305,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
 
         const ws = fs.createWriteStream(globalsPath);
         child.stdout.pipe(ws);
-        child.stderr.on('data', (d) => log(d.toString()));
+        child.stderr.on('data', (d) => log(redactConnectionString(d.toString())));
 
         const cancelInterval = setInterval(() => {
           if (!isCancelled) return;

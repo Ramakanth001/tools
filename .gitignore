@@ -8,3 +8,8 @@ node_modules/
 
 # Generated backups / dumps
 **/backups/
+
+demo-data/
+
+mysql-pg-migrate/state
+public/assets/*

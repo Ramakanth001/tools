@@ -2,19 +2,45 @@ const { requireToolDep } = require('../../requireToolDep');
 const { Client, Pool } = requireToolDep('pg');
 const crypto = require('node:crypto');
 const { buildInsertSql, qualifyTable, buildCreateTableSql, buildAlterTableAddColumnsSql, buildAlterTableAddConstraintSql, quoteIdentifier } = require('./sql');
+const {
+  mapMysqlColumnToPostgres: mapMysqlColumnToPostgresByCatalog,
+  compareMysqlToPostgresColumn: compareMysqlToPostgresColumnByCatalog,
+} = require('./typeCompatibility');
 
 const MASKED_CONNECTION_STRING = '[provided]';
+
+function normalizeSslMode(input) {
+  const value = String(input || '').trim().toLowerCase();
+  if (!value) return 'prefer';
+  if (['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full', 'no-verify'].includes(value)) return value;
+  if (value === 'verify_ca') return 'verify-ca';
+  if (value === 'verify_full') return 'verify-full';
+  return 'prefer';
+}
+
+function resolvePgSslConfig(connection) {
+  const mode = normalizeSslMode(connection?.pooler?.sslmode);
+  if (mode === 'disable' || mode === 'allow' || mode === 'prefer') return undefined;
+  if (mode === 'no-verify') return { rejectUnauthorized: false };
+  return { rejectUnauthorized: true };
+}
+
+function buildPostgresClientConfig(connection) {
+  const connectionString = buildPostgresConnectionString(connection);
+  const ssl = resolvePgSslConfig(connection);
+  return ssl ? { connectionString, ssl } : { connectionString };
+}
 
 function buildPostgresConnectionString(connection) {
   const inlineConnectionString = String(connection.connectionString || '').trim();
   if (inlineConnectionString && inlineConnectionString !== MASKED_CONNECTION_STRING) return inlineConnectionString;
   const pooler = connection.pooler || {};
   const password = String(pooler.password || '');
-  return `postgresql://${encodeURIComponent(pooler.user)}:${encodeURIComponent(password)}@${pooler.host}:${Number(pooler.port || 5432)}/${encodeURIComponent(pooler.database)}?sslmode=${encodeURIComponent(pooler.sslmode || 'require')}`;
+  return `postgresql://${encodeURIComponent(pooler.user)}:${encodeURIComponent(password)}@${pooler.host}:${Number(pooler.port || 5432)}/${encodeURIComponent(pooler.database)}?sslmode=${encodeURIComponent(normalizeSslMode(pooler.sslmode))}`;
 }
 
 async function withClient(connection, fn) {
-  const client = new Client({ connectionString: buildPostgresConnectionString(connection) });
+  const client = new Client(buildPostgresClientConfig(connection));
   await client.connect();
   try {
     return await fn(client);
@@ -28,7 +54,7 @@ const poolCache = new Map();
 function getPool(connection) {
   const connectionString = buildPostgresConnectionString(connection);
   if (!poolCache.has(connectionString)) {
-    poolCache.set(connectionString, new Pool({ connectionString, max: 10, idleTimeoutMillis: 30000 }));
+    poolCache.set(connectionString, new Pool({ ...buildPostgresClientConfig(connection), max: 10, idleTimeoutMillis: 30000 }));
   }
   return poolCache.get(connectionString);
 }
@@ -260,7 +286,7 @@ async function writeRowsToPostgres(connection, { schema, tableName, rows, mode =
   return withPooledClient(connection, async (client) => {
     const { sql, values } = buildInsertSql({ schema, table: tableName, columns, rows: filteredRows, conflictKeys, mode, updateColumns: columns.filter((column) => !conflictKeys.includes(column)) });
     const result = await client.query(sql, values);
-    return { rowCount: result.rowCount || filteredRows.length };
+    return { rowCount: result.rowCount ?? filteredRows.length };
   });
 }
 
@@ -327,22 +353,12 @@ function inferSetValues(column) {
 
 function compareMysqlToPostgresColumn(sourceColumn, targetColumn) {
   const proposed = mapMysqlColumnToPostgres(sourceColumn);
-  const sourceNorm = normalizePgTypeForCompare(proposed.pgType);
-  const targetNorm = normalizePgTypeForCompare(targetColumn?.fullType || targetColumn?.dataType || '');
-  const compatibleType = sourceNorm === targetNorm
-    || (sourceNorm.startsWith('varchar(') && targetNorm === 'text')
-    || (sourceNorm === 'jsonb' && /^json/.test(targetNorm))
-    || (sourceNorm === 'bytea' && /^bytea$/.test(targetNorm))
-    || (sourceNorm === 'bool' && targetNorm === 'boolean');
-  const nullableCompatible = sourceColumn.nullable !== false || targetColumn?.nullable !== false;
+  const comparison = compareMysqlToPostgresColumnByCatalog(sourceColumn, targetColumn);
   const defaultCompatible = !proposed.defaultExpression || !targetColumn?.defaultValue || normalizePgTypeForCompare(proposed.defaultExpression) === normalizePgTypeForCompare(targetColumn.defaultValue);
   return {
-    compatible: compatibleType && nullableCompatible,
-    compatibleType,
-    nullableCompatible,
+    ...comparison,
+    compatible: Boolean(comparison.compatible),
     defaultCompatible,
-    proposedType: proposed.pgType,
-    targetType: targetColumn?.fullType || targetColumn?.dataType || null,
     proposedDefault: proposed.defaultExpression,
     targetDefault: targetColumn?.defaultValue || null,
     enumValues: proposed.enumValues || [],
@@ -350,43 +366,26 @@ function compareMysqlToPostgresColumn(sourceColumn, targetColumn) {
   };
 }
 
-function mapMysqlColumnToPostgres(column) {
-  const type = String(column?.dataType || column?.fullType || '').toLowerCase();
-  const fullType = String(column?.fullType || '').toLowerCase();
-  let pgType = 'text';
-  let defaultExpression = null;
+function describeCompatibilityBlockers(columnName, comparison = {}) {
+  const reasons = [];
+  if (!comparison.compatibleType) {
+    reasons.push(`type ${comparison.proposedType || 'unknown'} -> ${comparison.targetType || 'unknown'}`);
+  }
+  if (!comparison.nullableCompatible) {
+    reasons.push('target is NOT NULL but source can contain NULL values');
+  }
+  return `Incompatible target column ${columnName}: ${reasons.join('; ') || 'manual schema review required'}`;
+}
+
+function mapMysqlColumnToPostgres(column = {}) {
+  const mapped = mapMysqlColumnToPostgresByCatalog(column || {});
   const enumValues = inferEnumValues(column);
   const setValues = inferSetValues(column);
-
-  if (/bigint/.test(type)) pgType = 'bigint';
-  else if (/tinyint\(1\)|boolean/.test(fullType) || /bool/.test(type)) pgType = 'boolean';
-  else if (/tinyint|smallint/.test(type)) pgType = 'smallint';
-  else if (/mediumint|int|integer/.test(type)) pgType = 'integer';
-  else if (/decimal|numeric/.test(type)) {
-    const precision = fullType.match(/\((\d+)\s*,\s*(\d+)\)/);
-    pgType = precision ? `numeric(${precision[1]},${precision[2]})` : 'numeric';
-  } else if (/double/.test(type)) pgType = 'double precision';
-  else if (/float/.test(type)) pgType = 'real';
-  else if (/json/.test(type)) pgType = 'jsonb';
-  else if (/datetime|timestamp/.test(type)) pgType = 'timestamp with time zone';
-  else if (/date/.test(type)) pgType = 'date';
-  else if (/time/.test(type)) pgType = 'time';
-  else if (/blob|binary|varbinary/.test(type)) pgType = 'bytea';
-  else if (/enum/.test(type)) pgType = 'text';
-  else if (/set/.test(type)) pgType = 'jsonb';
-  else if (/char|varchar|text|enum|set/.test(type)) {
-    const len = fullType.match(/\((\d+)\)/);
-    pgType = /char|varchar/.test(type) && len ? `varchar(${len[1]})` : 'text';
-  }
-
-  if (column.autoIncrement) {
-    if (pgType === 'bigint') pgType = 'bigint';
-    else pgType = 'integer';
-  }
+  let defaultExpression = null;
 
   if (!column.autoIncrement && !column.generated) {
-    defaultExpression = normalizeMysqlDefaultExpression(column.defaultValue, pgType);
-    if (/^jsonb$/i.test(pgType) && setValues.length && column.defaultValue) {
+    defaultExpression = normalizeMysqlDefaultExpression(column.defaultValue, mapped.pgType);
+    if (/^jsonb$/i.test(mapped.pgType) && setValues.length && column.defaultValue) {
       const setItems = String(column.defaultValue)
         .split(',')
         .map((item) => item.trim())
@@ -396,13 +395,9 @@ function mapMysqlColumnToPostgres(column) {
   }
 
   return {
+    ...mapped,
     name: column.name,
-    sourceType: column.fullType || column.dataType,
-    pgType,
-    nullable: column.nullable !== false,
     defaultExpression,
-    identity: Boolean(column.autoIncrement),
-    generated: Boolean(column.generated),
     enumValues,
     setValues,
   };
@@ -411,27 +406,41 @@ function mapMysqlColumnToPostgres(column) {
 function buildProvisioningPlan({ sourceCatalog, targetCatalog, targetSchema, tableMappings }) {
   const targetTables = new Map((targetCatalog.tables || []).map((table) => [table.name, table]));
   const sourceTables = new Map((sourceCatalog.tables || []).map((table) => [table.name, table]));
+  const mappingsBySource = new Map((tableMappings || []).filter((mapping) => mapping.enabled !== false).map((mapping) => [mapping.sourceTable, mapping]));
 
-  const plan = (tableMappings || []).map((mapping) => {
+  const plan = (tableMappings || []).filter((mapping) => mapping.enabled !== false).map((mapping) => {
     const sourceTable = sourceTables.get(mapping.sourceTable);
     const targetTable = mapping.targetTable ? targetTables.get(mapping.targetTable) : null;
     const desiredTargetName = mapping.targetTable || mapping.sourceTable;
-    const enabledMappings = (mapping.columnMappings || []).filter((item) => item.enabled !== false);
-    const shouldCreate = !targetTable && (mapping.createTargetTable === true || mapping.targetTableMode === 'create_new' || !mapping.targetTable);
+    const enabledMappings = (mapping.columnMappings || []).filter((item) => item.enabled !== false && item.targetColumnMode !== 'ignore' && item.targetColumn);
+    const hasExplicitColumnMappings = (mapping.columnMappings || []).length > 0;
+    const shouldCreate = !targetTable && (mapping.createTargetTable === true || mapping.targetTableMode === 'create_new');
+    const sourceToTargetColumn = new Map();
     const desiredColumns = (sourceTable?.columns || [])
       .filter((column) => {
-        if (shouldCreate) return true;
+        if (shouldCreate && !hasExplicitColumnMappings) return true;
         return enabledMappings.some((item) => item.sourceColumn === column.name);
       })
       .map((column) => {
         const mapped = enabledMappings.find((item) => item.sourceColumn === column.name);
         const targetName = mapped?.targetColumn || column.name;
+        sourceToTargetColumn.set(column.name, targetName);
         return { ...mapMysqlColumnToPostgres(column), name: targetName, sourceColumn: column.name };
       });
-    const primaryKey = (sourceTable?.primaryKey || []).map((sourceColumn) => {
-      const mapped = enabledMappings.find((item) => item.sourceColumn === sourceColumn);
-      return mapped?.targetColumn || sourceColumn;
-    }).filter(Boolean);
+    const desiredColumnNames = new Set(desiredColumns.map((column) => column.name));
+    function mapSourceColumnName(sourceColumn) {
+      return sourceToTargetColumn.get(sourceColumn) || (hasExplicitColumnMappings ? null : sourceColumn);
+    }
+    function mapSourceColumns(sourceColumns = []) {
+      const mapped = [];
+      for (const sourceColumn of sourceColumns || []) {
+        const targetColumn = mapSourceColumnName(sourceColumn);
+        if (!targetColumn || !desiredColumnNames.has(targetColumn)) return null;
+        mapped.push(targetColumn);
+      }
+      return mapped;
+    }
+    const primaryKey = mapSourceColumns(sourceTable?.primaryKey || []) || [];
 
     const targetColumns = new Map((targetTable?.columns || []).map((column) => [column.name, column]));
     const missingColumns = [];
@@ -451,15 +460,20 @@ function buildProvisioningPlan({ sourceCatalog, targetCatalog, targetSchema, tab
       const sourceColumn = (sourceTable?.columns || []).find((column) => column.name === desiredColumn.sourceColumn);
       const comparison = compareMysqlToPostgresColumn(sourceColumn || desiredColumn, existingColumn);
       if (comparison.compatible) {
-        compatibleColumns.push({ name: desiredColumn.name, comparison, state: comparison.defaultCompatible ? 'compatible' : 'compatible_with_default_difference' });
+        const needsReview = !comparison.defaultCompatible || (comparison.reviewReasons || []).length > 0;
+        compatibleColumns.push({ name: desiredColumn.name, comparison, state: needsReview ? 'compatible_with_review' : 'compatible', compatibilityClass: comparison.compatibilityClass || 'direct' });
         if (!comparison.defaultCompatible) {
           readiness.level = readiness.level === 'blocked' ? 'blocked' : 'review';
           readiness.reasons.push(`Default differs for column ${desiredColumn.name}`);
         }
+        for (const reason of comparison.reviewReasons || []) {
+          readiness.level = readiness.level === 'blocked' ? 'blocked' : 'review';
+          readiness.reasons.push(`Review ${desiredColumn.name}: ${reason}`);
+        }
       } else {
         incompatibleColumns.push({ name: desiredColumn.name, comparison, sourceColumn: desiredColumn.sourceColumn });
         readiness.level = 'blocked';
-        readiness.reasons.push(`Incompatible target column ${desiredColumn.name}`);
+        readiness.reasons.push(describeCompatibilityBlockers(desiredColumn.name, comparison));
       }
     }
 
@@ -481,20 +495,23 @@ function buildProvisioningPlan({ sourceCatalog, targetCatalog, targetSchema, tab
         }
       }
       const sourceIndexes = sourceTable?.indexes || [];
+      const seenIndexNames = new Set();
       for (const index of sourceIndexes) {
         if (index.name === 'PRIMARY') continue;
+        if (seenIndexNames.has(index.name)) continue;
+        seenIndexNames.add(index.name);
+        const sourceIndexColumns = sourceIndexes.filter((item) => item.name === index.name).sort((a, b) => a.seq - b.seq).map((item) => item.column);
+        const mappedIndexColumns = mapSourceColumns(sourceIndexColumns);
+        if (!mappedIndexColumns?.length) continue;
         indexesToCreate.push({
           name: `${desiredTargetName}_${index.name}`,
           unique: Boolean(index.unique),
-          columns: sourceIndexes.filter((item) => item.name === index.name).sort((a, b) => a.seq - b.seq).map((item) => item.column),
+          columns: mappedIndexColumns,
         });
       }
       for (const key of sourceTable?.uniqueKeys || []) {
-        const mappedColumns = (key.columns || []).map((sourceColumn) => {
-          const mapped = enabledMappings.find((item) => item.sourceColumn === sourceColumn);
-          return mapped?.targetColumn || sourceColumn;
-        }).filter(Boolean);
-        if (mappedColumns.length) {
+        const mappedColumns = mapSourceColumns(key.columns || []);
+        if (mappedColumns?.length) {
           constraintsToCreate.push({
             type: 'unique',
             name: `${desiredTargetName}_${key.name}`,
@@ -504,12 +521,16 @@ function buildProvisioningPlan({ sourceCatalog, targetCatalog, targetSchema, tab
         }
       }
       for (const fk of sourceTable?.foreignKeys || []) {
-        const mappedColumn = enabledMappings.find((item) => item.sourceColumn === fk.column)?.targetColumn || fk.column;
+        const mappedColumn = mapSourceColumnName(fk.column);
+        const referencedMapping = mappingsBySource.get(fk.referencedTable);
+        const referencedTargetTable = referencedMapping?.targetTable || fk.referencedTable;
+        const referencedTargetColumn = (referencedMapping?.columnMappings || []).find((item) => item.enabled !== false && item.targetColumnMode !== 'ignore' && item.sourceColumn === fk.referencedColumn)?.targetColumn || fk.referencedColumn;
+        if (!mappedColumn) continue;
         constraintsToCreate.push({
           type: 'foreign_key',
           name: `${desiredTargetName}_${fk.name}`,
           columns: [mappedColumn],
-          references: { table: fk.referencedTable, columns: [fk.referencedColumn] },
+          references: { table: referencedTargetTable, columns: [referencedTargetColumn] },
           autoApplySafe: false,
           reason: 'requires referenced table/column parity verification',
         });
@@ -523,13 +544,29 @@ function buildProvisioningPlan({ sourceCatalog, targetCatalog, targetSchema, tab
       readiness.reasons.push('Target name conflicts with existing table');
     } else if (incompatibleColumns.length) {
       action = 'manual_fix_required';
-      issues.push(...incompatibleColumns.map((column) => ({ kind: 'incompatible_target_column', column: column.name, sourceColumn: column.sourceColumn, message: `Source ${column.comparison.proposedType} is incompatible with existing target ${column.comparison.targetType}` })));
+      issues.push(...incompatibleColumns.map((column) => ({
+        kind: 'incompatible_target_column',
+        column: column.name,
+        sourceColumn: column.sourceColumn,
+        message: describeCompatibilityBlockers(column.name, column.comparison),
+        comparison: column.comparison,
+      })));
       readiness.level = 'blocked';
     } else if (missingColumns.length) {
       action = 'alter_table_add_columns';
       ddl = buildAlterTableAddColumnsSql({ schema: targetSchema, table: desiredTargetName, columns: missingColumns });
       readiness.level = 'provision';
       readiness.reasons.push('Missing columns will be added');
+      for (const column of missingColumns) {
+        if (!column.nullable && !column.defaultExpression && !column.identity && !column.generated) {
+          issues.push({
+            kind: 'not_null_column_added_nullable',
+            column: column.name,
+            message: `Column ${column.name} is NOT NULL in MySQL but will be added nullable first; backfill and add NOT NULL manually if required.`,
+          });
+          readiness.reasons.push(`Backfill/re-apply NOT NULL manually for ${column.name}`);
+        }
+      }
     }
 
     const ddlStatements = [ddl, ...buildAlterTableAddConstraintSql({ schema: targetSchema, table: desiredTargetName, constraints: constraintsToCreate.filter((item) => item.autoApplySafe) })].filter(Boolean);
@@ -593,4 +630,4 @@ async function countPostgresRows(connection, schema, tableName) {
   });
 }
 
-module.exports = { buildPostgresConnectionString, listPostgresSchemas, introspectPostgresSchema, samplePostgresTableRows, truncatePostgresTable, writeRowsToPostgres, writeBatchedRowsToPostgres, withClient, withPooledClient, mapMysqlColumnToPostgres, buildProvisioningPlan, createTargetTables, compareMysqlToPostgresColumn, countPostgresRows };
+module.exports = { buildPostgresConnectionString, buildPostgresClientConfig, listPostgresSchemas, introspectPostgresSchema, samplePostgresTableRows, truncatePostgresTable, writeRowsToPostgres, writeBatchedRowsToPostgres, withClient, withPooledClient, mapMysqlColumnToPostgres, buildProvisioningPlan, createTargetTables, compareMysqlToPostgresColumn, countPostgresRows, normalizeSslMode, resolvePgSslConfig };
