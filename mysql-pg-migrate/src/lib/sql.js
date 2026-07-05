@@ -2,6 +2,10 @@ function quoteIdentifier(name) {
   return `"${String(name || '').replace(/"/g, '""')}"`;
 }
 
+function quoteLiteral(value) {
+  return `'${String(value == null ? '' : value).replace(/'/g, "''")}'`;
+}
+
 function qualifyTable(schema, table) {
   return `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
 }
@@ -69,18 +73,45 @@ function buildAlterTableAddColumnsSql({ schema, table, columns }) {
 
 function buildAlterTableAddConstraintSql({ schema, table, constraints = [] }) {
   if (!Array.isArray(constraints) || !constraints.length) return [];
+  function wrapConstraintStatement(constraint, statement) {
+    return [
+      'DO $$',
+      'BEGIN',
+      `  IF NOT EXISTS (`,
+      `    SELECT 1`,
+      `    FROM pg_constraint c`,
+      `    JOIN pg_class rel ON rel.oid = c.conrelid`,
+      `    JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace`,
+      `    WHERE nsp.nspname = ${quoteLiteral(schema)}`,
+      `      AND rel.relname = ${quoteLiteral(table)}`,
+      `      AND c.conname = ${quoteLiteral(constraint.name)}`,
+      `  ) THEN`,
+      `    ${statement};`,
+      '  END IF;',
+      'END $$',
+    ].join('\n');
+  }
   return constraints.map((constraint) => {
     if (constraint.type === 'unique' && constraint.columns?.length) {
-      return `ALTER TABLE ${qualifyTable(schema, table)} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} UNIQUE (${constraint.columns.map(quoteIdentifier).join(', ')})`;
+      return wrapConstraintStatement(
+        constraint,
+        `ALTER TABLE ${qualifyTable(schema, table)} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} UNIQUE (${constraint.columns.map(quoteIdentifier).join(', ')})`,
+      );
     }
     if (constraint.type === 'foreign_key' && constraint.columns?.length && constraint.references?.table && constraint.references?.columns?.length) {
-      return `ALTER TABLE ${qualifyTable(schema, table)} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} FOREIGN KEY (${constraint.columns.map(quoteIdentifier).join(', ')}) REFERENCES ${qualifyTable(schema, constraint.references.table)} (${constraint.references.columns.map(quoteIdentifier).join(', ')})`;
+      return wrapConstraintStatement(
+        constraint,
+        `ALTER TABLE ${qualifyTable(schema, table)} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} FOREIGN KEY (${constraint.columns.map(quoteIdentifier).join(', ')}) REFERENCES ${qualifyTable(schema, constraint.references.table)} (${constraint.references.columns.map(quoteIdentifier).join(', ')})`,
+      );
     }
     if (constraint.type === 'check' && constraint.expression) {
-      return `ALTER TABLE ${qualifyTable(schema, table)} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} CHECK (${constraint.expression})`;
+      return wrapConstraintStatement(
+        constraint,
+        `ALTER TABLE ${qualifyTable(schema, table)} ADD CONSTRAINT ${quoteIdentifier(constraint.name)} CHECK (${constraint.expression})`,
+      );
     }
     return null;
   }).filter(Boolean);
 }
 
-module.exports = { quoteIdentifier, qualifyTable, buildInsertSql, buildCreateTableSql, buildAlterTableAddColumnsSql, buildAlterTableAddConstraintSql };
+module.exports = { quoteIdentifier, quoteLiteral, qualifyTable, buildInsertSql, buildCreateTableSql, buildAlterTableAddColumnsSql, buildAlterTableAddConstraintSql };

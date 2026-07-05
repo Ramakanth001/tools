@@ -3,9 +3,10 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { z } = require('zod');
 
-const { runBackup } = require('./backupRunner');
+const { runBackup, buildPgToolEnv } = require('./backupRunner');
 const { zipFolderToFileStream } = require('./zipStream');
 const { getSchemaSnapshot, normalizeSnapshot } = require('./schemaIntrospector');
+const { createJobStore } = require('../../src/jobStore');
 
 const BACKUPS_DIR = path.join(__dirname, '..', 'backups');
 const PROFILES_JSON = path.join(__dirname, '..', 'pgbackup.profiles.json');
@@ -175,6 +176,11 @@ function validatePoolerPassword(parsedData, res) {
 function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {}) {
   const router = express.Router();
   const jobs = new Map();
+  const jobStore = createJobStore({ backupsDir: BACKUPS_DIR });
+  const jobsReady = jobStore.hydrate(jobs).catch((error) => {
+    console.warn(`WARN: could not load pg-backup job metadata: ${error?.message || String(error)}`);
+  });
+  const persistJob = (job) => jobStore.persist(job).catch(() => undefined);
 
   router.use(express.json({ limit: '2mb' }));
 
@@ -188,6 +194,7 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
   });
 
   router.post('/backup', async (req, res) => {
+    await jobsReady;
     const parsed = BackupRequest.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ ok: false, error: parsed.error.flatten() });
@@ -200,10 +207,12 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
     }
 
     const job = createJob(jobs);
+    await persistJob(job);
     res.json({ ok: true, jobId: job.id });
 
     (async () => {
       job.status = 'running';
+      await persistJob(job);
       try {
         await fsp.mkdir(BACKUPS_DIR, { recursive: true });
         jobLog(job, 'Starting backup job...');
@@ -229,6 +238,7 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
         if (job.cancelRequested) {
           job.status = 'cancelled';
           jobLog(job, 'Cancelled before zipping.');
+          await persistJob(job);
           return;
         }
 
@@ -251,10 +261,12 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
           job.status = 'done';
           jobLog(job, 'Done.');
         }
+        await persistJob(job);
       } catch (e) {
         if (job.cancelRequested || e?.code === 'JOB_CANCELLED') {
           job.status = 'cancelled';
           jobLog(job, 'Cancelled.');
+          await persistJob(job);
           return;
         }
         job.status = 'error';
@@ -263,6 +275,7 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
         job.code = e?.code || null;
         jobLog(job, `ERROR: ${job.error}`);
         if (job.code) jobLog(job, `ERROR_CODE: ${job.code}`);
+        await persistJob(job);
       }
     })();
   });
@@ -276,11 +289,11 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
     const cs = withSslModeRequireIfMissing(parsed.data.connectionString);
     const { spawn } = require('node:child_process');
     const psql = process.env.PSQL_PATH || 'psql';
-    const env = { ...process.env, DATABASE_URL: cs };
+    const env = buildPgToolEnv(cs);
 
     try {
       await new Promise((resolve, reject) => {
-        const child = spawn(psql, [cs, '-v', 'ON_ERROR_STOP=1', '-q', '-t', '-c', 'select 1;'], {
+        const child = spawn(psql, ['-v', 'ON_ERROR_STOP=1', '-q', '-t', '-c', 'select 1;'], {
           env,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -364,7 +377,8 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
     }
   });
 
-  router.get('/jobs/:id', (req, res) => {
+  router.get('/jobs/:id', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'not found' });
     res.json({
@@ -383,15 +397,18 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
   });
 
   router.post('/jobs/:id/cancel', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'not found' });
     if (job.status !== 'running') return res.status(409).json({ ok: false, error: `job is ${job.status}` });
     cancelJob(job);
     jobLog(job, 'Cancel requested. Sending SIGTERM to child processes...');
+    await persistJob(job);
     res.json({ ok: true });
   });
 
   router.get('/jobs', async (req, res) => {
+    await jobsReady;
     const list = listJobsFromStore(jobs, { q: req.query.q, limit: req.query.limit });
     res.json({
       ok: true,
@@ -407,6 +424,7 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
   });
 
   router.post('/jobs/:id/delete', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'not found' });
     if (job.status === 'running') return res.status(409).json({ ok: false, error: 'job is running' });
@@ -419,10 +437,12 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
     }
 
     jobs.delete(job.id);
+    await jobStore.remove(job);
     res.json({ ok: true });
   });
 
   router.post('/cleanup', async (req, res) => {
+    await jobsReady;
     const schema = z.object({
       days: z.coerce.number().int().positive().default(14),
       keep: z.coerce.number().int().positive().default(50),
@@ -447,13 +467,15 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
         // ignore cleanup errors
       }
       jobs.delete(j.id);
+      await jobStore.remove(j);
       deleted++;
     }
 
     res.json({ ok: true, deleted });
   });
 
-  router.get('/jobs/:id/events', (req, res) => {
+  router.get('/jobs/:id/events', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).end();
 
@@ -493,6 +515,7 @@ function registerPgBackupRoutes(app, { basePath = '/api/tools/pg-backup' } = {})
   });
 
   router.get('/jobs/:id/download', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).end();
     if (!job.zipPath) return res.status(409).json({ ok: false, error: 'zip not ready' });

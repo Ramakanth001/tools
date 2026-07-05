@@ -5,10 +5,11 @@
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
-    "dev": "node ../pg-backup/node_modules/concurrently/dist/bin/concurrently.js --kill-others=false \"node src/server.js\" \"node ../pg-backup/node_modules/vite/bin/vite.js --config vite.config.js\"",
+    "dev": "node ../src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"node ../src/runPackageBin.js vite --config vite.config.js\"",
     "start": "node src/server.js",
-    "build": "node ../pg-backup/node_modules/vite/bin/vite.js build --config vite.config.js",
-    "preview": "node ../pg-backup/node_modules/vite/bin/vite.js preview --config vite.config.js --port 5175"
+    "test": "node test/transformEngine.test.js",
+    "build": "node ../src/runPackageBin.js vite build --config vite.config.js",
+    "preview": "node ../src/runPackageBin.js vite preview --config vite.config.js --port 5175"
   },
   "dependencies": {
     "archiver": "^7.0.1",

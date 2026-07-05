@@ -12,4 +12,4 @@ node_modules/
 demo-data/
 
 mysql-pg-migrate/state
-public/assets/*
+**/public/assets/*

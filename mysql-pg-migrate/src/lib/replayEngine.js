@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { transformRow } = require('./valueTransforms');
+const { transformRowsForTable } = require('./transformEngine');
 const { writeRowsToPostgres } = require('./postgresIntrospector');
 
 function makeId(prefix) {
@@ -10,7 +10,7 @@ function findTableMapping(project, tableName) {
   return (project.tableMappings || []).find((table) => table.sourceTable === tableName || table.targetTable === tableName) || null;
 }
 
-async function replayCorrectedRows({ persistence, runId, project, targetConnection, corrections = [] }) {
+async function replayCorrectedRows({ persistence, runId, project, targetConnection, sourceConnection, corrections = [] }) {
   const results = [];
   for (const correction of corrections) {
     const tableMapping = findTableMapping(project, correction.tableName);
@@ -20,7 +20,30 @@ async function replayCorrectedRows({ persistence, runId, project, targetConnecti
     }
 
     const sourceRow = correction.sourceRow || correction.rowPayload || correction.correctedRow || {};
-    const transformedRow = correction.transformedRow || transformRow({ row: sourceRow, tableMapping });
+    let transformedRow = correction.transformedRow || null;
+    if (!transformedRow) {
+      const transformed = await transformRowsForTable({
+        rows: [sourceRow],
+        tableMapping,
+        sourceConnection,
+        schema: project.sourceSchema,
+      });
+      if (transformed.rejected?.length) {
+        results.push({
+          errorId: correction.errorId,
+          tableName: correction.tableName,
+          status: 'failed',
+          classification: correction.classification || 'manual-correction',
+          reason: transformed.rejected[0].error?.message || String(transformed.rejected[0].error),
+        });
+        continue;
+      }
+      transformedRow = transformed.transformedRows[0] || null;
+    }
+    if (!transformedRow) {
+      results.push({ errorId: correction.errorId, tableName: correction.tableName, status: 'skipped', reason: 'row_filtered_by_transform' });
+      continue;
+    }
     const classification = correction.classification || (correction.errorId ? 'replayed-error' : 'manual-correction');
     try {
       const outcome = await writeRowsToPostgres(targetConnection, {

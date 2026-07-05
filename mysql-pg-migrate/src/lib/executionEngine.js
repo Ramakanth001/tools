@@ -2,7 +2,7 @@ const crypto = require('node:crypto');
 
 const { countMysqlRows, fetchMysqlRowsPageFromSession, openMysqlReadSession, closeMysqlReadSession, compareCursorValues } = require('./mysqlIntrospector');
 const { truncatePostgresTable, writeRowsToPostgres, writeBatchedRowsToPostgres } = require('./postgresIntrospector');
-const { transformRow } = require('./valueTransforms');
+const { collectRequiredSourceColumnsForTableMapping, transformRowsForTable } = require('./transformEngine');
 const { runWithConcurrency } = require('./async');
 
 function makeId(prefix) {
@@ -10,6 +10,18 @@ function makeId(prefix) {
 }
 
 function createExecutionEngine({ persistence }) {
+  function cancellationError() {
+    const error = new Error('Run cancelled');
+    error.code = 'RUN_CANCELLED';
+    return error;
+  }
+
+  function throwIfCancelled(options = {}) {
+    if (typeof options.isCancelled === 'function' && options.isCancelled()) {
+      throw cancellationError();
+    }
+  }
+
   function chunkFingerprint(rows) {
     return crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
   }
@@ -229,20 +241,17 @@ function createExecutionEngine({ persistence }) {
     };
   }
 
-  async function writeChunk({ runId, project, tableMapping, sourceRows, publish, options }) {
-    const transformed = [];
-    const rejected = [];
-
-    for (let index = 0; index < sourceRows.length; index += 1) {
-      const row = sourceRows[index];
-      try {
-        const transformedRow = transformRow({ row, tableMapping });
-        if (transformedRow == null) continue;
-        transformed.push(transformedRow);
-      } catch (error) {
-        rejected.push({ index, row, error });
-      }
-    }
+  async function writeChunk({ runId, project, tableMapping, sourceRows, sourceSession, publish, options }) {
+    throwIfCancelled(options);
+    const transformOutcome = await transformRowsForTable({
+      rows: sourceRows,
+      tableMapping,
+      sourceSession,
+      schema: project.sourceSchema,
+      sourceConnection: project.runtimeSourceConnection || project.sourceConnection,
+    });
+    const transformed = transformOutcome.transformedRows || [];
+    const rejected = transformOutcome.rejected || [];
 
     if (rejected.length && options.errorPolicy === 'fail-fast') {
       const failure = rejected[0];
@@ -254,7 +263,16 @@ function createExecutionEngine({ persistence }) {
       publish('log', { level: 'warn', message: `Rejected row during transform for ${tableMapping.sourceTable}: ${rejectedRow.error.message}` });
     }
 
-    if (!transformed.length) return { inserted: 0, rejected: rejected.length };
+    if (!transformed.length) {
+      return {
+        inserted: 0,
+        rejected: rejected.length,
+        transformed: 0,
+        filtered: transformOutcome.filteredRowCount || 0,
+        transformRejected: rejected.length,
+        writeRejected: 0,
+      };
+    }
 
     try {
       const writer = options.batchSize && Number(options.batchSize) > 0 ? writeBatchedRowsToPostgres : writeRowsToPostgres;
@@ -266,11 +284,20 @@ function createExecutionEngine({ persistence }) {
         conflictKeys: tableMapping.conflictKeys || [],
         batchSize: options.batchSize,
       });
-      return { inserted: result.rowCount ?? transformed.length, rejected: rejected.length };
+      return {
+        inserted: result.rowCount ?? transformed.length,
+        rejected: rejected.length,
+        transformed: transformed.length,
+        filtered: transformOutcome.filteredRowCount || 0,
+        transformRejected: rejected.length,
+        writeRejected: 0,
+      };
     } catch (error) {
       if (options.errorPolicy === 'fail-fast') throw error;
       let inserted = 0;
+      let writeRejected = 0;
       for (const row of transformed) {
+        throwIfCancelled(options);
         try {
           const result = await writeRowsToPostgres(project.runtimeTargetConnection || project.targetConnection, {
             schema: project.targetSchema,
@@ -281,15 +308,24 @@ function createExecutionEngine({ persistence }) {
           });
           inserted += result.rowCount ?? 1;
         } catch (singleError) {
+          writeRejected += 1;
           await saveError(runId, tableMapping.sourceTable, singleError, { phase: 'write', row });
           publish('log', { level: 'warn', message: `Rejected row during write for ${tableMapping.sourceTable}: ${singleError.message}` });
         }
       }
-      return { inserted, rejected: rejected.length + (transformed.length - inserted) };
+      return {
+        inserted,
+        rejected: rejected.length + writeRejected,
+        transformed: transformed.length,
+        filtered: transformOutcome.filteredRowCount || 0,
+        transformRejected: rejected.length,
+        writeRejected,
+      };
     }
   }
 
   async function executeTable({ runId, tableMapping, publish, project, options }) {
+    throwIfCancelled(options);
     if (!tableMapping.targetTable) throw new Error(`Missing target table for source table ${tableMapping.sourceTable}`);
     const enabledMappings = (tableMapping.columnMappings || []).filter((column) => column.enabled !== false && column.targetColumnMode !== 'ignore' && column.targetColumn);
     if (!enabledMappings.length) throw new Error(`No enabled mapped columns for source table ${tableMapping.sourceTable}`);
@@ -305,6 +341,10 @@ function createExecutionEngine({ persistence }) {
     let offset = isIncremental ? 0 : Number(checkpoint?.offset || 0);
     let inserted = Number(checkpoint?.rowsInserted || 0);
     let rejected = Number(checkpoint?.rowsRejected || 0);
+    let transformed = Number(checkpoint?.rowsTransformed || 0);
+    let filtered = Number(checkpoint?.rowsFiltered || 0);
+    let transformRejected = Number(checkpoint?.rowsTransformRejected || 0);
+    let writeRejected = Number(checkpoint?.rowsWriteRejected || 0);
     let truncated = Boolean(checkpoint?.truncated);
     let lastValue = isIncremental ? null : (checkpoint?.keyset?.lastValue ?? null);
     let lastChunkFingerprint = checkpoint?.lastChunkFingerprint || null;
@@ -329,6 +369,7 @@ function createExecutionEngine({ persistence }) {
       ? { watermarkColumn, watermarkValue: highWatermark, tieBreakerColumn, tieBreakerValue: highWatermarkTieBreaker }
       : undefined;
     const totalRows = await countMysqlRows(project.runtimeSourceConnection || project.sourceConnection, project.sourceSchema, tableMapping.sourceTable, { sourceFilter: loadStrategy.sourceFilter, keyset: initialCountKeyset });
+    throwIfCancelled(options);
 
     const sourceSession = await openMysqlReadSession(project.runtimeSourceConnection || project.sourceConnection, { database: project.sourceSchema });
     publish('log', { level: 'info', message: `Source read consistency for ${tableMapping.sourceTable}: ${sourceSession.consistencyMode}` });
@@ -341,8 +382,9 @@ function createExecutionEngine({ persistence }) {
       }
 
       while (offset < totalRows) {
+        throwIfCancelled(options);
         const fetchColumns = Array.from(new Set([
-          ...enabledMappings.map((column) => column.sourceColumn),
+          ...collectRequiredSourceColumnsForTableMapping(tableMapping),
           ...(resumeStrategy.mode === 'keyset' ? [resumeStrategy.column] : []),
           ...(watermarkColumn ? [watermarkColumn] : []),
           ...(tieBreakerColumn ? [tieBreakerColumn] : []),
@@ -357,6 +399,7 @@ function createExecutionEngine({ persistence }) {
           keyset,
           sourceFilter: loadStrategy.sourceFilter,
         });
+        throwIfCancelled(options);
         if (!rows.length) break;
 
         const currentChunkFingerprint = chunkFingerprint(rows);
@@ -387,12 +430,32 @@ function createExecutionEngine({ persistence }) {
           continue;
         }
 
-        let outcome = { inserted: rows.length, rejected: 0 };
+        let outcome = { inserted: rows.length, rejected: 0, transformed: rows.length, filtered: 0, transformRejected: 0, writeRejected: 0 };
         if (!options.dryRun) {
-          outcome = await writeChunk({ runId, project, tableMapping, sourceRows: rows, publish, options });
+          outcome = await writeChunk({ runId, project, tableMapping, sourceRows: rows, sourceSession, publish, options });
+        } else {
+          const dryTransform = await transformRowsForTable({
+            rows,
+            tableMapping,
+            sourceSession,
+            schema: project.sourceSchema,
+            sourceConnection: project.runtimeSourceConnection || project.sourceConnection,
+          });
+          outcome = {
+            inserted: dryTransform.transformedRows.length,
+            rejected: dryTransform.rejected.length,
+            transformed: dryTransform.transformedRows.length,
+            filtered: dryTransform.filteredRowCount || 0,
+            transformRejected: dryTransform.rejected.length,
+            writeRejected: 0,
+          };
         }
         inserted += outcome.inserted;
         rejected += outcome.rejected;
+        transformed += outcome.transformed || 0;
+        filtered += outcome.filtered || 0;
+        transformRejected += outcome.transformRejected || 0;
+        writeRejected += outcome.writeRejected || 0;
         offset += rows.length;
         if (resumeStrategy.mode === 'keyset') {
           lastValue = rows[rows.length - 1]?.[resumeStrategy.column] ?? lastValue;
@@ -409,6 +472,10 @@ function createExecutionEngine({ persistence }) {
           offset,
           rowsInserted: inserted,
           rowsRejected: rejected,
+          rowsTransformed: transformed,
+          rowsFiltered: filtered,
+          rowsTransformRejected: transformRejected,
+          rowsWriteRejected: writeRejected,
           truncated,
           resumeStrategy,
           consistencyMode: sourceSession.consistencyMode,
@@ -430,6 +497,10 @@ function createExecutionEngine({ persistence }) {
           batch: rows.length,
           inserted,
           rejected,
+          transformed,
+          filtered,
+          transformRejected,
+          writeRejected,
         });
       }
     } finally {
@@ -456,6 +527,10 @@ function createExecutionEngine({ persistence }) {
       totalRows,
       inserted,
       rejected,
+      transformed,
+      filtered,
+      transformRejected,
+      writeRejected,
       resumeStrategy,
       consistencyMode: sourceSession.consistencyMode,
       highWatermark,
@@ -469,6 +544,7 @@ function createExecutionEngine({ persistence }) {
 
   async function executeRun({ runId, project, options, publish }) {
     await markRun(runId, { status: 'running' });
+    throwIfCancelled(options);
     const projectWatermarks = await loadProjectWatermarks(project);
     options.projectWatermarks = projectWatermarks;
     const plan = buildExecutionPlan(project, options);
@@ -476,6 +552,10 @@ function createExecutionEngine({ persistence }) {
     const tableStatuses = [];
     let totalInserted = 0;
     let totalRejected = 0;
+    let totalTransformed = 0;
+    let totalFiltered = 0;
+    let totalTransformRejected = 0;
+    let totalWriteRejected = 0;
     const executionProfile = {
       mode: options.mode,
       dryRun: Boolean(options.dryRun),
@@ -491,6 +571,7 @@ function createExecutionEngine({ persistence }) {
       tableWriteModes: tables.map((table) => ({ sourceTable: table.sourceTable, targetTable: table.targetTable, ...describeWriteMode(table) })),
       layers: plan.layers || [],
       verificationFingerprint: options.verificationFingerprint || null,
+      transformFingerprint: options.transformFingerprint || null,
     };
     publish('log', { level: 'info', message: `Execution plan prepared for ${tables.length} table(s)` });
     publish('log', {
@@ -502,9 +583,13 @@ function createExecutionEngine({ persistence }) {
     }
     const processTable = async (table) => {
       try {
+        throwIfCancelled(options);
         const status = await executeTable({ runId, tableMapping: table, publish, project, options });
         return { status };
       } catch (error) {
+        if (error?.code === 'RUN_CANCELLED') {
+          return { status: { tableName: table.sourceTable, targetTable: table.targetTable, status: 'cancelled' }, error };
+        }
         await saveError(runId, table.sourceTable, error, { phase: 'table' });
         publish('log', { level: 'error', message: error.message || String(error) });
         return { status: { tableName: table.sourceTable, targetTable: table.targetTable, status: 'error', error: error.message || String(error) }, error };
@@ -516,23 +601,36 @@ function createExecutionEngine({ persistence }) {
     if (fallbackLayer.length) layeredMappings.push(fallbackLayer);
 
     for (const layer of layeredMappings) {
+      throwIfCancelled(options);
       const processed = await runWithConcurrency(layer, processTable, { concurrency: executionProfile.concurrency });
       for (const item of processed) {
+        if (item.error?.code === 'RUN_CANCELLED') {
+          await markRun(runId, {
+            status: 'cancelled',
+            counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, rowsTransformed: totalTransformed, rowsFiltered: totalFiltered, rowsTransformRejected: totalTransformRejected, rowsWriteRejected: totalWriteRejected, tablesCompleted: tableStatuses.length, totalTables: tables.length },
+            tableStatuses,
+          });
+          throw item.error;
+        }
         const status = item.status;
         totalInserted += status.inserted || 0;
         totalRejected += status.rejected || 0;
+        totalTransformed += status.transformed || 0;
+        totalFiltered += status.filtered || 0;
+        totalTransformRejected += status.transformRejected || 0;
+        totalWriteRejected += status.writeRejected || 0;
         tableStatuses.push(status);
         if (item.error && options.errorPolicy === 'fail-fast') {
           await markRun(runId, {
             status: 'error',
-            counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, tablesCompleted: tableStatuses.filter((entry) => entry.status !== 'error').length, totalTables: tables.length },
+            counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, rowsTransformed: totalTransformed, rowsFiltered: totalFiltered, rowsTransformRejected: totalTransformRejected, rowsWriteRejected: totalWriteRejected, tablesCompleted: tableStatuses.filter((entry) => entry.status !== 'error').length, totalTables: tables.length },
             tableStatuses,
           });
           throw item.error;
         }
         await markRun(runId, {
           status: 'running',
-          counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, tablesCompleted: tableStatuses.length, totalTables: tables.length },
+          counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, rowsTransformed: totalTransformed, rowsFiltered: totalFiltered, rowsTransformRejected: totalTransformRejected, rowsWriteRejected: totalWriteRejected, tablesCompleted: tableStatuses.length, totalTables: tables.length },
           tableStatuses,
         });
         publish('progress', {
@@ -541,19 +639,23 @@ function createExecutionEngine({ persistence }) {
           totalTables: tables.length,
           rowsInserted: totalInserted,
           rowsRejected: totalRejected,
+          rowsTransformed: totalTransformed,
+          rowsFiltered: totalFiltered,
+          rowsTransformRejected: totalTransformRejected,
+          rowsWriteRejected: totalWriteRejected,
         });
       }
     }
     const hasErrors = tableStatuses.some((item) => item.status === 'error');
     await markRun(runId, {
       status: hasErrors ? 'partial' : (options.dryRun ? 'previewed' : 'done'),
-      counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, tablesCompleted: tableStatuses.length, totalTables: tables.length },
+      counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, rowsTransformed: totalTransformed, rowsFiltered: totalFiltered, rowsTransformRejected: totalTransformRejected, rowsWriteRejected: totalWriteRejected, tablesCompleted: tableStatuses.length, totalTables: tables.length },
       tableStatuses,
       executionProfile,
     });
   }
 
-  async function resumeRun({ runId, project, publish }) {
+  async function resumeRun({ runId, project, publish, options = {} }) {
     const run = await persistence.getRun(runId);
     if (!run) throw new Error('Run not found');
     const originalOptions = {
@@ -568,6 +670,8 @@ function createExecutionEngine({ persistence }) {
       cutoverMode: run.executionProfile?.cutoverMode || 'manual',
       watermarkColumn: run.executionProfile?.watermarkColumn || null,
       verificationFingerprint: run.executionProfile?.verificationFingerprint || null,
+      transformFingerprint: run.executionProfile?.transformFingerprint || null,
+      isCancelled: options.isCancelled,
     };
     if (originalOptions.dryRun) {
       throw new Error('Dry-run/preview runs cannot be resumed into real writes. Start a new execution run instead.');
@@ -578,22 +682,31 @@ function createExecutionEngine({ persistence }) {
     const tables = plan.orderedMappings.filter((table) => !completed.has(table.sourceTable));
     let totalInserted = run.counters?.rowsInserted || 0;
     let totalRejected = run.counters?.rowsRejected || 0;
+    let totalTransformed = run.counters?.rowsTransformed || 0;
+    let totalFiltered = run.counters?.rowsFiltered || 0;
+    let totalTransformRejected = run.counters?.rowsTransformRejected || 0;
+    let totalWriteRejected = run.counters?.rowsWriteRejected || 0;
     const tableStatuses = [...(run.tableStatuses || [])];
     await markRun(runId, { status: 'running' });
     for (const table of tables) {
+      throwIfCancelled(originalOptions);
       const status = await executeTable({ runId, tableMapping: table, publish, project, options: originalOptions });
       totalInserted += status.inserted;
       totalRejected += status.rejected || 0;
+      totalTransformed += status.transformed || 0;
+      totalFiltered += status.filtered || 0;
+      totalTransformRejected += status.transformRejected || 0;
+      totalWriteRejected += status.writeRejected || 0;
       tableStatuses.push(status);
       await markRun(runId, {
         status: 'running',
-        counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, tablesCompleted: tableStatuses.length, totalTables: (project.tableMappings || []).length },
+        counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, rowsTransformed: totalTransformed, rowsFiltered: totalFiltered, rowsTransformRejected: totalTransformRejected, rowsWriteRejected: totalWriteRejected, tablesCompleted: tableStatuses.length, totalTables: (project.tableMappings || []).length },
         tableStatuses,
       });
     }
     await markRun(runId, {
       status: 'done',
-      counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, tablesCompleted: tableStatuses.length, totalTables: (project.tableMappings || []).length },
+      counters: { rowsInserted: totalInserted, rowsRejected: totalRejected, rowsTransformed: totalTransformed, rowsFiltered: totalFiltered, rowsTransformRejected: totalTransformRejected, rowsWriteRejected: totalWriteRejected, tablesCompleted: tableStatuses.length, totalTables: (project.tableMappings || []).length },
       tableStatuses,
       executionProfile: run.executionProfile || originalOptions,
     });

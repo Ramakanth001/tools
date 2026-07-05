@@ -5,10 +5,10 @@
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
-    "dev": "concurrently --kill-others=false \"node src/server.js\" \"vite\"",
+    "dev": "node ../src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"node ../src/runPackageBin.js vite\"",
     "start": "node src/server.js",
-    "build": "vite build",
-    "preview": "vite preview",
+    "build": "node ../src/runPackageBin.js vite build",
+    "preview": "node ../src/runPackageBin.js vite preview",
     "health": "node -e \"fetch('http://localhost:8787/api/health').then(r=>r.text()).then(t=>console.log(t)).catch(e=>{console.error(e.message); process.exit(1);})\""
   },
   "dependencies": {

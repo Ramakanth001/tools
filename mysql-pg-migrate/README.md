@@ -8,8 +8,7 @@ This project is no longer just a planner. It already supports:
 
 - MySQL and PostgreSQL connection setup
 - schema introspection on both sides
-- automatic table and column mapping suggestions
-- editable mappings with per-table write settings
+- manual table and column mappings with per-table write settings
 - preflight validation and dry-run previews
 - target schema provisioning for missing tables/columns
 - real data movement from MySQL into PostgreSQL
@@ -47,8 +46,8 @@ It is best described today as:
 
 1. connect to source and target databases
 2. introspect schemas and table metadata
-3. generate automatic mappings
-4. review and edit mappings manually
+3. save a manual project
+4. define table and column mappings manually
 5. validate compatibility before execution
 6. preview transformed rows with dry-run samples
 7. provision missing PostgreSQL tables/columns when needed
@@ -87,7 +86,7 @@ The current implementation already includes:
 - **driver-based MySQL access via `mysql2`**
 - **PostgreSQL access via `pg`**
 - **schema introspection** for MySQL and PostgreSQL
-- **automatic mapping generation**
+- **manual mapping workflow**
 - **preflight validation** with blockers and warnings
 - **dry-run previews** using transformed sample rows
 - **real data writes to PostgreSQL**
@@ -117,6 +116,8 @@ The biggest remaining gaps are around:
 - advanced reconciliation and validation
 - richer ETL transforms
 - throughput/parallelism at larger scale
+- replacing custom JavaScript expression transforms with a purpose-built safe expression evaluator
+- database-backed integration tests for cancellation, provisioning, replay, and SSL flows
 
 So the right framing today is:
 
@@ -289,9 +290,9 @@ If you are completely new, do this first:
 
 7. Click **Introspect schemas**.
 
-8. If that works, click **Create auto-mapped project**.
+8. If that works, click **Save project** or **Save & open Mapping**.
 
-9. Go to **Mapping** and review the suggested table/column matches.
+9. Go to **Mapping** and manually add table/column mappings.
 
 10. Go to **Validate & Run** and run:
     - **Run preflight**
@@ -313,7 +314,7 @@ Use this tab to:
 - enter MySQL and PostgreSQL connection information
 - load available schemas
 - introspect both catalogs
-- create a persisted project with auto-generated mappings
+- create a persisted manual mapping project
 
 ### 2. Mapping
 
@@ -326,7 +327,7 @@ Use this tab to:
 - set conflict keys for upsert flows
 - tune chunk size
 - adjust per-column mappings and transforms
-- save or regenerate mappings
+- save mappings
 
 ### 3. Validate & Run
 
@@ -365,7 +366,7 @@ Use this tab to communicate operational expectations and current tool status.
 
 ### Mapping and planning
 
-- automatic table and column mapping suggestions
+- manual table and column mapping
 - editable mappings with enable/disable support
 - configurable write mode and conflict keys
 - persisted project state and mapping export/import
@@ -479,7 +480,7 @@ This is where you set up the migration context.
 - load schema names from each side
 - choose source and target schemas
 - introspect catalogs
-- create a saved auto-mapped project
+- save a manual mapping project
 
 ### Fields you will see
 
@@ -502,9 +503,10 @@ You can enter:
 - User
 - Database
 - SSL mode
+- SSL CA/cert/key material for verified TLS connections
 - Reference
 - Password
-- Connection string (optional reference field)
+- Connection string (optional `mysql://` or `mysql2://` URL)
 - Schema
 
 **Tip for beginners:**
@@ -552,25 +554,23 @@ This performs a deeper inspection of:
 - columns
 - other catalog information
 
-After a successful introspection, you will see source and target catalog JSON previews.
+After a successful introspection, you will see compact source and target schema overviews by default. Full raw schema introspection is available as an optional expanded view.
 
-#### Create auto-mapped project
+#### Save project
 
 This does several things:
 
-1. introspects source and target
-2. compares names/types
-3. generates suggested table mappings
-4. generates suggested column mappings
-5. saves the project into the tool’s local state store
+1. validates that source and target catalogs have been introspected
+2. saves the project name and schema catalogs into the tool’s local state store
+3. keeps table and column mappings empty until you add them manually
 
-This is the main entry point into the rest of the workflow.
+Use **Save project** to stay in Workspace, or **Save & open Mapping** to continue directly to manual mapping.
 
 ---
 
 ## Mapping tab
 
-This is where you review and adjust the suggested mappings.
+This is where you manually define every table and column mapping.
 
 ### What you do here
 
@@ -612,7 +612,7 @@ This is useful when:
 
 #### Target table
 
-If the tool guessed the wrong table, choose the correct one manually.
+Choose the intended target table manually.
 
 #### Write mode
 
@@ -666,14 +666,9 @@ Always click **Save project** after making mapping changes.
 
 If you do not save, your current edits may not be reflected in later preflight or run steps.
 
-### Re-run auto map
+### Save mappings
 
-Use this if:
-
-- you want to reset mappings to the latest auto-generated suggestion
-- you changed source/target understanding and want fresh suggestions
-
-Be careful: re-running auto map may overwrite manual mapping edits.
+Use this after every manual table or column mapping change so validation and execution use the latest intent.
 
 ---
 
@@ -865,12 +860,12 @@ Questions it tries to answer:
 
 ### Step 3: Build mappings
 
-The tool guesses:
+Manually choose:
 
-- which source table matches which target table
-- which source column matches which target column
+- which source table maps to which target table
+- which source column maps to which target column
 
-These are only suggestions. You should review them.
+The tool uses only the mappings you save.
 
 ### Step 4: Validate before running
 
@@ -918,7 +913,7 @@ Then:
 1. click **Load schemas** on both sides
 2. choose your schemas
 3. click **Introspect schemas**
-4. click **Create auto-mapped project**
+4. click **Save project** or **Save & open Mapping**
 
 ### In Mapping
 
@@ -997,12 +992,6 @@ GET /api/projects
 
 ```http
 PUT /api/projects/:id
-```
-
-### Re-run auto-map
-
-```http
-POST /api/projects/:id/auto-map
 ```
 
 ### Preflight
@@ -1211,7 +1200,7 @@ Even beginners should follow these rules:
 4. **Always run preflight before execution.**
 5. **Use dry-run previews to inspect transformed sample rows.**
 6. **Export project JSON as backup before major mapping changes.**
-7. **Do not assume auto-mapping is perfect.**
+7. **Define table and column mappings manually.**
 
 ---
 

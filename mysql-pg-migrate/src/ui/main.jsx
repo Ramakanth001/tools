@@ -57,13 +57,32 @@ function getStorageKey(name) {
   return `${runtime.storagePrefix}.${String(name || '').replace(/^\.+/, '')}`;
 }
 
+function getAuthToken() {
+  const tokenFromUrl = new URLSearchParams(window.location.search).get('token') || '';
+  if (tokenFromUrl) localStorage.setItem('tools.authToken', tokenFromUrl);
+  return tokenFromUrl || localStorage.getItem('tools.authToken') || '';
+}
+
+function getAuthHeaders() {
+  const token = getAuthToken();
+  return token ? { 'x-tools-auth': token } : {};
+}
+
+function withAuthQuery(url) {
+  const token = getAuthToken();
+  if (!token) return url;
+  const next = new URL(url, window.location.origin);
+  next.searchParams.set('token', token);
+  return next.toString();
+}
+
 async function api(path, { method = 'GET', body, timeoutMs = 30000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(new Error('Request timeout')), timeoutMs);
   try {
     const resp = await fetch(resolveApiUrl(path), {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: { ...getAuthHeaders(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
@@ -81,7 +100,7 @@ async function api(path, { method = 'GET', body, timeoutMs = 30000 } = {}) {
 }
 
 function openRunEventSource(runId, { onLog, onProgress, onStatus } = {}) {
-  const ev = new EventSource(resolveApiUrl(`/runs/${encodeURIComponent(runId)}/events`));
+  const ev = new EventSource(withAuthQuery(resolveApiUrl(`/runs/${encodeURIComponent(runId)}/events`)));
   ev.addEventListener('log', (e) => {
     try {
       onLog?.(JSON.parse(e.data));
@@ -125,15 +144,37 @@ function loadLocal(key, fallback) {
   try {
     const raw = localStorage.getItem(getStorageKey(key));
     const parsed = raw ? safeJsonParse(raw) : null;
-    return parsed ?? fallback;
+    const value = parsed ?? fallback;
+    return key === 'workspace' ? stripWorkspaceSecrets(value) : value;
   } catch {
     return fallback;
   }
 }
 
+function stripWorkspaceSecrets(value) {
+  if (!value || typeof value !== 'object') return value;
+  return {
+    ...value,
+    sourceConnection: {
+      ...(value.sourceConnection || {}),
+      password: '',
+      sslKey: '',
+      connectionString: '',
+    },
+    targetConnection: {
+      ...(value.targetConnection || {}),
+      connectionString: '',
+      pooler: value.targetConnection?.pooler
+        ? { ...value.targetConnection.pooler, password: '' }
+        : value.targetConnection?.pooler,
+    },
+  };
+}
+
 function saveLocal(key, value) {
   try {
-    localStorage.setItem(getStorageKey(key), JSON.stringify(value));
+    const safeValue = key === 'workspace' ? stripWorkspaceSecrets(value) : value;
+    localStorage.setItem(getStorageKey(key), JSON.stringify(safeValue));
   } catch {
     // ignore
   }
@@ -160,7 +201,7 @@ function nowIso() {
 }
 
 function defaultSourceConnection() {
-  return { host: '127.0.0.1', port: 3306, user: 'root', password: '', database: '', sslMode: 'DISABLED', connectionString: '', ref: '', consistentRead: { enabled: false, isolation: 'REPEATABLE READ' } };
+  return { host: '127.0.0.1', port: 3306, user: 'root', password: '', database: '', sslMode: 'DISABLED', sslCa: '', sslCert: '', sslKey: '', connectionString: '', ref: '', consistentRead: { enabled: false, isolation: 'REPEATABLE READ' } };
 }
 
 function defaultTargetConnection() {
@@ -243,6 +284,26 @@ function mergeWorkspaceWithProject(project, currentWorkspace) {
   };
 }
 
+function workspaceMatchesProject(workspace, project) {
+  if (!workspace || !project?.id) return false;
+  const payload = workspaceForCatalogRequest(workspace);
+  const source = payload.sourceConnection || {};
+  const savedSource = project.sourceConnection || {};
+  const target = payload.targetConnection || {};
+  const targetPooler = target.pooler || {};
+  const savedTarget = project.targetConnection || {};
+  const savedPooler = savedTarget.pooler || {};
+  const sourceFields = ['host', 'port', 'user', 'database', 'ref', 'sslMode', 'sslCa', 'sslCert'];
+  const targetFields = ['host', 'port', 'user', 'database', 'sslmode'];
+  return cleanName(payload.name) === cleanName(project.name)
+    && cleanName(payload.sourceSchema) === cleanName(project.sourceSchema)
+    && cleanName(payload.targetSchema) === cleanName(project.targetSchema)
+    && Boolean(payload.includeViews) === Boolean(project.includeViews)
+    && sourceFields.every((key) => String(source[key] ?? '') === String(savedSource[key] ?? ''))
+    && String(target.ref ?? '') === String(savedTarget.ref ?? '')
+    && targetFields.every((key) => String(targetPooler[key] ?? '') === String(savedPooler[key] ?? ''));
+}
+
 function normalizeWorkspaceState(input = {}) {
   const sourceConnection = mergeSourceConnection(input.sourceConnection || {}, input.sourceConnection || {});
   const targetConnection = mergeTargetConnection(input.targetConnection || {}, input.targetConnection || {});
@@ -270,6 +331,7 @@ function redactSourceConnectionForProject(connection = {}) {
   return {
     ...connection,
     password: undefined,
+    sslKey: undefined,
     connectionString: '',
     ref: connection.ref || connection.database || 'source',
   };
@@ -394,6 +456,21 @@ function normalizeProjectForUi(project) {
   };
 }
 
+function schemaNamesFromLoadedProject(project) {
+  if (!project) return { sourceSchemas: [], targetSchemas: [] };
+  return {
+    sourceSchemas: uniqueCleanNames([
+      project.sourceConnection?.database,
+      project.sourceSchema,
+      project.sourceCatalog?.schema,
+    ]),
+    targetSchemas: uniqueCleanNames([
+      project.targetSchema,
+      project.targetCatalog?.schema,
+    ]),
+  };
+}
+
 function dedupeTableMappings(tableMappings = []) {
   const seen = new Set();
   const next = [];
@@ -433,34 +510,144 @@ function describeCompactColumn(column) {
   return parts.join(' ');
 }
 
+function normalizeExactRowCount(value) {
+  if (value == null || value === '') return null;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return null;
+  return text;
+}
+
+function normalizeRowCountForDisplay(table = {}) {
+  const exact = normalizeExactRowCount(table.rowCountExact ?? table.rows ?? table.tableRows);
+  if (exact != null) return exact;
+  const estimate = Number(table.rowEstimate);
+  if (Number.isFinite(estimate) && estimate >= 0) return String(Math.trunc(estimate));
+  return '0';
+}
+
+function compareNumericStrings(a, b) {
+  const left = normalizeExactRowCount(a);
+  const right = normalizeExactRowCount(b);
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+  const leftBig = BigInt(left);
+  const rightBig = BigInt(right);
+  if (leftBig < rightBig) return -1;
+  if (leftBig > rightBig) return 1;
+  return 0;
+}
+
 function buildCatalogSummary(catalog = {}) {
   const normalized = normalizeCatalog(catalog || {});
-  const tables = {};
+  const tables = [];
   for (const table of catalogTables(normalized)) {
-    const columns = {};
-    for (const column of tableColumns(table)) {
-      columns[column.name] = describeCompactColumn(column);
-    }
-    tables[table.name] = {
-      rows: table.rowEstimate ?? table.rows ?? table.tableRows ?? null,
-      columns,
-    };
+    const columns = tableColumns(table);
+    const primaryKeys = columns
+      .filter((column) => String(column.key || '').toUpperCase() === 'PRI' || column.primaryKey === true || column.isPrimaryKey === true)
+      .map((column) => column.name);
+    tables.push({
+      name: table.name,
+      kind: table.kind || 'table',
+      rows: normalizeRowCountForDisplay(table),
+      columnCount: columns.length,
+      primaryKeys,
+      foreignKeyCount: (table.foreignKeys || table.foreign_keys || []).length,
+    });
   }
   return {
     engine: normalized.engine || catalog.engine || 'unknown',
     schema: normalized.schema || catalog.schema || '',
-    tableCount: Object.keys(tables).length,
+    tableCount: tables.length,
     tables,
   };
 }
 
 function CatalogPreview({ title, catalog }) {
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const summary = buildCatalogSummary(catalog || {});
+  const visibleTables = useMemo(() => {
+    const q = cleanName(search).toLowerCase();
+    const filtered = q
+      ? summary.tables.filter((table) => [
+        table.name,
+        table.kind,
+        table.rows,
+        table.columnCount,
+        table.primaryKeys.join(', '),
+        table.foreignKeyCount,
+      ].some((value) => String(value ?? '').toLowerCase().includes(q)))
+      : summary.tables;
+    const direction = sort.direction === 'desc' ? -1 : 1;
+    return [...filtered].sort((a, b) => {
+      let result = 0;
+      if (sort.key === 'rows') result = compareNumericStrings(a.rows, b.rows);
+      else if (sort.key === 'columnCount' || sort.key === 'foreignKeyCount') result = Number(a[sort.key] || 0) - Number(b[sort.key] || 0);
+      else if (sort.key === 'primaryKeys') result = a.primaryKeys.join(', ').localeCompare(b.primaryKeys.join(', '));
+      else result = String(a[sort.key] ?? '').localeCompare(String(b[sort.key] ?? ''));
+      return result * direction;
+    });
+  }, [search, sort.direction, sort.key, summary.tables]);
+  function toggleSort(key) {
+    setSort((curr) => ({ key, direction: curr.key === key && curr.direction === 'asc' ? 'desc' : 'asc' }));
+  }
+  function SortHeader({ columnKey, align = 'left', children }) {
+    const active = sort.key === columnKey;
+    return (
+      <th
+        onClick={() => toggleSort(columnKey)}
+        title="Click to sort"
+        style={{ textAlign: align, padding: 8, cursor: 'pointer', position: 'sticky', top: 0, background: '#101820', zIndex: 1 }}
+      >
+        {children}{active ? ` ${sort.direction === 'asc' ? '↑' : '↓'}` : ''}
+      </th>
+    );
+  }
   return (
     <div className="card">
       <h3>{title}</h3>
-      <div className="hint">Tables: {summary.tableCount} • default view is compact table → columns → datatypes/rows JSON.</div>
-      <div className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 10 }}>{formatJson(summary)}</div>
+      <div className="toolbar" style={{ marginTop: 8, marginBottom: 12 }}>
+        <span className="badge">Engine: {summary.engine}</span>
+        <span className="badge">Schema: {summary.schema || '—'}</span>
+        <span className="badge">Tables: {summary.tableCount}</span>
+        <span className="badge">Exact row counts</span>
+      </div>
+      <div className="field full" style={{ marginBottom: 12 }}>
+        <div className="field-label">Search catalog</div>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter by table, kind, rows, primary key, or FK count" />
+      </div>
+      <div className="schema-table-scroll" style={{ maxHeight: 560, overflow: 'auto' }}>
+        <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <SortHeader columnKey="name">Table</SortHeader>
+              <SortHeader columnKey="kind">Kind</SortHeader>
+              <SortHeader columnKey="rows" align="right">Rows</SortHeader>
+              <SortHeader columnKey="columnCount" align="right">Columns</SortHeader>
+              <SortHeader columnKey="primaryKeys">Primary key</SortHeader>
+              <SortHeader columnKey="foreignKeyCount" align="right">FKs</SortHeader>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleTables.map((table) => (
+              <tr key={table.name}>
+                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{table.name}</td>
+                <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{table.kind}</td>
+                <td style={{ padding: 8, textAlign: 'right', borderTop: '1px solid rgba(255,255,255,0.08)' }}>{table.rows ?? '—'}</td>
+                <td style={{ padding: 8, textAlign: 'right', borderTop: '1px solid rgba(255,255,255,0.08)' }}>{table.columnCount}</td>
+                <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{table.primaryKeys.length ? table.primaryKeys.join(', ') : '—'}</td>
+                <td style={{ padding: 8, textAlign: 'right', borderTop: '1px solid rgba(255,255,255,0.08)' }}>{table.foreignKeyCount}</td>
+              </tr>
+            ))}
+            {!visibleTables.length ? (
+              <tr>
+                <td colSpan={6} className="hint" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{summary.tables.length ? 'No tables match this search.' : 'No tables found in this introspection result.'}</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
       <details style={{ marginTop: 12 }}>
         <summary className="btn" style={{ display: 'inline-flex' }}>Full schema introspection</summary>
         <div className="mono" style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto', marginTop: 12 }}>{formatJson(catalog || {})}</div>
@@ -571,6 +758,7 @@ function buildManualProjectPayload({ workspace, introspection, tableMappings = [
     sourceCatalog,
     targetCatalog,
     tableMappings,
+    allowedVerificationIssues: [],
     mappingSummary: {
       mode: 'manual',
       sourceTables: sourceCatalog.tables?.length || 0,
@@ -608,6 +796,23 @@ function buildExecutionOptionsSignature(options = {}, selectedTables = []) {
     cutoverMode: options.cutoverMode || 'manual',
     watermarkColumn: options.watermarkColumn || '',
   });
+}
+
+function normalizePreviewSelectedTables(selectedTables = []) {
+  return Array.from(new Set((selectedTables || []).map((item) => String(item || '').trim()).filter(Boolean))).sort();
+}
+
+function transformPreviewCoversRun(preview, options = {}, selectedTables = []) {
+  if (!preview?.transformFingerprint || !preview.scope) return false;
+  const runMode = options.mode === 'selected' ? 'selected' : 'all';
+  const runSelected = runMode === 'selected' ? normalizePreviewSelectedTables(selectedTables) : [];
+  const previewMode = preview.scope.mode === 'selected' ? 'selected' : 'all';
+  const previewSelected = normalizePreviewSelectedTables(preview.scope.selectedTables || []);
+  if ((preview.scope.loadPhase || 'configured') !== (options.loadPhase || 'configured')) return false;
+  if (runMode === 'all') return previewMode === 'all';
+  if (previewMode === 'all') return true;
+  const previewSet = new Set(previewSelected);
+  return runSelected.every((table) => previewSet.has(table));
 }
 
 function buildDryRunSqlText(preview = {}) {
@@ -670,6 +875,7 @@ function AppProvider({ children }) {
   const [currentProject, setCurrentProject] = useState(null);
   const [currentRun, setCurrentRun] = useState(null);
   const [preflightReport, setPreflightReport] = useState(null);
+  const [transformPreview, setTransformPreview] = useState(null);
   const [dryRunPreview, setDryRunPreview] = useState(null);
   const [runReport, setRunReport] = useState(null);
   const [cutoverReport, setCutoverReport] = useState(null);
@@ -685,18 +891,19 @@ function AppProvider({ children }) {
   const eventSourceRef = useRef(null);
   const alertRef = useRef(null);
 
-  function clearProjectDerivedState() {
+  function clearProjectDerivedState({ keepIntrospection = false, keepMessage = false } = {}) {
     setCurrentProject(null);
     setSelectedProjectId('');
     setCurrentRun(null);
     setSelectedRunId('');
     setPreflightReport(null);
+    setTransformPreview(null);
     setDryRunPreview(null);
     setRunReport(null);
     setCutoverReport(null);
-    setIntrospection(null);
+    if (!keepIntrospection) setIntrospection(null);
     setLogs([]);
-    setMessage('');
+    if (!keepMessage) setMessage('');
     setError('');
     setMappingDirty(false);
   }
@@ -731,7 +938,7 @@ function AppProvider({ children }) {
     return resp.runs || [];
   }
 
-  async function loadProject(projectId) {
+  async function loadProject(projectId, { loadIntoWorkspace = false } = {}) {
     if (!projectId) {
       setCurrentProject(null);
       return null;
@@ -741,7 +948,21 @@ function AppProvider({ children }) {
     setCurrentProject(project || null);
     setMappingDirty(false);
     setSelectedProjectId(project?.id || '');
-    setWorkspace((curr) => mergeWorkspaceWithProject(project || null, curr));
+    setCurrentRun(null);
+    setSelectedRunId('');
+    setPreflightReport(null);
+    setTransformPreview(null);
+    setDryRunPreview(null);
+    setRunReport(null);
+    setCutoverReport(null);
+    setLogs([]);
+    if (loadIntoWorkspace) {
+      const schemaNames = schemaNamesFromLoadedProject(project);
+      setWorkspace((curr) => mergeWorkspaceWithProject(project || null, curr));
+      setSourceSchemas(schemaNames.sourceSchemas);
+      setTargetSchemas(schemaNames.targetSchemas);
+      setIntrospection(project ? { source: project.sourceCatalog || {}, target: project.targetCatalog || {} } : null);
+    }
     return project || null;
   }
 
@@ -804,8 +1025,8 @@ function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (selectedProjectId) void loadProject(selectedProjectId);
-  }, [selectedProjectId]);
+    if (selectedProjectId && !currentProject) void loadProject(selectedProjectId);
+  }, [selectedProjectId, currentProject]);
 
   useEffect(() => {
     if (selectedRunId) {
@@ -832,6 +1053,7 @@ function AppProvider({ children }) {
     currentProject, setCurrentProject,
     currentRun, setCurrentRun,
     preflightReport, setPreflightReport,
+    transformPreview, setTransformPreview,
     dryRunPreview, setDryRunPreview,
     runReport, setRunReport,
     cutoverReport, setCutoverReport,
@@ -847,7 +1069,7 @@ function AppProvider({ children }) {
     transformCatalog,
     clearProjectDerivedState,
     refreshProjects, refreshRuns, loadProject, loadRun, loadRunReport, streamRun,
-  }), [tab, workspace, projects, runs, selectedProjectId, selectedRunId, currentProject, currentRun, preflightReport, dryRunPreview, runReport, cutoverReport, introspection, sourceSchemas, targetSchemas, mappingDirty, busy, message, error, logs, transformCatalog]);
+  }), [tab, workspace, projects, runs, selectedProjectId, selectedRunId, currentProject, currentRun, preflightReport, transformPreview, dryRunPreview, runReport, cutoverReport, introspection, sourceSchemas, targetSchemas, mappingDirty, busy, message, error, logs, transformCatalog]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
@@ -881,7 +1103,8 @@ function FirstRunChecklist() {
     'For upsert or incremental loads, select real target conflict keys that match a primary key or unique key.',
     'Pick the load strategy per table: historical full, historical filtered, incremental watermark, or historical + then incremental.',
     'For incremental loads, configure watermark column, tie-breaker column, optional lookback, and delete-handling expectation.',
-    'Save mappings, then Build dry run. Dry run automatically runs Verify project and Preflight first, and only then prepares a preview.',
+    'Continue to Transform; configure row filters, value maps, expressions, constants, templates, and lookup-table joins.',
+    'Preview transforms, then continue to Validate & Run. Dry run refreshes Transform preview, runs Verify project and Preflight first, and only then prepares a load preview.',
   ];
   return (
     <div className="card" style={{ background: 'rgba(59,130,246,0.06)' }}>
@@ -979,7 +1202,10 @@ function ConnectionFields() {
           <div className="field"><div className="field-label">Read isolation</div><select value={source.consistentRead?.isolation || 'REPEATABLE READ'} onChange={(e) => patchSource({ consistentRead: { ...(source.consistentRead || {}), isolation: e.target.value } })} disabled={source.consistentRead?.enabled !== true}><option>READ COMMITTED</option><option>REPEATABLE READ</option><option>SERIALIZABLE</option></select><div className="hint" style={{ marginTop: 6 }}>Only used when Consistent read is checked. REPEATABLE READ is usually best for stable migration snapshots.</div></div>
           <div className="field"><div className="field-label">Connection label / Reference</div><input value={source.ref || ''} onChange={(e) => patchSource({ ref: e.target.value })} placeholder="optional label, e.g. local-mysql" /><div className="hint" style={{ marginTop: 6 }}>Optional label only. It does not affect the database connection.</div></div>
           <div className="field full"><div className="field-label">Password</div><input type="password" value={source.password} onChange={(e) => patchSource({ password: e.target.value })} /></div>
-          <div className="field full"><div className="field-label">Connection string</div><input value={source.connectionString || ''} onChange={(e) => patchSource({ connectionString: e.target.value })} placeholder="optional mysql://... reference" /></div>
+          <div className="field full"><div className="field-label">SSL CA</div><textarea rows={3} value={source.sslCa || ''} onChange={(e) => patchSource({ sslCa: e.target.value })} placeholder="optional PEM CA certificate" /></div>
+          <div className="field full"><div className="field-label">SSL client certificate</div><textarea rows={3} value={source.sslCert || ''} onChange={(e) => patchSource({ sslCert: e.target.value })} placeholder="optional PEM client certificate" /></div>
+          <div className="field full"><div className="field-label">SSL private key</div><textarea rows={3} value={source.sslKey || ''} onChange={(e) => patchSource({ sslKey: e.target.value })} placeholder="optional PEM private key; not saved locally" /></div>
+          <div className="field full"><div className="field-label">Connection string</div><input value={source.connectionString || ''} onChange={(e) => patchSource({ connectionString: e.target.value })} placeholder="optional mysql://... URL" /></div>
           <div className="field full"><div className="field-label">Database / Schema</div><select value={effectiveSourceSchema} onChange={(e) => setWorkspace((curr) => ({ ...curr, sourceSchema: e.target.value }))}><option value="">— select source database/schema —</option>{uniqueCleanNames([source.database, effectiveSourceSchema, ...sourceSchemas]).map((schema) => <option key={schema} value={schema}>{schema}</option>)}</select><div className="hint" style={{ marginTop: 6 }}>For MySQL this is normally the same value as the Database field above. The database name is included even before schema listing finishes.</div></div>
         </div>
       </div>
@@ -1011,7 +1237,16 @@ function ConnectionFields() {
 }
 
 function WorkspaceScreen() {
-  const { workspace, setWorkspace, introspection, setIntrospection, currentProject, setCurrentProject, setSelectedProjectId, refreshProjects, withBusy, busy, setMessage, setTab, setMappingDirty, clearProjectDerivedState } = useApp();
+  const { workspace, setWorkspace, projects, introspection, setIntrospection, currentProject, setCurrentProject, selectedProjectId, setSelectedProjectId, refreshProjects, loadProject, withBusy, busy, setMessage, setTab, setMappingDirty, clearProjectDerivedState } = useApp();
+  const [projectMode, setProjectMode] = useState(() => selectedProjectId ? 'existing' : 'new');
+  const workspaceIsSavedProject = workspaceMatchesProject(workspace, currentProject);
+  const projectStateLabel = workspaceIsSavedProject && currentProject?.id
+    ? `Editing saved project ${currentProject.id}`
+    : 'New unsaved project draft';
+  const selectedSavedProject = projects.find((project) => project.id === selectedProjectId) || null;
+  const savedProjectMappingCount = selectedSavedProject?.mappingSummary?.mappedTables
+    ?? selectedSavedProject?.tableMappings?.filter?.((mapping) => mapping?.targetTable)?.length
+    ?? 0;
 
   async function introspect() {
     await withBusy('introspect', async () => {
@@ -1023,18 +1258,19 @@ function WorkspaceScreen() {
     });
   }
 
-  async function saveSchemasAndContinue() {
-    await withBusy('continue-mapping', async () => {
+  async function saveWorkspaceProject({ openMapping = false } = {}) {
+    const busyKey = openMapping ? 'continue-mapping' : 'save-workspace-project';
+    await withBusy(busyKey, async () => {
       const payload = workspaceForCatalogRequest(workspace);
       setWorkspace(payload);
       if (!introspection?.source || !introspection?.target) {
-        throw new Error('Click “Introspect schemas” first so the source and target catalogs are visible before continuing to Mapping.');
+        throw new Error('Click “Introspect schemas” first so the source and target catalogs are visible before saving the project.');
       }
       const sourceCatalog = normalizeCatalog(introspection.source || {});
       const targetCatalog = normalizeCatalog(introspection.target || {});
-      const startFresh = !currentProject?.id || isProjectNameChanged(payload.name, currentProject);
+      const startFresh = !workspaceMatchesProject(payload, currentProject) || isProjectNameChanged(payload.name, currentProject);
       if (startFresh) {
-        clearProjectDerivedState();
+        clearProjectDerivedState({ keepIntrospection: true, keepMessage: true });
       }
       const existingMappings = startFresh ? [] : (currentProject?.tableMappings || []);
       const resp = startFresh
@@ -1062,12 +1298,24 @@ function WorkspaceScreen() {
       setSelectedProjectId(project?.id || '');
       setMappingDirty(false);
       await refreshProjects();
-      setMessage(`${startFresh ? 'Started fresh migration project' : 'Saved inspected schemas and opened manual mapping'} for ${project?.name || ''}`.trim());
-      setTab('mapping');
+      setMessage(`${startFresh ? 'Saved new manual migration project' : 'Saved inspected schemas'} for ${project?.name || ''}`.trim());
+      if (openMapping) setTab('mapping');
     });
   }
 
-  function startFreshMigration() {
+  async function openExistingProject(projectId = selectedProjectId, { openMapping = false } = {}) {
+    const id = cleanName(projectId);
+    await withBusy(openMapping ? 'open-existing-mapping' : 'load-existing-project', async () => {
+      if (!id) throw new Error('Select an existing migration project first.');
+      const project = await loadProject(id, { loadIntoWorkspace: true });
+      setProjectMode('existing');
+      setMessage(`Loaded saved migration ${project?.name || id} (${project?.id || id})`.trim());
+      if (openMapping) setTab('mapping');
+    });
+  }
+
+  function startNewProject() {
+    setProjectMode('new');
     clearProjectDerivedState();
     setWorkspace((curr) => normalizeWorkspaceState({
       ...curr,
@@ -1077,10 +1325,64 @@ function WorkspaceScreen() {
     setTab('workspace');
   }
 
+  function clearLocalCredentials() {
+    const safeWorkspace = stripWorkspaceSecrets(workspace);
+    setWorkspace((curr) => normalizeWorkspaceState(stripWorkspaceSecrets(curr)));
+    try {
+      localStorage.setItem(getStorageKey('workspace'), JSON.stringify(safeWorkspace));
+    } catch {
+      // ignore
+    }
+    setMessage('Local connection secrets cleared.');
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div className="card">
-        <SectionTitle title="Connect & introspect" hint="Enter source/target details, inspect both schemas, then continue to manual mapping. No automatic mapping is created." action={<span className="badge">Step 1</span>} />
+        <SectionTitle title="Connect & introspect" hint="Choose a new or saved migration, then continue with schema inspection and mapping." action={<span className="badge">Step 1</span>} />
+        <div className="toolbar" style={{ marginBottom: 14, alignItems: 'flex-start' }}>
+          <div className="tabs" role="tablist" aria-label="Migration mode">
+            <button className="tab" type="button" role="tab" aria-selected={projectMode === 'new'} onClick={startNewProject}>New migration</button>
+            <button className="tab" type="button" role="tab" aria-selected={projectMode === 'existing'} onClick={() => { setProjectMode('existing'); void refreshProjects(); }}>Existing migration</button>
+          </div>
+          {projectMode === 'existing' ? (
+            <div className="toolbar" style={{ flex: 1, minWidth: 280 }}>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => {
+                  setSelectedProjectId(e.target.value);
+                  if (e.target.value) void openExistingProject(e.target.value);
+                }}
+                disabled={busy['load-existing-project']}
+                aria-label="Existing migration project"
+                style={{ minWidth: 320, flex: 1 }}
+              >
+                <option value="">— Select saved migration —</option>
+                {projects.map((project) => {
+                  const count = project.mappingSummary?.mappedTables ?? project.tableMappings?.filter?.((mapping) => mapping?.targetTable)?.length ?? 0;
+                  return (
+                    <option key={project.id} value={project.id}>
+                      {project.name || project.id} ({project.id}.json, {count} mapped)
+                    </option>
+                  );
+                })}
+              </select>
+              <button className="btn" type="button" onClick={() => void refreshProjects()}>Refresh</button>
+              <button className="btn primary" type="button" onClick={() => void openExistingProject()} disabled={!selectedProjectId || busy['load-existing-project']}>{busy['load-existing-project'] ? 'Loading…' : 'Load selected'}</button>
+              <button className="btn" type="button" onClick={() => void openExistingProject(selectedProjectId, { openMapping: true })} disabled={!selectedProjectId || busy['open-existing-mapping']}>{busy['open-existing-mapping'] ? 'Opening…' : 'Open Mapping'}</button>
+            </div>
+          ) : null}
+        </div>
+        {projectMode === 'existing' && selectedSavedProject ? (
+          <div className="alert" style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800 }}>{selectedSavedProject.name || selectedSavedProject.id}</div>
+            <div className="hint" style={{ marginTop: 6 }}>File: {selectedSavedProject.id}.json • Source: {selectedSavedProject.sourceSchema || '—'} • Target: {selectedSavedProject.targetSchema || '—'} • Mapped tables: {savedProjectMappingCount}</div>
+          </div>
+        ) : null}
+        <div className="toolbar" style={{ marginBottom: 14 }}>
+          <span className="badge">{projectStateLabel}</span>
+          {currentProject?.id && !workspaceIsSavedProject ? <span className="hint">Saving this draft will create a separate project with empty mappings.</span> : null}
+        </div>
         <div className="field full" style={{ marginBottom: 14 }}>
           <div className="field-label">Project name</div>
           <input value={workspace.name} onChange={(e) => setWorkspace((curr) => ({ ...curr, name: e.target.value }))} placeholder="e.g. billing-mysql-to-pg" />
@@ -1095,9 +1397,11 @@ function WorkspaceScreen() {
         </div>
         <div className="toolbar">
           <button className="btn" type="button" onClick={() => void introspect()} disabled={busy.introspect}>{busy.introspect ? 'Introspecting…' : 'Introspect schemas'}</button>
-          <button className="btn primary" type="button" onClick={() => void saveSchemasAndContinue()} disabled={!introspection || busy['continue-mapping']}>{busy['continue-mapping'] ? 'Saving…' : 'Save schemas & continue to Mapping'}</button>
-          <button className="btn" type="button" onClick={startFreshMigration}>Start new migration</button>
-          {!introspection ? <span className="hint">Run introspection first; continuing will save the shown catalogs into the project.</span> : null}
+          <button className="btn" type="button" onClick={() => void saveWorkspaceProject()} disabled={!introspection || busy['save-workspace-project']}>{busy['save-workspace-project'] ? 'Saving…' : 'Save project'}</button>
+          <button className="btn primary" type="button" onClick={() => void saveWorkspaceProject({ openMapping: true })} disabled={!introspection || busy['continue-mapping']}>{busy['continue-mapping'] ? 'Saving…' : 'Save & open Mapping'}</button>
+          <button className="btn" type="button" onClick={clearLocalCredentials}>Clear local credentials</button>
+          <button className="btn" type="button" onClick={startNewProject}>New project</button>
+          {!introspection ? <span className="hint">Run introspection first; saving will store the shown catalogs into a project.</span> : null}
         </div>
         <div className="hint" style={{ marginTop: 10 }}>New project names start with empty mappings and cleared validation/run state. Use project selection only when you want to reuse an existing saved migration.</div>
       </div>
@@ -1115,8 +1419,8 @@ function WorkspaceScreen() {
 function ProjectStatusBadge() {
   const { tab, workspace, currentProject } = useApp();
   const draftName = cleanName(workspace?.name);
-  const savedName = cleanName(currentProject?.name);
-  if (tab === 'workspace' && draftName) {
+  const isDraft = draftName && !workspaceMatchesProject(workspace, currentProject);
+  if ((tab === 'workspace' || isDraft) && draftName) {
     return <span className="badge">Project draft: {draftName}</span>;
   }
   if (currentProject?.name) {
@@ -1157,7 +1461,7 @@ function MappingScreen() {
 
   async function saveAndContinue() {
     await saveProject();
-    setTab('validate-run');
+    setTab('transform');
   }
 
   async function generateSchemaPlan() {
@@ -1517,7 +1821,7 @@ function MappingScreen() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div className="card">
-        <SectionTitle title="Manual mappings" hint="Define source → target table mappings and source → target column mappings before validation or execution." action={<span className="badge">Step 2</span>} />
+        <SectionTitle title="Manual mappings" hint="Define source → target table mappings, source → target column intent, and load/write options before transformation." action={<span className="badge">Step 2</span>} />
         <div className="toolbar" style={{ marginBottom: 14 }}>
           <select value={selectedProjectId} onChange={(e) => { setSelectedProjectId(e.target.value); void loadProject(e.target.value); }}>
             <option value="">— Select project —</option>
@@ -1525,7 +1829,7 @@ function MappingScreen() {
           </select>
           {mappingDirty ? <span className="badge" style={{ borderColor: '#d97706', color: '#d97706' }}>Unsaved mapping changes</span> : <span className="badge">Mappings saved</span>}
           <button className="btn" type="button" onClick={() => void saveProject()} disabled={!currentProject?.id || busy['save-project']}>{busy['save-project'] ? 'Saving…' : 'Save mappings'}</button>
-          <button className="btn primary" type="button" onClick={() => void saveAndContinue()} disabled={!currentProject?.id || busy['save-project']}>{busy['save-project'] ? 'Saving…' : 'Save & continue to Validate'}</button>
+          <button className="btn primary" type="button" onClick={() => void saveAndContinue()} disabled={!currentProject?.id || busy['save-project']}>{busy['save-project'] ? 'Saving…' : 'Save & continue to Transform'}</button>
         </div>
 
         {!currentProject ? (
@@ -1554,7 +1858,7 @@ function MappingScreen() {
             </div>
             <div className="alert warn" style={{ marginBottom: 0 }}>
               <div style={{ fontWeight: 800 }}>Manual mapping only</div>
-              <div className="hint" style={{ marginTop: 6 }}>Add at least one source → target table mapping, then save mappings before validation. No automatic table or column mapping is generated.</div>
+              <div className="hint" style={{ marginTop: 6 }}>Add at least one source → target table mapping, then save mappings before validation.</div>
             </div>
 
             {(currentProject.tableMappings || []).map((mapping, tableIndex) => (
@@ -1633,34 +1937,8 @@ function MappingScreen() {
                           </td>
                           <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{targetMode === 'create_new' ? 'new column' : (describeColumn(targetColumn) || '—')}</td>
                           <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                            <select value={column.transform?.preset || column.transform?.type || 'direct'} onChange={(e) => {
-                              const selected = e.target.value;
-                              const preset = transformCatalog.find((item) => item.name === selected);
-                              patchColumn(tableIndex, colIndex, { transform: preset ? { preset: selected, ...(preset.rule || {}) } : { ...(column.transform || {}), type: selected, config: column.transform?.config || {} } });
-                            }}>
-                              <option value="direct">direct</option>
-                              <option value="string">string</option>
-                              <option value="number">number</option>
-                              <option value="boolean">boolean</option>
-                              <option value="json">json</option>
-                              <option value="date">date</option>
-                              <option value="datetime">datetime</option>
-                              <option value="constant">constant</option>
-                              <option value="null">null</option>
-                              <option value="template">template</option>
-                              <option value="lookup">lookup</option>
-                              <option value="expression">expression</option>
-                              <option value="concat">concat</option>
-                              <option value="coalesce">coalesce</option>
-                              {transformCatalog.map((item) => <option key={item.name} value={item.name}>preset:{item.name}</option>)}
-                            </select>
-                            <div className="hint" style={{ marginTop: 6 }}>{transformCatalog.find((item) => item.name === (column.transform?.preset || ''))?.description || 'Configure transform behavior below when needed.'}</div>
-                            {['template', 'expression', 'conditional'].includes(column.transform?.type || '') || column.transform?.preset ? (
-                              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                <input value={column.transform?.config?.template || column.transform?.config?.expression || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, column.transform?.type === 'template' ? 'template' : 'expression', e.target.value)} placeholder={column.transform?.type === 'template' ? '{{first_name}} {{last_name}}' : 'value != null ? value : null'} />
-                                <input value={column.transform?.config?.when || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, 'when', e.target.value)} placeholder="Optional condition: row.status === 'active'" />
-                              </div>
-                            ) : null}
+                            <span className="badge">{column.transform?.preset || column.transform?.type || 'direct'}</span>
+                            <div className="hint" style={{ marginTop: 6 }}>Configure in Transform.</div>
                           </td>
                           <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{badgeForColumnState(column.columnState || column.state)}</td>
                           <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}><button className="btn danger" type="button" onClick={() => removeColumnMapping(tableIndex, colIndex)}>Remove</button></td>
@@ -1698,11 +1976,7 @@ function MappingScreen() {
                         <div className="field"><div className="field-label">Filter end value</div><input value={historicalFilter.valueTo ?? ''} onChange={(e) => patchHistoricalFilter(tableIndex, { valueTo: e.target.value })} disabled={!historicalFilter.enabled || historicalFilter.operator !== 'between'} placeholder="2024-12-31 or 5000" /></div>
                         <div className="field"><div className="field-label">Delete handling</div><select value={deleteHandling.mode || 'none'} onChange={(e) => patchDeleteHandling(tableIndex, { mode: e.target.value })}><option value="none">none / hard deletes not captured</option><option value="soft_delete">soft-delete column</option></select></div>
                         <div className="field"><div className="field-label">Soft-delete column</div><select value={deleteHandling.column || ''} onChange={(e) => patchDeleteHandling(tableIndex, { column: e.target.value })} disabled={deleteHandling.mode !== 'soft_delete'}><option value="">— select soft-delete column —</option>{sourceColumns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}</select></div>
-                        <label className="check full" style={{ gridColumn: 'span 12' }}>
-                          <input type="checkbox" checked={mapping.rowFilter?.enabled === true} onChange={(e) => patchRowFilter(tableIndex, { enabled: e.target.checked })} />
-                          <span className="field-label" style={{ margin: 0 }}>Enable row filter</span>
-                        </label>
-                        <div className="field full"><div className="field-label">Row filter expression</div><input value={mapping.rowFilter?.expression || ''} onChange={(e) => patchRowFilter(tableIndex, { expression: e.target.value })} placeholder="row.status !== 'deleted'" disabled={mapping.rowFilter?.enabled !== true} /></div>
+                        <div className="field full"><div className="field-label">Row filter</div><div className="hint">{mapping.rowFilter?.enabled ? `Configured in Transform: ${mapping.rowFilter.expression || 'enabled'}` : 'Configure row filtering in Transform.'}</div></div>
                         <label className="check full" style={{ gridColumn: 'span 12' }}>
                           <input type="checkbox" checked={mapping.createTargetTable === true} onChange={(e) => patchTable(tableIndex, { createTargetTable: e.target.checked, targetTableMode: e.target.checked ? 'create_new' : 'existing' })} />
                           <span className="field-label" style={{ margin: 0 }}>Create target table if it does not exist</span>
@@ -1764,17 +2038,387 @@ function MappingScreen() {
   );
 }
 
+function formatValueMap(values = {}) {
+  return Object.entries(values || {}).map(([key, value]) => `${key}=${value == null ? '' : String(value)}`).join('\n');
+}
+
+function parseValueMap(text) {
+  const values = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const separatorIndex = trimmed.includes('=') ? trimmed.indexOf('=') : trimmed.indexOf(':');
+    if (separatorIndex < 0) {
+      values[trimmed] = '';
+      continue;
+    }
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    if (key) values[key] = value;
+  }
+  return values;
+}
+
+function commaList(value) {
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value || '');
+}
+
+function parseCommaList(value) {
+  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function defaultTransformForType(type, column = {}) {
+  if (type === 'lookup') return { type, config: { values: {}, defaultValue: '' } };
+  if (type === 'lookup_table') return { type, config: { table: '', localColumn: column.sourceColumn || '', lookupColumn: '', valueColumn: '', missing: 'reject', defaultValue: '' } };
+  if (type === 'expression') return { type, config: { expression: 'value', requiredColumns: [] } };
+  if (type === 'constant') return { type, config: { value: '' } };
+  if (type === 'template') return { type, config: { template: '', requiredColumns: [] } };
+  if (type === 'concat') return { type, config: { fields: [], delimiter: ' ' } };
+  if (type === 'coalesce') return { type, config: { fields: [] } };
+  if (type === 'conditional') return { type, config: { branches: [], otherwise: { type: 'direct', config: {} } } };
+  return { type, config: {} };
+}
+
+function TransformScreen() {
+  const { workspace, currentProject, setCurrentProject, selectedProjectId, transformPreview, setTransformPreview, refreshProjects, withBusy, busy, setMessage, setError, mappingDirty, setMappingDirty, setTab, transformCatalog } = useApp();
+  const [sampleLimit, setSampleLimit] = useState(5);
+  const sourceCatalog = resolveCatalog(currentProject?.sourceCatalog, null);
+  const targetCatalog = resolveCatalog(currentProject?.targetCatalog, null);
+  const sourceTables = catalogTables(sourceCatalog);
+  const enabledMappings = (currentProject?.tableMappings || []).filter((mapping) => mapping.enabled !== false);
+  const transformTypes = ['direct', 'string', 'number', 'boolean', 'json', 'date', 'datetime', 'constant', 'null', 'template', 'lookup', 'lookup_table', 'expression', 'concat', 'coalesce', 'conditional'];
+
+  function markTransformDirty() {
+    setMappingDirty(true);
+    setTransformPreview(null);
+  }
+
+  function patchTable(tableIndex, patch) {
+    markTransformDirty();
+    setCurrentProject((curr) => {
+      if (!curr) return curr;
+      const tableMappings = [...(curr.tableMappings || [])];
+      tableMappings[tableIndex] = { ...tableMappings[tableIndex], ...patch };
+      return { ...curr, tableMappings };
+    });
+  }
+
+  function patchColumn(tableIndex, colIndex, patch) {
+    markTransformDirty();
+    setCurrentProject((curr) => {
+      if (!curr) return curr;
+      const tableMappings = [...(curr.tableMappings || [])];
+      const table = { ...tableMappings[tableIndex] };
+      const columnMappings = [...(table.columnMappings || [])];
+      columnMappings[colIndex] = { ...columnMappings[colIndex], ...patch };
+      table.columnMappings = columnMappings;
+      tableMappings[tableIndex] = table;
+      return { ...curr, tableMappings };
+    });
+  }
+
+  function patchTransformConfig(tableIndex, colIndex, patch) {
+    const table = currentProject?.tableMappings?.[tableIndex];
+    const column = table?.columnMappings?.[colIndex] || {};
+    patchColumn(tableIndex, colIndex, {
+      transform: {
+        ...(column.transform || { type: 'direct', config: {} }),
+        config: { ...(column.transform?.config || {}), ...patch },
+      },
+    });
+  }
+
+  function setTransformType(tableIndex, colIndex, selected) {
+    const table = currentProject?.tableMappings?.[tableIndex];
+    const column = table?.columnMappings?.[colIndex] || {};
+    if (selected.startsWith('preset:')) {
+      const presetName = selected.slice('preset:'.length);
+      const preset = transformCatalog.find((item) => item.name === presetName);
+      patchColumn(tableIndex, colIndex, { transform: { preset: presetName, ...(preset?.rule || { type: 'direct', config: {} }) } });
+      return;
+    }
+    patchColumn(tableIndex, colIndex, { transform: defaultTransformForType(selected, column) });
+  }
+
+  function patchRowFilter(tableIndex, patch) {
+    const mapping = currentProject?.tableMappings?.[tableIndex] || {};
+    patchTable(tableIndex, {
+      rowFilter: {
+        enabled: false,
+        expression: '',
+        config: { requiredColumns: [] },
+        ...(mapping.rowFilter || {}),
+        ...patch,
+      },
+    });
+  }
+
+  async function saveProject() {
+    if (!currentProject?.id) return null;
+    const dedupedTableMappings = dedupeTableMappings(currentProject.tableMappings || []);
+    const resp = await api(`/projects/${encodeURIComponent(currentProject.id)}`, {
+      method: 'PUT',
+      body: {
+        name: currentProject.name,
+        notes: currentProject.notes || '',
+        sourceSchema: currentProject.sourceSchema || workspace.sourceSchema,
+        targetSchema: currentProject.targetSchema || workspace.targetSchema,
+        includeViews: currentProject.includeViews ?? workspace.includeViews,
+        sourceCatalog: currentProject.sourceCatalog,
+        targetCatalog: currentProject.targetCatalog,
+        tableMappings: dedupedTableMappings,
+      },
+      timeoutMs: 120000,
+    });
+    const project = normalizeProjectForUi(resp.project || null);
+    setCurrentProject(project);
+    setMappingDirty(false);
+    await refreshProjects().catch(() => []);
+    return project;
+  }
+
+  async function saveTransforms() {
+    await withBusy('save-transforms', async () => {
+      await saveProject();
+      setMessage('Saved project transform configuration');
+    });
+  }
+
+  async function runTransformPreview() {
+    if (!currentProject?.id) {
+      setError('No active project. Create or load a project first.');
+      return;
+    }
+    await withBusy('transform-preview', async () => {
+      await saveProject();
+      const resp = await api(`/projects/${encodeURIComponent(currentProject.id)}/transform-preview`, {
+        method: 'POST',
+        body: {
+          sourceConnection: workspace.sourceConnection,
+          sampleLimit: Number(sampleLimit || 5),
+          mode: 'all',
+          selectedTables: [],
+          loadPhase: 'configured',
+        },
+        timeoutMs: 120000,
+      });
+      setTransformPreview(resp.preview || null);
+      const errors = resp.preview?.summary?.transformErrorCount || 0;
+      setMessage(errors ? `Transform preview completed with ${errors} transform errors` : 'Transform preview passed');
+    });
+  }
+
+  async function savePreviewAndContinue() {
+    await runTransformPreview();
+    setTab('validate-run');
+  }
+
+  function renderTransformConfig({ tableIndex, colIndex, mapping, column }) {
+    const type = column.transform?.type || 'direct';
+    const config = column.transform?.config || {};
+    const sourceTable = tableByName(sourceCatalog, mapping.sourceTable);
+    const sourceColumns = tableColumns(sourceTable);
+    const lookupTable = tableByName(sourceCatalog, config.table);
+    const lookupColumns = tableColumns(lookupTable);
+
+    if (type === 'lookup') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <textarea
+            value={formatValueMap(config.values || {})}
+            onChange={(e) => patchTransformConfig(tableIndex, colIndex, { values: parseValueMap(e.target.value) })}
+            placeholder={'1=Y\n0=N'}
+            style={{ minHeight: 90 }}
+          />
+          <input value={config.defaultValue ?? ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { defaultValue: e.target.value })} placeholder="Default value when no map entry matches" />
+        </div>
+      );
+    }
+
+    if (type === 'lookup_table') {
+      return (
+        <div className="form-grid" style={{ marginTop: 8 }}>
+          <div className="field"><div className="field-label">Lookup table</div><select value={config.table || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { table: e.target.value, lookupColumn: '', valueColumn: '' })}><option value="">— select table —</option>{sourceTables.map((table) => <option key={table.name} value={table.name}>{table.name}</option>)}</select></div>
+          <div className="field"><div className="field-label">Local source column</div><select value={config.localColumn || column.sourceColumn || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { localColumn: e.target.value })}><option value="">— select local key —</option>{sourceColumns.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></div>
+          <div className="field"><div className="field-label">Lookup key column</div><select value={config.lookupColumn || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { lookupColumn: e.target.value })}><option value="">— select lookup key —</option>{lookupColumns.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></div>
+          <div className="field"><div className="field-label">Lookup value column</div><select value={config.valueColumn || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { valueColumn: e.target.value })}><option value="">— select value column —</option>{lookupColumns.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></div>
+          <div className="field"><div className="field-label">Missing key</div><select value={config.missing || 'reject'} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { missing: e.target.value })}><option value="reject">reject row</option><option value="null">write null</option><option value="default">use default</option></select></div>
+          <div className="field"><div className="field-label">Default value</div><input value={config.defaultValue ?? ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { defaultValue: e.target.value })} disabled={(config.missing || 'reject') !== 'default'} /></div>
+        </div>
+      );
+    }
+
+    if (type === 'expression') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <input value={config.expression || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { expression: e.target.value })} placeholder="value === '1' ? 'Y' : 'N'" />
+          <input value={commaList(config.requiredColumns)} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { requiredColumns: parseCommaList(e.target.value) })} placeholder="Required source columns, comma-separated" />
+        </div>
+      );
+    }
+
+    if (type === 'constant') {
+      return <input style={{ marginTop: 8 }} value={config.value ?? ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { value: e.target.value })} placeholder="Constant target value" />;
+    }
+
+    if (type === 'template') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <input value={config.template || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { template: e.target.value })} placeholder="{{first_name}} {{last_name}}" />
+          <input value={commaList(config.requiredColumns)} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { requiredColumns: parseCommaList(e.target.value) })} placeholder="Required source columns, comma-separated" />
+        </div>
+      );
+    }
+
+    if (type === 'concat' || type === 'coalesce') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <input value={commaList(config.fields)} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { fields: parseCommaList(e.target.value) })} placeholder="Source fields, comma-separated" />
+          {type === 'concat' ? <input value={config.delimiter ?? ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { delimiter: e.target.value })} placeholder="Delimiter" /> : null}
+        </div>
+      );
+    }
+
+    if (type === 'conditional') {
+      return (
+        <textarea
+          style={{ marginTop: 8, minHeight: 100 }}
+          value={formatJson(config)}
+          onChange={(e) => {
+            const parsed = safeJsonParse(e.target.value);
+            if (parsed) patchColumn(tableIndex, colIndex, { transform: { type: 'conditional', config: parsed } });
+          }}
+        />
+      );
+    }
+
+    return null;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div className="card">
+        <SectionTitle title="Transform" hint="Configure row filters, value rewrites, expressions, and lookup-table enrichments before validation and load." action={<span className="badge">Step 3</span>} />
+        <div className="toolbar" style={{ marginBottom: 14 }}>
+          {mappingDirty ? <span className="badge" style={{ borderColor: '#d97706', color: '#d97706' }}>Unsaved transform changes</span> : <span className="badge">Transforms saved</span>}
+          <div className="field" style={{ minWidth: 120 }}><div className="field-label">Sample rows</div><input type="number" min="1" max="50" value={sampleLimit} onChange={(e) => setSampleLimit(Number(e.target.value || 5))} /></div>
+          <button className="btn" type="button" onClick={() => void saveTransforms()} disabled={!currentProject?.id || busy['save-transforms']}>{busy['save-transforms'] ? 'Saving…' : 'Save project transforms'}</button>
+          <button className="btn" type="button" onClick={() => void runTransformPreview()} disabled={!currentProject?.id || busy['transform-preview']}>{busy['transform-preview'] ? 'Previewing…' : 'Preview all transforms'}</button>
+          <button className="btn primary" type="button" onClick={() => void savePreviewAndContinue()} disabled={!currentProject?.id || busy['transform-preview']}>Preview all & continue</button>
+        </div>
+
+        {!currentProject ? <div className="hint">Create or load a project first.</div> : null}
+        {currentProject && !enabledMappings.length ? <div className="alert warn"><div style={{ fontWeight: 800 }}>No enabled mappings</div><div className="hint" style={{ marginTop: 6 }}>Go to Mapping and add at least one enabled table mapping.</div></div> : null}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {(currentProject?.tableMappings || []).map((mapping, tableIndex) => {
+            const sourceTable = tableByName(sourceCatalog, mapping.sourceTable);
+            const targetTable = tableByName(targetCatalog, mapping.targetTable);
+            const sourceColumns = tableColumns(sourceTable);
+            const tablePreview = (transformPreview?.tables || []).find((item) => item.sourceTable === mapping.sourceTable);
+            return (
+              <div key={mapping.id || `${mapping.sourceTable}:${tableIndex}`} className="card" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <SectionTitle
+                  title={`${mapping.sourceTable || 'source'} → ${mapping.targetTable || 'target'}`}
+                  hint={mapping.enabled === false ? 'Disabled table mapping' : `Transform status: ${tablePreview?.status || 'not previewed'}`}
+                  action={tablePreview ? <span className="badge">{tablePreview.status}</span> : <span className="badge">No preview</span>}
+                />
+
+                <div className="card" style={{ background: 'rgba(59,130,246,0.06)', marginBottom: 12 }}>
+                  <SectionTitle title="Row filter" hint="Filter rows after extraction and before target writes." />
+                  <div className="form-grid">
+                    <label className="check"><input type="checkbox" checked={mapping.rowFilter?.enabled === true} onChange={(e) => patchRowFilter(tableIndex, { enabled: e.target.checked })} /><span className="field-label" style={{ margin: 0 }}>Enable row filter</span></label>
+                    <div className="field full"><div className="field-label">Expression</div><input value={mapping.rowFilter?.expression || ''} onChange={(e) => patchRowFilter(tableIndex, { expression: e.target.value })} placeholder="row.status !== 'deleted'" disabled={mapping.rowFilter?.enabled !== true} /></div>
+                    <div className="field full"><div className="field-label">Required columns</div><input value={commaList(mapping.rowFilter?.config?.requiredColumns)} onChange={(e) => patchRowFilter(tableIndex, { config: { ...(mapping.rowFilter?.config || {}), requiredColumns: parseCommaList(e.target.value) } })} placeholder="status, deleted_at" disabled={mapping.rowFilter?.enabled !== true} /></div>
+                  </div>
+                </div>
+
+                <div className="schema-table-scroll" style={{ overflowX: 'auto' }}>
+                  <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', padding: 8 }}>Target column</th>
+                        <th style={{ textAlign: 'left', padding: 8 }}>Source column</th>
+                        <th style={{ textAlign: 'left', padding: 8 }}>Transform</th>
+                        <th style={{ textAlign: 'left', padding: 8 }}>Config</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(mapping.columnMappings || []).filter((column) => column.enabled !== false && column.targetColumnMode !== 'ignore' && column.targetColumn).map((column) => {
+                        const colIndex = (mapping.columnMappings || []).findIndex((item) => item.id === column.id);
+                        const selectedType = column.transform?.preset ? `preset:${column.transform.preset}` : (column.transform?.type || 'direct');
+                        const sourceColumn = columnByName(sourceTable, column.sourceColumn);
+                        const targetColumn = columnByName(targetTable, column.targetColumn);
+                        return (
+                          <tr key={column.id}>
+                            <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{column.targetColumn}<div className="hint">{describeColumn(targetColumn) || '—'}</div></td>
+                            <td className="mono" style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{column.sourceColumn}<div className="hint">{describeColumn(sourceColumn) || '—'}</div></td>
+                            <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)', minWidth: 180 }}>
+                              <select value={selectedType} onChange={(e) => setTransformType(tableIndex, colIndex, e.target.value)}>
+                                {transformTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                                {transformCatalog.map((item) => <option key={item.name} value={`preset:${item.name}`}>preset:{item.name}</option>)}
+                              </select>
+                              <input style={{ marginTop: 8 }} value={column.transform?.config?.when || ''} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { when: e.target.value })} placeholder="Optional condition" />
+                            </td>
+                            <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)', minWidth: 360 }}>{renderTransformConfig({ tableIndex, colIndex, mapping, column })}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {tablePreview ? (
+                  <details style={{ marginTop: 12 }} open>
+                    <summary className="btn" style={{ display: 'inline-flex' }}>Preview</summary>
+                    <div className="toolbar" style={{ marginTop: 12, marginBottom: 8 }}>
+                      <span className="badge">Required columns: {(tablePreview.requiredColumns || []).join(', ') || 'default'}</span>
+                      <span className="badge">Filtered: {tablePreview.filteredRowCount || 0}</span>
+                      <span className="badge">Errors: {(tablePreview.transformErrors || []).length}</span>
+                    </div>
+                    {tablePreview.lookupDependencies?.length ? <div className="hint" style={{ marginBottom: 8 }}>Lookup joins: {tablePreview.lookupDependencies.map((item) => `${item.localColumn} → ${item.table}.${item.lookupColumn}.${item.valueColumn}`).join(' • ')}</div> : null}
+                    {tablePreview.transformErrors?.length ? <div className="alert warn"><div style={{ fontWeight: 800 }}>Transform errors</div><div className="hint" style={{ marginTop: 6 }}>{tablePreview.transformErrors.map((item) => item.message).join(' • ')}</div></div> : null}
+                    <div className="grid" style={{ alignItems: 'start' }}>
+                      <div className="mono" style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{formatJson({ sampleRows: tablePreview.sampleRows || [] })}</div>
+                      <div className="mono" style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{formatJson({ transformedRows: tablePreview.transformedRows || [] })}</div>
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card">
+        <SectionTitle title="Transform preview summary" hint="Saved preview fingerprint used by execution gating." />
+        {transformPreview ? (
+          <div className="toolbar" style={{ marginBottom: 12 }}>
+            <span className="badge">Fingerprint: {transformPreview.transformFingerprint}</span>
+            <span className="badge">Tables: {transformPreview.summary?.tableCount || 0}</span>
+            <span className="badge">Ready: {transformPreview.summary?.readyCount || 0}</span>
+            <span className="badge">Errors: {transformPreview.summary?.transformErrorCount || 0}</span>
+          </div>
+        ) : null}
+        <div className="mono" style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto' }}>{transformPreview ? formatJson(transformPreview) : '—'}</div>
+      </div>
+    </div>
+  );
+}
+
 function ValidateRunScreen() {
-  const { workspace, currentProject, setCurrentProject, currentRun, preflightReport, setPreflightReport, dryRunPreview, setDryRunPreview, runReport, cutoverReport, setCutoverReport, selectedProjectId, selectedRunId, setSelectedRunId, runs, loadRun, loadRunReport, refreshProjects, refreshRuns, streamRun, logs, setLogs, withBusy, busy, setMessage, setError, mappingDirty, setMappingDirty } = useApp();
+  const { workspace, currentProject, setCurrentProject, currentRun, preflightReport, setPreflightReport, transformPreview, setTransformPreview, dryRunPreview, setDryRunPreview, runReport, setRunReport, cutoverReport, setCutoverReport, selectedProjectId, selectedRunId, setSelectedRunId, runs, loadRun, loadRunReport, refreshProjects, refreshRuns, streamRun, logs, setLogs, withBusy, busy, setMessage, setError, mappingDirty, setMappingDirty } = useApp();
   const [runErrors, setRunErrors] = useState([]);
   const [replayPlan, setReplayPlan] = useState(null);
   const [replayImportJson, setReplayImportJson] = useState('');
   const [replays, setReplays] = useState([]);
   const [verification, setVerification] = useState(null);
+  const [verificationIssueView, setVerificationIssueView] = useState({ view: 'open', table: '' });
   const [verifiedExecutionSignature, setVerifiedExecutionSignature] = useState('');
   const [watermarks, setWatermarks] = useState(null);
-  const [executeOptions, setExecuteOptions] = useState({ mode: 'all', selectedTables: [], dryRun: false, errorPolicy: 'fail-fast', concurrency: 1, batchSize: 1000, cdcMode: 'off', loadPhase: 'configured', cutoverMode: 'manual', watermarkColumn: '', verificationFingerprint: '' });
-  const hasVerificationBlockers = Boolean(verification && !verification.readyToLoad);
+  const issuePanelRef = useRef(null);
+  const [executeOptions, setExecuteOptions] = useState({ mode: 'all', selectedTables: [], dryRun: false, errorPolicy: 'fail-fast', concurrency: 1, batchSize: 1000, cdcMode: 'off', loadPhase: 'configured', cutoverMode: 'manual', watermarkColumn: '', verificationFingerprint: '', transformFingerprint: '' });
   const watermarkInvalid = executeOptions.cdcMode === 'watermark' && !String(executeOptions.watermarkColumn || '').trim();
   const selectedTableList = Array.isArray(executeOptions.selectedTables)
     ? executeOptions.selectedTables
@@ -1785,15 +2429,293 @@ function ValidateRunScreen() {
     .map((mapping) => ({ sourceTable: mapping.sourceTable, targetTable: mapping.targetTable || '—' }));
   const enabledUiMappings = (currentProject?.tableMappings || []).filter((mapping) => mapping.enabled !== false && mapping.sourceTable);
   const hasEnabledMappings = enabledUiMappings.length > 0;
-  const blockerSummary = [
-    ...(verification?.report?.blockers || []).map((item) => item.message || item.kind || String(item)),
-    ...(verification?.pendingSchemaActions || []).map((item) => `Pending schema action: ${item.action}:${item.targetTable}`),
-    ...(verification?.blockingSchemaIssues || []).map((item) => `Blocking schema issue: ${item.action}:${item.targetTable}`),
-  ];
+  const transformErrorCount = transformPreview?.summary?.transformErrorCount || 0;
+  const transformScopeCurrent = transformPreviewCoversRun(transformPreview, executeOptions, selectedTableList);
+  const transformReady = Boolean(transformPreview?.transformFingerprint) && transformScopeCurrent && !transformErrorCount;
+  function showVerificationIssues(nextView = {}) {
+    setVerificationIssueView((curr) => ({ ...curr, ...nextView }));
+    setTimeout(() => {
+      try {
+        issuePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {
+        // ignore scroll failures
+      }
+    }, 0);
+  }
+  function describeSchemaAction(action) {
+    if (action === 'create_table') return 'Target table will be created before loading.';
+    if (action === 'alter_table_add_columns') return 'Missing target columns need to be added before loading.';
+    if (action === 'missing_target_table') return 'Target table does not exist. Select an existing target table or mark the mapping to create a new target table.';
+    if (action === 'target_name_conflict') return 'Target table already exists but the mapping is marked create-new. Choose the existing target table or pick a different new table name.';
+    if (action === 'manual_fix_required') return 'Target schema has incompatible columns. Adjust the mapping or change the target schema before loading.';
+    if (action === 'use_existing') return 'Existing target table can be used.';
+    return action ? `Schema action: ${action}` : 'No schema action.';
+  }
+
+  function formatIssueKind(kind) {
+    return String(kind || 'issue').replace(/_/g, ' ');
+  }
+
+  function formatKnownReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return '';
+    const known = {
+      target_text_is_value_safe_but_not_strict_round_trip_varchar: 'varchar/text mapping is value-safe, but it is not an exact round-trip type match.',
+      target_integer_type_is_wider_than_source_mapping: 'target integer type is wider than the source mapping.',
+      target_float_type_is_wider_than_source_mapping: 'target floating-point type is wider than the source mapping.',
+      char_trailing_space_semantics_review: 'CHAR trailing-space behavior can differ between engines.',
+      postgres_json_preserves_text_more_than_jsonb_but_indexing_differs: 'PostgreSQL JSON preserves source text differently than JSONB and has different indexing behavior.',
+      datetime_to_timestamptz_changes_timezone_semantics: 'datetime to timestamptz changes timezone semantics.',
+      timestamp_instant_loaded_into_timezone_neutral_column: 'timestamp with timezone is being loaded into a timezone-neutral column.',
+    };
+    return known[text] || text.replace(/_/g, ' ');
+  }
+
+  function formatCompatibilityReviewMessage(message) {
+    const text = String(message || '').trim().replace(/^(conditional|review|risky|compatible):\s*/i, '');
+    if (!text) return 'review the source and target column compatibility before loading.';
+    return text.split(/\s*•\s*/).map(formatKnownReason).filter(Boolean).join(' ');
+  }
+
+  function formatCompatibilityDetail(issue = {}) {
+    const comparison = issue.comparison || {};
+    const rawMessage = String(issue.message || '').trim();
+    const match = rawMessage.match(/^source\s+(.+?)\s*->\s*target\s+(.+)$/i);
+    const sourceType = comparison.proposedType || match?.[1] || '';
+    const targetType = comparison.targetType || match?.[2] || '';
+    if (!sourceType && !targetType) return '';
+    return `${sourceType || 'source type'} to ${targetType || 'target type'}`;
+  }
+
+  function formatReadinessReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return '';
+    let match = text.match(/^Review\s+([^:]+):\s*(.+)$/i);
+    if (match) return `Column "${match[1]}" needs review: ${formatCompatibilityReviewMessage(match[2])}`;
+    match = text.match(/^Default differs for column\s+(.+)$/i);
+    if (match) return `Column "${match[1]}" has a different target default. Verify it matches your migration intent.`;
+    match = text.match(/^Required target column\s+(.+?)\s+is not mapped$/i);
+    if (match) return `Target column "${match[1]}" is required but no source column is mapped to it.`;
+    match = text.match(/^Backfill\/re-apply NOT NULL manually for\s+(.+)$/i);
+    if (match) return `Column "${match[1]}" needs a backfill before re-applying NOT NULL.`;
+    match = text.match(/^Incompatible target column\s+([^:]+):\s*(.+)$/i);
+    if (match) return `Target column "${match[1]}" is incompatible: ${formatKnownReason(match[2])}`;
+    return formatKnownReason(text);
+  }
+
+  function describeVerificationIssue(issue = {}, fallbackTable = {}) {
+    const rawMessage = String(issue.message || '').trim();
+    const tableName = issue.table || fallbackTable.sourceTable || '';
+    const targetName = issue.target || fallbackTable.targetTable || '';
+    const sourceColumn = issue.sourceColumn || issue.column || '';
+    const targetColumn = issue.targetColumn || issue.column || '';
+    const comparison = issue.comparison || {};
+    const compatibilityDetail = formatCompatibilityDetail(issue);
+    switch (issue.kind) {
+      case 'no_enabled_table_mappings':
+        return 'At least one enabled table mapping is required before verification or execution.';
+      case 'duplicate_source_table_mapping':
+        return `Source table "${tableName || issue.target || 'unknown'}" is mapped more than once. Keep one mapping or disable the duplicate.`;
+      case 'duplicate_source_column_mapping':
+        return `Source column "${sourceColumn || 'unknown'}" is mapped more than once for this table.`;
+      case 'duplicate_target_column_mapping':
+        return `Target column "${targetColumn || 'unknown'}" receives values from more than one source column.`;
+      case 'missing_source_table':
+        return `Source table "${tableName || 'unknown'}" was not found in the saved source catalog.`;
+      case 'missing_target_table':
+        return `Target table "${targetName || 'unknown'}" does not exist. Select an existing target table or create/provision one.`;
+      case 'missing_new_target_table_name':
+        return 'This mapping is set to create a new target table, but no target table name is provided.';
+      case 'missing_conflict_keys':
+        return 'Upsert mode needs conflict keys that match a target primary key or unique constraint.';
+      case 'invalid_conflict_keys':
+        return `Configured conflict keys (${(issue.conflictKeys || []).join(', ') || 'none'}) do not match a target primary key or unique constraint.`;
+      case 'missing_watermark_column':
+        return `Watermark column "${issue.watermarkColumn || 'unknown'}" does not exist on the source table.`;
+      case 'no_enabled_column_mappings':
+        return 'At least one enabled source column must map to a target column.';
+      case 'missing_target_column_mapping':
+        return `Source column "${sourceColumn || 'unknown'}" is enabled but has no target column. Map it or mark it ignored.`;
+      case 'missing_new_target_column_name':
+        return `Source column "${sourceColumn || 'unknown'}" is set to create a new target column, but no new column name is provided.`;
+      case 'missing_source_column':
+        return `Source column "${sourceColumn || 'unknown'}" was not found in the saved source catalog.`;
+      case 'missing_target_column':
+        return `Target column "${targetColumn || 'unknown'}" was not found in the saved target catalog.`;
+      case 'unsupported_transform':
+        return `Transform "${issue.transform || 'unknown'}" is not supported for ${sourceColumn || 'this column'}.`;
+      case 'target_not_null_source_nullable':
+        if (issue.nullCountKnown && Number(issue.nullCount || 0) > 0) {
+          return `Target column "${targetColumn || 'unknown'}" is NOT NULL, but source column "${sourceColumn || 'unknown'}" has ${issue.nullCount} NULL ${Number(issue.nullCount) === 1 ? 'row' : 'rows'}. Add a transform/default/filter, make the target nullable, or fix the data.`;
+        }
+        if (issue.nullCountKnown) {
+          return `Target column "${targetColumn || 'unknown'}" is NOT NULL and source column "${sourceColumn || 'unknown'}" is nullable in schema, but an exact scan found 0 NULL rows.`;
+        }
+        return `Target column "${targetColumn || 'unknown'}" is NOT NULL and source column "${sourceColumn || 'unknown'}" is nullable in schema. Exact NULL count could not be computed, so this requires explicit approval or a schema/mapping fix.`;
+      case 'type_not_safely_assignable':
+        return `Target column "${targetColumn || 'unknown'}" cannot safely store values from source column "${sourceColumn || 'unknown'}"${compatibilityDetail ? ` (${compatibilityDetail})` : ''}. Change the target type, choose a different target column, or add a transform.`;
+      case 'compatibility_review_required':
+        return `Column "${sourceColumn || 'unknown'}" maps to "${targetColumn || 'unknown'}" and needs compatibility review before loading.`;
+      case 'incompatible_type':
+        if (comparison.nullableCompatible === false) {
+          return `Target column "${targetColumn || 'unknown'}" is NOT NULL but source column "${sourceColumn || 'unknown'}" can contain NULL values. Make the target nullable, add a default/backfill, or transform/filter NULL values before loading.`;
+        }
+        if (comparison.compatibleType === false) {
+          return `Column "${sourceColumn || 'unknown'}" maps to "${targetColumn || 'unknown'}", but the target type cannot safely store the mapped source values${compatibilityDetail ? ` (${compatibilityDetail})` : ''}. Change the target type, choose a different target column, or add a transform.`;
+        }
+        return `Column "${sourceColumn || 'unknown'}" maps to "${targetColumn || 'unknown'}" and needs compatibility review${compatibilityDetail ? ` (${compatibilityDetail})` : ''}. Adjust the mapping or target schema before loading.`;
+      case 'unmapped_required_target_column':
+        return `Target column "${targetColumn || 'unknown'}" is required but no source column is mapped to it. Map a source column, add a default, or make it nullable.`;
+      case 'append_mode_duplicate_risk':
+        return 'Append mode can duplicate rows on retry/resume unless target uniqueness prevents it.';
+      case 'truncate_mode_restart_recommended':
+        return 'Truncate mode is safest when rerun from the start after interruption.';
+      case 'watermark_without_primary_key':
+        return 'Watermark mode works best with a stable primary-key tie-breaker.';
+      case 'risky_cast':
+        return `Column "${sourceColumn || 'unknown'}" maps to "${targetColumn || 'unknown'}" and needs review: ${formatCompatibilityReviewMessage(rawMessage)}`;
+      case 'transform_required':
+        return `Column "${sourceColumn || 'unknown'}" maps to "${targetColumn || 'unknown'}" and needs a transform before loading: ${formatCompatibilityReviewMessage(rawMessage)}`;
+      case 'target_column_will_be_created':
+        return `Target column "${targetColumn || sourceColumn || 'unknown'}" will be created before loading.`;
+      case 'target_table_will_be_created':
+        return `Target table "${targetName || tableName || 'unknown'}" will be created before loading.`;
+      case 'unexpected_boolean_values':
+        return `Boolean-like source column "${sourceColumn || 'unknown'}" has unexpected sample values: ${(issue.samples || []).join(', ') || 'unknown'}.`;
+      case 'transform_runtime_warning':
+        return `A transform/filter preview raised a warning for table "${tableName || 'unknown'}".`;
+      case 'table_mapping_disabled':
+        return `Table mapping "${tableName || 'unknown'}" is disabled and will not run.`;
+      case 'incompatible_target_column':
+        if (comparison.nullableCompatible === false || /NOT NULL/i.test(rawMessage)) {
+          return `Target column "${targetColumn || 'unknown'}" is NOT NULL but source column "${sourceColumn || 'unknown'}" can contain NULL values. Make the target nullable, add a default/backfill, or transform/filter NULL values before loading.`;
+        }
+        if (comparison.compatibleType === false) {
+          return `Target column "${targetColumn || 'unknown'}" cannot safely store source column "${sourceColumn || 'unknown'}"${compatibilityDetail ? ` (${compatibilityDetail})` : ''}.`;
+        }
+        return rawMessage ? formatReadinessReason(rawMessage) : `Target column "${targetColumn || 'unknown'}" is incompatible with the mapped source column.`;
+      case 'missing_historical_filter':
+        return 'Historical filtered load requires a filter column, operator, and value.';
+      case 'invalid_historical_filter_column':
+        return `Historical filter column "${issue.column || 'unknown'}" was not found on source table "${tableName || 'unknown'}".`;
+      case 'missing_historical_filter_value':
+        return `Historical filter column "${issue.column || 'unknown'}" needs a filter value.`;
+      case 'missing_historical_filter_end_value':
+        return `Historical between-filter column "${issue.column || 'unknown'}" needs an end value.`;
+      case 'historical_filter_review':
+        return 'Review filtered historical loads carefully before execution.';
+      case 'missing_incremental_watermark_column':
+        return `Incremental load requires a valid source watermark column on table "${tableName || 'unknown'}".`;
+      case 'missing_incremental_tie_breaker_column':
+        return `Incremental load requires a stable tie-breaker column, preferably a primary key, on table "${tableName || 'unknown'}".`;
+      case 'nullable_watermark_column':
+        return `Watermark column "${issue.watermarkColumn || 'unknown'}" is nullable, which can cause missed or unstable incremental reads.`;
+      case 'incremental_without_upsert':
+        return 'Incremental loads that may update existing rows are safest with write mode upsert and valid conflict keys.';
+      case 'incremental_without_conflict_keys':
+        return 'Without conflict keys, incremental replays or lookback windows can duplicate rows.';
+      case 'no_incremental_lookback_window':
+        return 'A small lookback window helps catch late-arriving updates.';
+      case 'incremental_hard_deletes_not_captured':
+        return 'Watermark incremental loads do not capture hard deletes. Use a soft-delete column or manual reconciliation.';
+      case 'missing_soft_delete_column':
+        return `Soft-delete column "${issue.column || 'unknown'}" was not found on the source table.`;
+      default:
+        if (/^source\s+.+\s*->\s*target\s+.+$/i.test(rawMessage) && (sourceColumn || targetColumn)) {
+          return `Column "${sourceColumn || 'unknown'}" maps to "${targetColumn || 'unknown'}" and needs compatibility review${compatibilityDetail ? ` (${compatibilityDetail})` : ''}.`;
+        }
+        return rawMessage ? formatReadinessReason(rawMessage) : (issue.kind ? `Review issue: ${formatIssueKind(issue.kind)}` : String(issue));
+    }
+  }
+
+  function createVerificationIssueItem(severity, issue = {}, fallbackTable = {}, scope = 'Table') {
+    const sourceTable = issue.sourceTable || fallbackTable.sourceTable || issue.table || '';
+    const targetTable = fallbackTable.targetTable || issue.targetTable || (issue.target && issue.target !== 'project' ? issue.target : '');
+    const sourceColumn = issue.sourceColumn || '';
+    const targetColumn = issue.targetColumn || issue.column || '';
+    const prefix = severity === 'blocker' ? 'Blocker' : 'Warning';
+    const columnTitle = sourceColumn || targetColumn ? `${sourceColumn || 'source column'} → ${targetColumn || 'target column'}` : '';
+    const tableTitle = sourceTable || targetTable ? [sourceTable, targetTable].filter(Boolean).join(' → ') : '';
+    return {
+      severity,
+      scope,
+      sourceTable,
+      targetTable,
+      sourceColumn,
+      targetColumn,
+      kind: issue.kind || severity,
+      title: `${prefix}: ${columnTitle || tableTitle || formatIssueKind(issue.kind || severity)}`,
+      message: describeVerificationIssue(issue, { ...fallbackTable, sourceTable, targetTable }),
+      raw: issue,
+    };
+  }
+
+  function collectVerificationIssues(nextVerification = verification) {
+    const items = [];
+    const projectIssueKinds = new Set(['no_enabled_table_mappings', 'duplicate_source_table_mapping']);
+    for (const issue of nextVerification?.report?.blockers || []) {
+      if (!projectIssueKinds.has(issue.kind) && issue.target !== 'project') continue;
+      items.push(createVerificationIssueItem('blocker', issue, {}, 'Project'));
+    }
+    for (const issue of nextVerification?.report?.warnings || []) {
+      if (!projectIssueKinds.has(issue.kind) && issue.target !== 'project') continue;
+      items.push(createVerificationIssueItem('warning', issue, {}, 'Project'));
+    }
+    for (const table of nextVerification?.report?.tables || []) {
+      for (const issue of table.blockers || []) {
+        items.push(createVerificationIssueItem('blocker', issue, table, table.sourceTable || table.targetTable || 'Table'));
+      }
+      for (const issue of table.warnings || []) {
+        items.push(createVerificationIssueItem('warning', issue, table, table.sourceTable || table.targetTable || 'Table'));
+      }
+    }
+    const seen = new Set();
+    return items.filter((item) => {
+      const key = `${item.severity}:${item.sourceTable}:${item.targetTable}:${item.sourceColumn}:${item.targetColumn}:${item.kind}:${item.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function normalizeServerIssueForUi(issue = {}) {
+    const sourceColumn = issue.sourceColumn || '';
+    const targetColumn = issue.targetColumn || '';
+    const sourceTable = issue.sourceTable || '';
+    const targetTable = issue.targetTable || '';
+    const prefix = issue.severity === 'blocker' ? (issue.status === 'allowed' ? 'Allowed blocker' : 'Open blocker') : 'Warning';
+    const columnTitle = sourceColumn || targetColumn ? `${sourceColumn || 'source column'} → ${targetColumn || 'target column'}` : '';
+    const tableTitle = sourceTable || targetTable ? [sourceTable, targetTable].filter(Boolean).join(' → ') : '';
+    return {
+      ...issue,
+      scope: issue.scope || tableTitle || 'Project',
+      title: `${prefix}: ${columnTitle || tableTitle || formatIssueKind(issue.kind || issue.severity)}`,
+      message: issue.message || describeVerificationIssue(issue, { sourceTable, targetTable }),
+      status: issue.status || (issue.severity === 'warning' ? 'warning' : 'open'),
+    };
+  }
+
+  const verificationIssues = useMemo(() => {
+    if (Array.isArray(verification?.issues) && verification.issues.length) {
+      return verification.issues.map(normalizeServerIssueForUi);
+    }
+    return collectVerificationIssues(verification);
+  }, [verification]);
+  const openVerificationBlockers = verificationIssues.filter((item) => item.severity === 'blocker' && item.status !== 'allowed');
+  const warningVerificationIssues = verificationIssues.filter((item) => item.severity === 'warning');
+  const topGateIssues = openVerificationBlockers.length ? openVerificationBlockers : warningVerificationIssues;
+  const filteredVerificationIssues = verificationIssues.filter((item) => {
+    if (verificationIssueView.view === 'open' && !(item.severity === 'blocker' && item.status !== 'allowed')) return false;
+    if (verificationIssueView.view === 'allowed' && !(item.severity === 'blocker' && item.status === 'allowed')) return false;
+    if (verificationIssueView.view === 'warning' && item.severity !== 'warning') return false;
+    if (verificationIssueView.table && item.sourceTable !== verificationIssueView.table && item.targetTable !== verificationIssueView.table) return false;
+    return true;
+  });
+  const primaryGateIssue = openVerificationBlockers[0] || verificationIssues[0] || null;
   const verificationStale = mappingDirty && Boolean(verification);
   const currentExecutionSignature = buildExecutionOptionsSignature(executeOptions, selectedTableList);
   const executionOptionsStale = Boolean(verification) && verifiedExecutionSignature !== currentExecutionSignature;
-  const canExecute = Boolean(verification?.readyToLoad) && !watermarkInvalid && !selectedModeMissingTables && !mappingDirty && !executionOptionsStale && hasEnabledMappings;
+  const canExecute = Boolean(verification?.readyToLoad) && transformReady && !watermarkInvalid && !selectedModeMissingTables && !mappingDirty && !executionOptionsStale && hasEnabledMappings;
 
   function readinessBadge(level) {
     if (level === 'ready') return 'Ready';
@@ -1801,6 +2723,31 @@ function ValidateRunScreen() {
     if (level === 'provision') return 'Provision';
     if (level === 'blocked') return 'Blocked';
     return 'Unknown';
+  }
+
+  function readinessNextStep(item = {}) {
+    const openCount = item.openBlockerCount ?? item.blockerCount ?? 0;
+    if (openCount > 0) return 'Fix open blockers';
+    if ((item.allowedBlockerCount || 0) > 0) return 'Allowed by intent';
+    if ((item.warningCount || 0) > 0) return 'Review warnings';
+    if (item.schemaAction === 'create_table' || item.schemaAction === 'alter_table_add_columns') return 'Provision target';
+    if (item.schemaAction === 'manual_fix_required') return 'Review schema';
+    if (item.readiness?.level === 'ready') return 'Ready to load';
+    return 'Review details';
+  }
+
+  function executionGateMessage() {
+    if (!hasEnabledMappings) return `No enabled table mappings exist in the current UI state. Go to Mapping and add at least one manual source → target table mapping. Current mappings: ${(currentProject?.tableMappings || []).length}.`;
+    if (mappingDirty) return 'You have unsaved mapping changes. Click Save mappings in Mapping, then run Verify project.';
+    if (verificationStale) return 'Mappings changed after verification. Save and verify again.';
+    if (!transformPreview?.transformFingerprint) return 'Run Transform preview first.';
+    if (transformErrorCount) return 'Resolve Transform preview errors before execution.';
+    if (!transformScopeCurrent) return 'Transform preview does not match the current run mode, selected tables, or load phase. Build dry run or rerun Transform preview.';
+    if (executionOptionsStale) return 'Execution options changed after verification. Run Verify project again.';
+    if (watermarkInvalid) return 'Watermark mode requires a watermark column.';
+    if (selectedModeMissingTables) return 'Selected mode requires at least one table selection.';
+    if (!verification) return 'Run Verify project first. Verification will save current mappings before checking.';
+    return primaryGateIssue?.message || 'Resolve verification blockers before loading data.';
   }
 
   async function runPreflight() {
@@ -1818,6 +2765,12 @@ function ValidateRunScreen() {
     await withBusy('dry-run', async () => {
       if (!ensureReadyForValidation()) return;
       await saveMappingsIfNeeded();
+      const nextTransformPreview = await performTransformPreview();
+      if ((nextTransformPreview?.summary?.transformErrorCount || 0) > 0) {
+        setDryRunPreview(null);
+        setError('Dry run stopped: Transform preview found errors. Review the Transform tab first.');
+        return;
+      }
       const nextVerification = await performVerification();
       if (!nextVerification?.readyToLoad) {
         setDryRunPreview(null);
@@ -1846,13 +2799,99 @@ function ValidateRunScreen() {
   }
 
   async function performVerification() {
-    const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/verify`, { method: 'POST', body: buildRuntimeOverrides(workspace, { includeTarget: false }), timeoutMs: 120000 });
+    const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/verify`, {
+      method: 'POST',
+      body: {
+        ...buildRuntimeOverrides(workspace, { includeTarget: false }),
+        mode: executeOptions.mode,
+        selectedTables: executeOptions.mode === 'selected' ? selectedTableList : [],
+        dryRun: executeOptions.dryRun,
+        errorPolicy: executeOptions.errorPolicy,
+        concurrency: Number(executeOptions.concurrency || 1),
+        batchSize: Number(executeOptions.batchSize || 1000),
+        cdcMode: executeOptions.cdcMode,
+        loadPhase: executeOptions.loadPhase,
+        cutoverMode: executeOptions.cutoverMode,
+        watermarkColumn: executeOptions.watermarkColumn || undefined,
+      },
+      timeoutMs: 120000,
+    });
     const nextVerification = resp.verification || null;
     setVerification(nextVerification);
     setVerifiedExecutionSignature(buildExecutionOptionsSignature(executeOptions, selectedTableList));
     setExecuteOptions((curr) => ({ ...curr, verificationFingerprint: nextVerification?.verificationFingerprint || '' }));
     await loadWatermarks(selectedProjectId).catch(() => null);
     return nextVerification;
+  }
+
+  async function performTransformPreview() {
+    const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/transform-preview`, {
+      method: 'POST',
+      body: {
+        ...buildRuntimeOverrides(workspace, { includeTarget: false }),
+        mode: executeOptions.mode,
+        selectedTables: executeOptions.mode === 'selected' ? selectedTableList : [],
+        sampleLimit: 5,
+        loadPhase: executeOptions.loadPhase,
+      },
+      timeoutMs: 120000,
+    });
+    const nextPreview = resp.preview || null;
+    setTransformPreview(nextPreview);
+    setExecuteOptions((curr) => ({ ...curr, transformFingerprint: nextPreview?.transformFingerprint || '' }));
+    return nextPreview;
+  }
+
+  async function saveVerificationAllowances(nextAllowedIssues) {
+    if (!selectedProjectId) return null;
+    const resp = await api(`/projects/${encodeURIComponent(selectedProjectId)}/verification-allowances`, {
+      method: 'PUT',
+      body: { allowedVerificationIssues: nextAllowedIssues },
+      timeoutMs: 120000,
+    });
+    const project = normalizeProjectForUi(resp.project || null);
+    setCurrentProject(project);
+    await refreshProjects().catch(() => []);
+    return project;
+  }
+
+  async function allowVerificationIssue(issue) {
+    if (!issue?.issueKey || !issue.allowable) return;
+    const reason = typeof window !== 'undefined' ? window.prompt(`Why is this blocker acceptable?\n\n${issue.message || issue.title || issue.kind}`, '') : '';
+    if (!String(reason || '').trim()) {
+      setError('A reason is required before allowing a blocker.');
+      return;
+    }
+    await withBusy('verification-allowances', async () => {
+      const existing = (currentProject?.allowedVerificationIssues || []).filter((item) => item.issueKey !== issue.issueKey);
+      await saveVerificationAllowances([
+        ...existing,
+        {
+          issueKey: issue.issueKey,
+          kind: issue.kind,
+          sourceTable: issue.sourceTable || '',
+          targetTable: issue.targetTable || '',
+          sourceColumn: issue.sourceColumn || '',
+          targetColumn: issue.targetColumn || '',
+          reason: String(reason).trim(),
+          allowedAt: nowIso(),
+        },
+      ]);
+      await performVerification();
+      showVerificationIssues({ view: 'allowed', table: issue.sourceTable || issue.targetTable || '' });
+      setMessage('Allowed blocker saved with your reason.');
+    });
+  }
+
+  async function revokeVerificationIssue(issue) {
+    if (!issue?.issueKey) return;
+    await withBusy('verification-allowances', async () => {
+      const existing = (currentProject?.allowedVerificationIssues || []).filter((item) => item.issueKey !== issue.issueKey);
+      await saveVerificationAllowances(existing);
+      await performVerification();
+      showVerificationIssues({ view: 'open', table: issue.sourceTable || issue.targetTable || '' });
+      setMessage('Allowed blocker revoked.');
+    });
   }
 
   async function performPreflight() {
@@ -1964,12 +3003,17 @@ function ValidateRunScreen() {
   function verificationSummary() {
     const report = verification?.report;
     if (!report) return null;
-    const blockerCount = report.summary?.blockerCount || 0;
-    const warningCount = report.summary?.warningCount || 0;
+    const openBlockerCount = verification.openBlockerCount ?? report.summary?.openBlockerCount ?? report.summary?.blockerCount ?? 0;
+    const allowedBlockerCount = verification.allowedBlockerCount ?? report.summary?.allowedBlockerCount ?? 0;
+    const nonAllowableBlockerCount = verification.nonAllowableBlockerCount ?? report.summary?.nonAllowableBlockerCount ?? 0;
+    const warningCount = verification.warningCount ?? report.summary?.warningCount ?? 0;
     return {
-      blockerCount,
+      blockerCount: openBlockerCount,
+      openBlockerCount,
+      allowedBlockerCount,
+      nonAllowableBlockerCount,
       warningCount,
-      readiness: verification.readyToLoad ? 'verified' : (blockerCount ? 'needs_manual_review' : 'verified_with_warnings'),
+      readiness: verification.readyToLoad ? 'verified' : (openBlockerCount ? 'needs_manual_review' : 'verified_with_warnings'),
     };
   }
 
@@ -1982,9 +3026,14 @@ function ValidateRunScreen() {
   }, [selectedProjectId, verification?.verificationFingerprint, mappingDirty]);
 
   useEffect(() => {
+    setExecuteOptions((curr) => ({ ...curr, transformFingerprint: transformPreview?.transformFingerprint || '' }));
+  }, [transformPreview?.transformFingerprint]);
+
+  useEffect(() => {
     setVerification(null);
     setVerifiedExecutionSignature('');
     setPreflightReport(null);
+    setTransformPreview(null);
     setDryRunPreview(null);
     setRunReport(null);
     setCutoverReport(null);
@@ -2020,6 +3069,7 @@ function ValidateRunScreen() {
           cutoverMode: executeOptions.cutoverMode,
           watermarkColumn: executeOptions.watermarkColumn || undefined,
           verificationFingerprint: executeOptions.verificationFingerprint || undefined,
+          transformFingerprint: executeOptions.transformFingerprint || undefined,
           sourceConnection: workspace.sourceConnection,
           targetConnection: workspace.targetConnection,
         },
@@ -2062,6 +3112,19 @@ function ValidateRunScreen() {
     });
   }
 
+  async function cancelRun() {
+    if (!selectedRunId) return;
+    await withBusy('cancel-run', async () => {
+      await api(`/runs/${encodeURIComponent(selectedRunId)}/cancel`, {
+        method: 'POST',
+        timeoutMs: 30000,
+      });
+      await loadRun(selectedRunId).catch(() => null);
+      streamRun(selectedRunId);
+      setMessage(`Cancellation requested for ${selectedRunId}`);
+    });
+  }
+
   async function openRun(runId) {
     setSelectedRunId(runId);
     await loadRun(runId);
@@ -2080,7 +3143,7 @@ function ValidateRunScreen() {
     const parsed = JSON.parse(replayImportJson);
     const resp = await api(`/runs/${encodeURIComponent(selectedRunId)}/replay-import`, {
       method: 'POST',
-      body: { ...parsed, targetConnection: workspace.targetConnection },
+      body: { ...parsed, sourceConnection: workspace.sourceConnection, targetConnection: workspace.targetConnection },
       timeoutMs: 120000,
     });
     setReplayImportJson('');
@@ -2091,7 +3154,7 @@ function ValidateRunScreen() {
 
   async function exportErrors() {
     if (!selectedRunId) return;
-    const resp = await fetch(resolveApiUrl(`/runs/${encodeURIComponent(selectedRunId)}/errors/export`));
+    const resp = await fetch(resolveApiUrl(`/runs/${encodeURIComponent(selectedRunId)}/errors/export`), { headers: getAuthHeaders() });
     const text = await resp.text();
     downloadText(`${selectedRunId}.errors.json`, text);
   }
@@ -2099,7 +3162,7 @@ function ValidateRunScreen() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div className="card">
-        <SectionTitle title="Validation & execution" hint="Build dry run is the main safety gate: it saves mappings, runs Verify project, runs Preflight, then creates a transformed sample preview if there are no blockers." action={<span className="badge">Step 3</span>} />
+        <SectionTitle title="Validation & execution" hint="Build dry run refreshes Transform preview, runs Verify project, runs Preflight, then creates a transformed sample preview if there are no blockers." action={<span className="badge">Step 4</span>} />
         <div className="toolbar" style={{ marginBottom: 14 }}>
           <button className="btn" type="button" onClick={() => void verifyProject()} disabled={!selectedProjectId || busy.verify}>{busy.verify ? 'Verifying…' : 'Verify project'}</button>
           <button className="btn" type="button" onClick={() => void runPreflight()} disabled={!selectedProjectId || busy.preflight}>{busy.preflight ? 'Running…' : 'Run preflight'}</button>
@@ -2112,10 +3175,39 @@ function ValidateRunScreen() {
           <div className="hint" style={{ marginTop: 6 }}><b>Verify project</b> checks mapping completeness, target-schema readiness, and execution gating. <b>Preflight</b> samples source rows and validates transforms/filters. <b>Build dry run</b> now runs both of those first, then shows transformed sample rows without writing to PostgreSQL.</div>
         </div>
 
-        {!canExecute ? <div className="alert warn" style={{ marginBottom: 14 }}><div style={{ fontWeight: 800 }}>Execution gated</div><div className="hint" style={{ marginTop: 6 }}>{!hasEnabledMappings ? `No enabled table mappings exist in the current UI state. Go to Mapping and add at least one manual source → target table mapping. Current mappings: ${(currentProject?.tableMappings || []).length}.` : mappingDirty ? 'You have unsaved mapping changes. Click Save mappings in Mapping, then run Verify project.' : verificationStale ? 'Mappings changed after verification. Save and verify again.' : executionOptionsStale ? 'Execution options changed after verification. Run Verify project again.' : watermarkInvalid ? 'Watermark mode requires a watermark column.' : selectedModeMissingTables ? 'Selected mode requires at least one table selection.' : !verification ? 'Run Verify project first. Verification will save current mappings before checking.' : (blockerSummary.slice(0, 4).join(' • ') || 'Resolve verification blockers before loading data.')}</div></div> : null}
+        {!canExecute ? (
+          <div className="alert warn" style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800 }}>Execution gated</div>
+            <div className="hint" style={{ marginTop: 6 }}>{executionGateMessage()}</div>
+            {verification && topGateIssues.length ? (
+              <div style={{ marginTop: 10 }}>
+                <div className="hint" style={{ marginBottom: 6 }}>{openVerificationBlockers.length ? 'What to fix before execution:' : 'Warnings to review before execution:'}</div>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {topGateIssues.slice(0, 4).map((item, index) => (
+                    <li key={`${item.severity}:${item.kind}:${index}`} className="hint">
+                      <b>{item.severity === 'blocker' ? 'Open blocker' : 'Warning'}</b>
+                      {item.sourceTable || item.targetTable ? ` (${[item.sourceTable, item.targetTable].filter(Boolean).join(' → ')})` : ''}: {item.message}
+                    </li>
+                  ))}
+                </ul>
+                <button className="btn" type="button" style={{ marginTop: 10 }} onClick={() => showVerificationIssues({ view: openVerificationBlockers.length ? 'open' : 'warning', table: '' })}>
+                  {openVerificationBlockers.length ? 'Show blocker details' : 'Show warning details'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="alert" style={{ marginBottom: 14 }}>
           <div style={{ fontWeight: 800 }}>Mapping state</div>
           <div className="hint" style={{ marginTop: 6 }}>Current UI table mappings: {(currentProject?.tableMappings || []).length} • Enabled mappings: {enabledUiMappings.length} • Unsaved changes: {mappingDirty ? 'yes' : 'no'}</div>
+        </div>
+        <div className="alert" style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 800 }}>Transform state</div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            {transformPreview?.transformFingerprint
+              ? `Preview ${transformScopeCurrent ? 'matches' : 'does not match'} this run scope • Errors: ${transformErrorCount} • Filtered sample rows: ${transformPreview.summary?.filteredSampleRows || 0} • Scope: ${transformPreview.scope?.mode || 'unknown'} / ${transformPreview.scope?.loadPhase || 'configured'}`
+              : 'No transform preview for the current saved mappings.'}
+          </div>
         </div>
         {!mappingDirty && currentProject ? <MappingSummaryCard project={currentProject} sourceCatalog={sourceCatalog} targetCatalog={targetCatalog} title="Saved mapping summary used for validation" hint="This same persisted summary is what Verify, Preflight, Dry run, and Execute use." /> : null}
         {executeOptions.cdcMode === 'watermark' ? <div className="alert warn" style={{ marginBottom: 14 }}><div style={{ fontWeight: 800 }}>Incremental mode warning</div><div className="hint" style={{ marginTop: 6 }}>Watermark mode is still groundwork. It does not provide full CDC semantics, delete capture, or robust cutover sync guarantees.</div></div> : null}
@@ -2134,7 +3226,8 @@ function ValidateRunScreen() {
             <input type="checkbox" checked={executeOptions.dryRun} onChange={(e) => setExecuteOptions((curr) => ({ ...curr, dryRun: e.target.checked }))} />
             <span className="field-label" style={{ margin: 0 }}>Mark execution as dry run</span>
           </label>
-          <div className="field full"><div className="field-label">Verification fingerprint</div><input value={executeOptions.verificationFingerprint} onChange={(e) => setExecuteOptions((curr) => ({ ...curr, verificationFingerprint: e.target.value }))} placeholder="Auto-filled after verification" /></div>
+          <div className="field full"><div className="field-label">Verification token</div><div className="hint mono">{executeOptions.verificationFingerprint || 'Generated after Verify project'}</div></div>
+          <div className="field full"><div className="field-label">Transform preview token</div><div className="hint mono">{executeOptions.transformFingerprint || 'Generated after Transform preview'}</div></div>
         </div>
       </div>
 
@@ -2146,8 +3239,58 @@ function ValidateRunScreen() {
           {verificationMeta ? (
             <div className="toolbar" style={{ marginBottom: 12, gap: 8 }}>
               <TrustBadge level={verificationMeta.readiness} label={`Trust: ${verificationMeta.readiness}`} />
-              <span className="badge">Blockers: {verificationMeta.blockerCount}</span>
-              <span className="badge">Warnings: {verificationMeta.warningCount}</span>
+              <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'open', table: '' })}>Open blockers: {verificationMeta.openBlockerCount}</button>
+              <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'allowed', table: '' })}>Allowed: {verificationMeta.allowedBlockerCount}</button>
+              <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'warning', table: '' })}>Warnings: {verificationMeta.warningCount}</button>
+              {verificationMeta.nonAllowableBlockerCount ? <span className="badge">Hard stops: {verificationMeta.nonAllowableBlockerCount}</span> : null}
+            </div>
+          ) : null}
+          {verificationIssues.length ? (
+            <div ref={issuePanelRef} className="card" style={{ background: 'rgba(255,255,255,0.02)', marginBottom: 12 }}>
+              <SectionTitle
+                title={verificationIssueView.view === 'warning' ? 'Warnings' : (verificationIssueView.view === 'allowed' ? 'Allowed blockers' : (verificationIssueView.view === 'all' ? 'Verification issues' : 'Open blockers'))}
+                hint={verificationIssueView.table ? `Filtered to ${verificationIssueView.table}` : 'Click blocker/warning counts or table issue buttons to change this list.'}
+                action={(
+                  <div className="toolbar">
+                    <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'all', table: '' })}>All</button>
+                    <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'open', table: '' })}>Open</button>
+                    <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'allowed', table: '' })}>Allowed</button>
+                    <button className="btn" type="button" onClick={() => showVerificationIssues({ view: 'warning', table: '' })}>Warnings</button>
+                  </div>
+                )}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {filteredVerificationIssues.length ? filteredVerificationIssues.map((item, index) => (
+                  <div key={`${item.severity}:${item.kind}:${item.sourceTable}:${item.targetTable}:${index}`} className="alert" style={{ marginBottom: 0, borderColor: item.severity === 'blocker' ? 'rgba(220,38,38,0.45)' : 'rgba(217,119,6,0.45)' }}>
+                    <div className="toolbar" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontWeight: 800 }}>{item.title}</div>
+                        <div className="hint" style={{ marginTop: 6 }}>
+                          {item.sourceTable || item.targetTable ? [item.sourceTable, item.targetTable].filter(Boolean).join(' → ') : item.scope}
+                          {item.kind ? ` • ${formatIssueKind(item.kind)}` : ''}
+                        </div>
+                      </div>
+                      <span className="badge">{item.severity}</span>
+                    </div>
+                    <div style={{ marginTop: 8 }}>{item.message}</div>
+                    {item.severity === 'blocker' ? (
+                      <div className="toolbar" style={{ marginTop: 10 }}>
+                        {item.status === 'allowed' ? (
+                          <>
+                            <span className="badge">Allowed</span>
+                            <span className="hint">Reason: {item.allowance?.reason || '—'}</span>
+                            <button className="btn" type="button" onClick={() => void revokeVerificationIssue(item)} disabled={busy['verification-allowances']}>Revoke</button>
+                          </>
+                        ) : item.allowable ? (
+                          <button className="btn" type="button" onClick={() => void allowVerificationIssue(item)} disabled={busy['verification-allowances']}>Allow with reason</button>
+                        ) : (
+                          <span className="hint">Cannot be allowed: {item.nonAllowableReason || 'Fix this blocker before loading.'}</span>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )) : <div className="hint">No issues match this filter.</div>}
+              </div>
             </div>
           ) : null}
           {verification?.tableReadiness?.length ? (
@@ -2160,9 +3303,11 @@ function ValidateRunScreen() {
                     <th style={{ textAlign: 'left', padding: 8 }}>Readiness</th>
                     <th style={{ textAlign: 'left', padding: 8 }}>Completeness</th>
                     <th style={{ textAlign: 'left', padding: 8 }}>Schema action</th>
-                    <th style={{ textAlign: 'left', padding: 8 }}>Blockers</th>
+                    <th style={{ textAlign: 'left', padding: 8 }}>Open</th>
+                    <th style={{ textAlign: 'left', padding: 8 }}>Allowed</th>
                     <th style={{ textAlign: 'left', padding: 8 }}>Warnings</th>
-                    <th style={{ textAlign: 'left', padding: 8 }}>Reasons</th>
+                    <th style={{ textAlign: 'left', padding: 8 }}>Issues</th>
+                    <th style={{ textAlign: 'left', padding: 8 }}>Next step</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2173,9 +3318,15 @@ function ValidateRunScreen() {
                       <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{readinessBadge(item.readiness?.level)}</td>
                       <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{item.completeness?.level || '—'}</td>
                       <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{item.schemaAction || '—'}</td>
-                      <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{item.blockerCount}</td>
+                      <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{item.openBlockerCount ?? item.blockerCount ?? 0}</td>
+                      <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{item.allowedBlockerCount || 0}</td>
                       <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{item.warningCount}</td>
-                      <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{(item.readiness?.reasons || []).join(', ') || '—'}</td>
+                      <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                        {((item.openBlockerCount ?? item.blockerCount ?? 0) || item.allowedBlockerCount || item.warningCount) ? (
+                          <button className="btn" type="button" onClick={() => showVerificationIssues({ view: (item.openBlockerCount ?? item.blockerCount ?? 0) ? 'open' : (item.allowedBlockerCount ? 'allowed' : 'warning'), table: item.sourceTable || item.targetTable || '' })}>View details</button>
+                        ) : '—'}
+                      </td>
+                      <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}><span className="hint">{readinessNextStep(item)}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -2185,13 +3336,21 @@ function ValidateRunScreen() {
           {verification?.pendingSchemaActions?.length ? (
             <div className="alert warn" style={{ marginBottom: 12 }}>
               <div style={{ fontWeight: 800 }}>Pending schema actions</div>
-              <div className="hint" style={{ marginTop: 6 }}>{verification.pendingSchemaActions.map((item) => `${item.action}:${item.targetTable}`).join(' • ')}</div>
+              <div className="hint" style={{ marginTop: 6 }}>{verification.pendingSchemaActions.map((item) => `${item.targetTable || item.sourceTable}: ${describeSchemaAction(item.action)}`).join(' • ')}</div>
             </div>
           ) : null}
-          {verification?.blockingSchemaIssues?.length ? (
+          {verification?.hardBlockingSchemaIssues?.length ? (
             <div className="alert warn" style={{ marginBottom: 12 }}>
-              <div style={{ fontWeight: 800 }}>Blocking schema issues</div>
-              <div className="hint" style={{ marginTop: 6 }}>{verification.blockingSchemaIssues.map((item) => `${item.action}:${item.targetTable}`).join(' • ')}</div>
+              <div style={{ fontWeight: 800 }}>Hard schema blockers</div>
+              <div className="hint" style={{ marginTop: 6 }}>
+                {verification.hardBlockingSchemaIssues.map((item) => {
+                  const details = [
+                    ...(item.issues || []).map((issue) => describeVerificationIssue(issue, item)),
+                    ...(item.readiness?.reasons || []).map(formatReadinessReason),
+                  ].filter(Boolean).slice(0, 3);
+                  return `${item.targetTable || item.sourceTable}: ${describeSchemaAction(item.action)}${details.length ? ` ${details.join(' ')}` : ''}`;
+                }).join(' • ')}
+              </div>
             </div>
           ) : null}
           {verification?.executionPlan?.steps?.length ? (
@@ -2262,7 +3421,7 @@ function ValidateRunScreen() {
           <SectionTitle
             title="Runs"
             hint="Select a run to inspect current status or generate a final validation report."
-            action={<div className="toolbar"><button className="btn" type="button" onClick={() => void resumeRun()} disabled={!selectedRunId || busy['resume-run']}>{busy['resume-run'] ? 'Scheduling…' : 'Resume'}</button><button className="btn" type="button" onClick={() => void rerunFailed()} disabled={!selectedRunId || busy['rerun-failed']}>{busy['rerun-failed'] ? 'Starting…' : 'Rerun failed'}</button></div>}
+            action={<div className="toolbar"><button className="btn" type="button" onClick={() => void resumeRun()} disabled={!selectedRunId || busy['resume-run']}>{busy['resume-run'] ? 'Scheduling…' : 'Resume'}</button><button className="btn" type="button" onClick={() => void rerunFailed()} disabled={!selectedRunId || busy['rerun-failed']}>{busy['rerun-failed'] ? 'Starting…' : 'Rerun failed'}</button><button className="btn danger" type="button" onClick={() => void cancelRun()} disabled={!selectedRunId || !['queued', 'running'].includes(currentRun?.status) || busy['cancel-run']}>{busy['cancel-run'] ? 'Cancelling…' : 'Cancel'}</button></div>}
           />
           <div className="schema-table-scroll">
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -2371,12 +3530,12 @@ function ValidateRunScreen() {
 }
 
 function HistoryScreen() {
-  const { projects, runs, loadProject, setSelectedProjectId, loadRun, setSelectedRunId, currentProject, currentRun, refreshProjects, refreshRuns, withBusy, busy, setMessage } = useApp();
+  const { projects, runs, loadProject, setSelectedProjectId, loadRun, setSelectedRunId, currentProject, currentRun, refreshProjects, refreshRuns, withBusy, busy, setMessage, setTab } = useApp();
   const [importJson, setImportJson] = useState('');
 
   async function exportProject(projectId) {
     await withBusy('export-project', async () => {
-      const resp = await fetch(resolveApiUrl(`/projects/${encodeURIComponent(projectId)}/export`));
+      const resp = await fetch(resolveApiUrl(`/projects/${encodeURIComponent(projectId)}/export`), { headers: getAuthHeaders() });
       if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
       const text = await resp.text();
       downloadText(`${projectId}.mapping.json`, text);
@@ -2390,7 +3549,7 @@ function HistoryScreen() {
       const resp = await api('/projects/import', { method: 'POST', body: parsed, timeoutMs: 120000 });
       await refreshProjects();
       setSelectedProjectId(resp.project?.id || '');
-      await loadProject(resp.project?.id || '');
+      await loadProject(resp.project?.id || '', { loadIntoWorkspace: true });
       setMessage(`Imported project ${resp.project?.id || ''}`.trim());
     });
   }
@@ -2414,12 +3573,18 @@ function HistoryScreen() {
                 {projects.map((project) => (
                   <tr key={project.id}>
                     <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                      <button className="btn" type="button" onClick={() => { setSelectedProjectId(project.id); void loadProject(project.id); }}>{project.name}</button>
+                      <div style={{ fontWeight: 800 }}>{project.name}</div>
                       <div className="hint mono" style={{ marginTop: 6 }}>{project.id}</div>
                     </td>
                     <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{project.mappingSummary?.mappedTables ?? project.tableMappings?.filter?.((mapping) => mapping?.targetTable)?.length ?? 0}</td>
                     <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>{project.updatedAt || project.createdAt || '—'}</td>
-                    <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}><button className="btn" type="button" onClick={() => void exportProject(project.id)} disabled={busy['export-project']}>Export</button></td>
+                    <td style={{ padding: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div className="toolbar">
+                        <button className="btn" type="button" onClick={() => { setSelectedProjectId(project.id); void loadProject(project.id).then(() => setTab('mapping')); }}>Open mappings</button>
+                        <button className="btn" type="button" onClick={() => { setSelectedProjectId(project.id); void loadProject(project.id, { loadIntoWorkspace: true }).then(() => setTab('workspace')); }}>Load workspace</button>
+                        <button className="btn" type="button" onClick={() => void exportProject(project.id)} disabled={busy['export-project']}>Export</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2480,7 +3645,7 @@ function SettingsScreen() {
           <li>Projects are persisted under <span className="mono">mysql-pg-migrate/state/projects</span>.</li>
           <li>Runs, reports, checkpoints, and errors are persisted under sibling state folders.</li>
           <li>Passwords remain only in browser memory/local form state and are not persisted by the UI.</li>
-          <li>Wave-2 adds transform presets, richer run audit reporting, and error export workflows.</li>
+          <li>Transform is now first-class: preview row filters, value maps, expressions, constants, templates, and lookup-table joins before load.</li>
         </ul>
       </div>
       <div className="card">
@@ -2500,6 +3665,7 @@ function SettingsScreen() {
 const TABS = [
   { id: 'workspace', label: 'Workspace' },
   { id: 'mapping', label: 'Mapping' },
+  { id: 'transform', label: 'Transform' },
   { id: 'validate-run', label: 'Validate & Run' },
   { id: 'history', label: 'History' },
   { id: 'settings', label: 'Settings' },
@@ -2541,6 +3707,7 @@ function App() {
           {error ? <div className="alert warn" style={{ marginBottom: 14 }}><div style={{ fontWeight: 800 }}>Error</div><div className="hint" style={{ marginTop: 6 }}>{error}</div></div> : null}
           {tab === 'workspace' && <WorkspaceScreen />}
           {tab === 'mapping' && <MappingScreen />}
+          {tab === 'transform' && <TransformScreen />}
           {tab === 'validate-run' && <ValidateRunScreen />}
           {tab === 'history' && <HistoryScreen />}
           {tab === 'settings' && <SettingsScreen />}
@@ -2562,7 +3729,9 @@ export default function MysqlPgMigrateTool({ runtime: toolRuntime }) {
 const standaloneRoot = typeof document !== 'undefined' ? document.getElementById('root') : null;
 
 if (standaloneRoot?.dataset?.tool === 'mysql-pg-migrate') {
-  createRoot(standaloneRoot).render(
+  const root = standaloneRoot.__mysqlPgMigrateRoot || createRoot(standaloneRoot);
+  standaloneRoot.__mysqlPgMigrateRoot = root;
+  root.render(
     <React.StrictMode>
       <MysqlPgMigrateTool runtime={STANDALONE_RUNTIME} />
     </React.StrictMode>

@@ -82,14 +82,44 @@ function parseList(s) {
   return raw.split(',').map((x) => x.trim()).filter(Boolean);
 }
 
-function buildMysqlArgs(connection, { includePassword = true } = {}) {
+function normalizeMysqlConnection(connection = {}) {
+  const normalized = { ...connection };
+  const raw = String(connection.connectionString || '').trim();
+  if (!raw) return normalized;
+  try {
+    const url = new URL(raw);
+    if (!['mysql:', 'mysql2:'].includes(url.protocol)) return normalized;
+    if (url.hostname) normalized.host = url.hostname;
+    if (url.port) normalized.port = Number(url.port);
+    if (url.username) normalized.user = decodeURIComponent(url.username);
+    if (url.password) normalized.password = decodeURIComponent(url.password);
+    const database = decodeURIComponent(url.pathname || '').replace(/^\//, '');
+    if (database) normalized.database = database;
+    const sslMode = url.searchParams.get('ssl-mode') || url.searchParams.get('sslMode') || url.searchParams.get('sslmode');
+    if (sslMode) normalized.sslMode = sslMode;
+    const sslCa = url.searchParams.get('ssl-ca') || url.searchParams.get('sslCa');
+    const sslCert = url.searchParams.get('ssl-cert') || url.searchParams.get('sslCert');
+    const sslKey = url.searchParams.get('ssl-key') || url.searchParams.get('sslKey');
+    if (sslCa) normalized.sslCa = sslCa;
+    if (sslCert) normalized.sslCert = sslCert;
+    if (sslKey) normalized.sslKey = sslKey;
+  } catch {
+    // Invalid connection strings fall back to the explicit fields.
+  }
+  return normalized;
+}
+
+function buildMysqlArgs(connection) {
+  const resolved = normalizeMysqlConnection(connection);
   const args = [
-    `--host=${connection.host}`,
-    `--port=${Number(connection.port || 3306)}`,
-    `--user=${connection.user}`,
+    `--host=${resolved.host}`,
+    `--port=${Number(resolved.port || 3306)}`,
+    `--user=${resolved.user}`,
   ];
-  if (includePassword && connection.password) args.push(`--password=${connection.password}`);
-  if (connection.sslMode) args.push(`--ssl-mode=${connection.sslMode}`);
+  if (resolved.sslMode) args.push(`--ssl-mode=${resolved.sslMode}`);
+  if (resolved.sslCa) args.push(`--ssl-ca=${resolved.sslCa}`);
+  if (resolved.sslCert) args.push(`--ssl-cert=${resolved.sslCert}`);
+  if (resolved.sslKey) args.push(`--ssl-key=${resolved.sslKey}`);
   return args;
 }
 
@@ -109,19 +139,21 @@ async function writeText(filePath, text) {
 
 async function writeInventoryFile({ mysqlCmd, env, cwd, connection, sql, outPath, onChild, isCancelled, log }) {
   const query = `${sql}`;
+  const resolved = normalizeMysqlConnection(connection);
   await spawnLogged(
     mysqlCmd,
-    [...buildMysqlArgs(connection), `--database=${connection.database}`, '--batch', '--raw', '-e', query],
+    [...buildMysqlArgs(resolved), `--database=${resolved.database}`, '--batch', '--raw', '-e', query],
     { env, cwd, log, onChild, isCancelled, stdoutFile: outPath }
   );
 }
 
 async function runBackup({ connection, options, outDir, log, progress, onChild, isCancelled }) {
+  const resolvedConnection = normalizeMysqlConnection(connection);
   const stamp = nowStamp();
   const jobDir = path.join(outDir, stamp);
   await fsp.mkdir(jobDir, { recursive: true });
 
-  const env = { ...process.env, MYSQL_PWD: connection.password || process.env.MYSQL_PWD || '' };
+  const env = { ...process.env, MYSQL_PWD: resolvedConnection.password || process.env.MYSQL_PWD || '' };
   const mysqlCmd = process.env.MYSQL_PATH || 'mysql';
   const mysqldump = process.env.MYSQLDUMP_PATH || 'mysqldump';
 
@@ -129,18 +161,18 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
     createdAt: new Date().toISOString(),
     options,
     connection: {
-      host: connection.host,
-      port: Number(connection.port || 3306),
-      user: connection.user,
-      database: connection.database,
-      sslMode: connection.sslMode || 'PREFERRED',
-      connectionString: redactConnectionString(connection.connectionString || ''),
+      host: resolvedConnection.host,
+      port: Number(resolvedConnection.port || 3306),
+      user: resolvedConnection.user,
+      database: resolvedConnection.database,
+      sslMode: resolvedConnection.sslMode || 'PREFERRED',
+      connectionString: redactConnectionString(resolvedConnection.connectionString || ''),
     },
   };
   await writeText(path.join(jobDir, 'meta.json'), JSON.stringify(meta, null, 2));
 
   emit(log, `Backup output folder: ${jobDir}`);
-  emit(log, `Database: ${redactConnectionString(connection.connectionString || `mysql://${connection.user}:${connection.password || ''}@${connection.host}:${connection.port}/${connection.database}`)}`);
+  emit(log, `Database: ${redactConnectionString(resolvedConnection.connectionString || `mysql://${resolvedConnection.user}:${resolvedConnection.password || ''}@${resolvedConnection.host}:${resolvedConnection.port}/${resolvedConnection.database}`)}`);
 
   const missing = [];
   if (options.fullDump || options.schemaOnly) {
@@ -152,8 +184,8 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
   if (missing.length) throw missingMysqlToolsError(missing);
 
   const report = (p) => (progress ? progress(p) : undefined);
-  const includeTables = parseTableList(options.tableInclude).filter((x) => !x.database || x.database === connection.database);
-  const excludeTables = parseTableList(options.tableExclude).filter((x) => !x.database || x.database === connection.database);
+  const includeTables = parseTableList(options.tableInclude).filter((x) => !x.database || x.database === resolvedConnection.database);
+  const excludeTables = parseTableList(options.tableExclude).filter((x) => !x.database || x.database === resolvedConnection.database);
 
   function throwIfCancelled() {
     if (isCancelled && isCancelled()) {
@@ -167,13 +199,13 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
   throwIfCancelled();
 
   const tableArgs = includeTables.map((x) => x.table);
-  const ignoreArgs = excludeTables.map((x) => `--ignore-table=${connection.database}.${x.table}`);
+  const ignoreArgs = excludeTables.map((x) => `--ignore-table=${resolvedConnection.database}.${x.table}`);
 
   if (options.fullDump) {
     emit(log, 'Running mysqldump (full SQL) ...');
     await spawnLogged(
       mysqldump,
-      [...buildMysqlArgs(connection), '--single-transaction', '--routines', '--events', '--triggers', '--skip-comments', '--column-statistics=0', ...ignoreArgs, connection.database, ...tableArgs],
+      [...buildMysqlArgs(resolvedConnection), '--single-transaction', '--routines', '--events', '--triggers', '--skip-comments', '--column-statistics=0', ...ignoreArgs, resolvedConnection.database, ...tableArgs],
       { env, cwd: jobDir, log, onChild, isCancelled, stdoutFile: path.join(jobDir, 'db.sql') }
     );
     report({ phase: 'fullDump', percent: 45 });
@@ -184,7 +216,7 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
     emit(log, 'Running mysqldump (schema-only) ...');
     await spawnLogged(
       mysqldump,
-      [...buildMysqlArgs(connection), '--no-data', '--routines', '--events', '--triggers', '--skip-comments', '--column-statistics=0', ...ignoreArgs, connection.database, ...tableArgs],
+      [...buildMysqlArgs(resolvedConnection), '--no-data', '--routines', '--events', '--triggers', '--skip-comments', '--column-statistics=0', ...ignoreArgs, resolvedConnection.database, ...tableArgs],
       { env, cwd: jobDir, log, onChild, isCancelled, stdoutFile: path.join(jobDir, 'schema.sql') }
     );
     report({ phase: 'schemaOnly', percent: 70 });
@@ -195,7 +227,7 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
     emit(log, 'Running inventory queries (mysql) ...');
     const invDir = path.join(jobDir, 'inventory');
     await fsp.mkdir(invDir, { recursive: true });
-    const dbName = connection.database.replace(/'/g, "''");
+    const dbName = resolvedConnection.database.replace(/'/g, "''");
     const queries = [
       ['tables.tsv', `select table_schema, table_name, engine, table_rows from information_schema.tables where table_schema = '${dbName}' order by table_name;`],
       ['views.tsv', `select table_schema, table_name from information_schema.views where table_schema = '${dbName}' order by table_name;`],
@@ -205,7 +237,7 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
 
     for (const [file, sql] of queries) {
       emit(log, `Query: ${file}`);
-      await writeInventoryFile({ mysqlCmd, env, cwd: jobDir, connection, sql, outPath: path.join(invDir, file), onChild, isCancelled, log });
+      await writeInventoryFile({ mysqlCmd, env, cwd: jobDir, connection: resolvedConnection, sql, outPath: path.join(invDir, file), onChild, isCancelled, log });
       throwIfCancelled();
     }
     report({ phase: 'inventory', percent: 90 });
@@ -216,4 +248,4 @@ async function runBackup({ connection, options, outDir, log, progress, onChild, 
   return { jobDir, stamp };
 }
 
-module.exports = { runBackup, buildMysqlArgs };
+module.exports = { runBackup, buildMysqlArgs, normalizeMysqlConnection };

@@ -118,18 +118,13 @@ Workspace is for connecting to databases and creating a migration project.
 6. Click **Load schemas** under PostgreSQL.
 7. Select PostgreSQL schema, usually `public`.
 8. Click **Preview / introspect schemas**.
-9. Choose one project creation action:
-   - **Save manual mapping project** — recommended for explicit manual mapping.
-   - **Create project with suggested mappings** — creates name/type guesses as a starting point.
+9. Click **Save project** or **Save & open Mapping**.
 
 ### Important
 
 `Preview / introspect schemas` does not by itself create a project. It only reads and previews the source/target catalogs.
 
-To see a project in the Mapping tab, click one of:
-
-- **Save manual mapping project**
-- **Create project with suggested mappings**
+To see a project in the Mapping tab, click **Save & open Mapping**. The project starts with empty mappings until you add them manually.
 
 ---
 

@@ -4,7 +4,8 @@ Local web UI to create real MySQL backups using `mysqldump` and `mysql`, with zi
 
 ## Features
 
-- Connection form for host, port, user, password, database, and SSL mode
+- Connection form for host, port, user, password, database, `mysql://` URLs, and SSL mode
+- Optional MySQL CLI SSL CA/cert/key file paths
 - Test connection
 - Full SQL dump
 - Schema-only dump

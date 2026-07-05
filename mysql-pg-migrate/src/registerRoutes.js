@@ -9,20 +9,24 @@ const express = requireToolDep('express');
 const { z } = requireToolDep('zod');
 
 const { createPersistence } = require('./state/persistence');
-const { introspectMysqlSchema, listMysqlSchemas, sampleMysqlTableRows, countMysqlRows } = require('./lib/mysqlIntrospector');
+const { introspectMysqlSchema, listMysqlSchemas, sampleMysqlTableRows, countMysqlRows, countMysqlColumnNulls, normalizeMysqlConnection } = require('./lib/mysqlIntrospector');
 const { introspectPostgresSchema, listPostgresSchemas, samplePostgresTableRows, buildProvisioningPlan, createTargetTables, countPostgresRows } = require('./lib/postgresIntrospector');
 const { analyzePreflight, buildDryRunPreview, validateRunReport } = require('./lib/preflight');
 const { createExecutionEngine } = require('./lib/executionEngine');
 const { listTransformPresets } = require('./lib/transformCatalog');
+const { buildTransformPreview, collectRequiredSourceColumnsForTableMapping, normalizePreviewScope, transformFingerprint, transformRowsForTable } = require('./lib/transformEngine');
 const { replayCorrectedRows } = require('./lib/replayEngine');
 const { buildCutoverReadinessReport } = require('./lib/reporting');
+const { buildVerificationPayload } = require('./lib/verification');
 
 const ROOT_DIR = path.join(__dirname, '..');
 const STATE_DIR = path.join(ROOT_DIR, 'state');
+const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 const persistence = createPersistence({ rootDir: STATE_DIR });
 const executionEngine = createExecutionEngine({ persistence });
 const runStreams = new Map();
+const runControls = new Map();
 const MASKED_CONNECTION_STRING = '[provided]';
 
 function getRunChannel(runId) {
@@ -46,12 +50,54 @@ function publishRunEvent(runId, event, data) {
   }
 }
 
+function createRunControl(runId) {
+  const control = { cancelled: false };
+  runControls.set(runId, control);
+  return control;
+}
+
+async function saveTerminalRunStatus(runId, error) {
+  const existing = (await persistence.getRun(runId)) || { id: runId };
+  const cancelled = error?.code === 'RUN_CANCELLED';
+  await persistence.saveRun({
+    ...existing,
+    status: cancelled ? 'cancelled' : 'error',
+    error: error?.message || String(error),
+    updatedAt: new Date().toISOString(),
+  });
+  publishRunEvent(runId, 'log', { level: cancelled ? 'warn' : 'error', message: error?.message || String(error) });
+  publishRunEvent(runId, 'status', { status: cancelled ? 'cancelled' : 'error' });
+}
+
 function makeId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(6).toString('hex')}`;
 }
 
 function fingerprint(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function redactPreviewRowsForPersistence(report) {
+  const clone = JSON.parse(JSON.stringify(report || {}));
+  for (const table of clone.tables || clone.previews || []) {
+    if (Array.isArray(table.sampleRows)) {
+      table.sampleRowCount = table.sampleRows.length;
+      table.sampleRows = '[redacted]';
+    }
+    if (Array.isArray(table.transformedRows)) {
+      table.transformedRowCount = table.transformedRows.length;
+      table.transformedRows = '[redacted]';
+    }
+    for (const error of table.transformErrors || []) {
+      if (Object.prototype.hasOwnProperty.call(error, 'row')) error.row = '[redacted]';
+    }
+  }
+  clone.redacted = {
+    sampleRows: true,
+    transformedRows: true,
+    reason: 'Preview reports redact row payloads when persisted; the API response still contains the live preview.',
+  };
+  return clone;
 }
 
 function summarizeConnectionRefs(projectLike) {
@@ -63,12 +109,15 @@ function summarizeConnectionRefs(projectLike) {
 
 const MysqlConnectionSchema = z.object({
   ref: z.string().optional(),
-  host: z.string().min(1),
+  host: z.string().optional().default(''),
   port: z.coerce.number().int().positive().default(3306),
-  user: z.string().min(1),
+  user: z.string().optional().default(''),
   password: z.string().optional(),
-  database: z.string().min(1),
+  database: z.string().optional().default(''),
   sslMode: z.string().default('PREFERRED'),
+  sslCa: z.string().optional(),
+  sslCert: z.string().optional(),
+  sslKey: z.string().optional(),
   connectionString: z.string().optional(),
   consistentRead: z.object({
     enabled: z.boolean().default(false),
@@ -104,13 +153,13 @@ const ProjectCreateSchema = ContextSchema.extend({
 const TransformRuleSchema = z.object({
   type: z.string(),
   preset: z.string().optional(),
-  config: z.record(z.any()).default({}),
+  config: z.record(z.string(), z.any()).default({}),
 });
 
 const RowFilterSchema = z.object({
   enabled: z.boolean().default(false),
   expression: z.string().default(''),
-  config: z.record(z.any()).default({}),
+  config: z.record(z.string(), z.any()).default({}),
 });
 
 const SourceFilterSchema = z.object({
@@ -165,8 +214,19 @@ const TableMappingSchema = z.object({
   columnMappings: z.array(ColumnMappingSchema).default([]),
 });
 
+const AllowedVerificationIssueSchema = z.object({
+  issueKey: z.string().min(1),
+  kind: z.string().min(1),
+  sourceTable: z.string().optional().default(''),
+  targetTable: z.string().optional().default(''),
+  sourceColumn: z.string().optional().default(''),
+  targetColumn: z.string().optional().default(''),
+  reason: z.string().trim().min(1),
+  allowedAt: z.string().optional(),
+});
+
 const ProjectImportSchema = z.object({
-  id: z.string().optional(),
+  id: z.string().regex(SAFE_ID_RE, 'Project id may contain only letters, numbers, underscores, and hyphens').optional(),
   name: z.string().min(1),
   notes: z.string().optional(),
   sourceConnection: MysqlConnectionSchema.optional(),
@@ -177,6 +237,7 @@ const ProjectImportSchema = z.object({
   tableMappings: z.array(TableMappingSchema).default([]),
   sourceCatalog: z.any().optional(),
   targetCatalog: z.any().optional(),
+  allowedVerificationIssues: z.array(AllowedVerificationIssueSchema).optional(),
   versions: z.array(z.any()).optional(),
   schemaVersion: z.coerce.number().int().default(2),
 });
@@ -192,6 +253,10 @@ const ProjectUpdateSchema = z.object({
   targetCatalog: z.any().optional(),
 });
 
+const VerificationAllowancesUpdateSchema = z.object({
+  allowedVerificationIssues: z.array(AllowedVerificationIssueSchema).default([]),
+});
+
 const ExecuteSchema = z.object({
   mode: z.enum(['all', 'selected']).default('all'),
   selectedTables: z.array(z.string()).default([]),
@@ -205,23 +270,38 @@ const ExecuteSchema = z.object({
   cutoverMode: z.enum(['manual', 'guarded']).default('manual'),
   watermarkColumn: z.string().optional(),
   verificationFingerprint: z.string().optional(),
+  transformFingerprint: z.string().optional(),
   sourceConnection: MysqlConnectionSchema.optional(),
   targetConnection: PostgresConnectionSchema.optional(),
 });
 
+const TransformPreviewSchema = z.object({
+  mode: z.enum(['all', 'selected']).default('all').optional(),
+  selectedTables: z.array(z.string()).default([]).optional(),
+  sampleLimit: z.coerce.number().int().positive().max(50).default(5).optional(),
+  loadPhase: z.enum(['configured', 'historical', 'incremental']).default('configured').optional(),
+  sourceConnection: MysqlConnectionSchema.optional(),
+});
+
 function resolveRuntimeConnections(project, overrides = {}) {
   return {
-    sourceConnection: overrides.sourceConnection || project.runtimeSourceConnection || project.sourceConnection,
+    sourceConnection: normalizeMysqlConnection(overrides.sourceConnection || project.runtimeSourceConnection || project.sourceConnection),
     targetConnection: overrides.targetConnection || project.runtimeTargetConnection || project.targetConnection,
   };
 }
 
 function hasMysqlPassword(connection) {
-  return String(connection?.password || '').length > 0;
+  return String(normalizeMysqlConnection(connection)?.password || '').length > 0;
 }
 
 function ensureMysqlPassword(connection, res) {
-  if (hasMysqlPassword(connection)) return true;
+  const normalized = normalizeMysqlConnection(connection);
+  const missing = ['host', 'user', 'database'].filter((key) => !String(normalized?.[key] || '').trim());
+  if (missing.length) {
+    res.status(400).json({ ok: false, error: `Missing source MySQL connection field(s): ${missing.join(', ')}` });
+    return false;
+  }
+  if (hasMysqlPassword(normalized)) return true;
   res.status(400).json({ ok: false, error: 'Source MySQL password is required' });
   return false;
 }
@@ -270,6 +350,90 @@ function ensurePostgresPassword(connection, res) {
   if (hasPostgresCredentials(connection)) return true;
   res.status(400).json({ ok: false, error: 'Target PostgreSQL password or connection string is required' });
   return false;
+}
+
+function transformPreviewScopeCoversRun(previewScope, executionOptions = {}) {
+  if (!previewScope) return false;
+  const preview = normalizePreviewScope(previewScope);
+  const run = normalizePreviewScope({
+    mode: executionOptions.mode || 'all',
+    selectedTables: executionOptions.selectedTables || [],
+    loadPhase: executionOptions.loadPhase || 'configured',
+    sampleLimit: preview.sampleLimit || 5,
+  });
+  if (preview.loadPhase !== run.loadPhase) return false;
+  if (run.mode === 'all') return preview.mode === 'all';
+  if (preview.mode === 'all') return true;
+  const previewTables = new Set(preview.selectedTables || []);
+  return (run.selectedTables || []).every((table) => previewTables.has(table));
+}
+
+async function findTransformPreviewReport({ projectId, fingerprint: expectedFingerprint, executionOptions }) {
+  if (typeof persistence.listReports !== 'function') return null;
+  const reports = await persistence.listReports(projectId, 'transform-preview');
+  return reports.find((report) => {
+    const preview = report.report || {};
+    return preview.transformFingerprint === expectedFingerprint && transformPreviewScopeCoversRun(preview.scope, executionOptions);
+  }) || null;
+}
+
+function scopeProjectForExecution(project, executionOptions = {}) {
+  if (executionOptions.mode !== 'selected') return project;
+  const selected = new Set(executionOptions.selectedTables || []);
+  return {
+    ...project,
+    tableMappings: (project.tableMappings || []).filter((mapping) => selected.has(mapping.sourceTable)),
+  };
+}
+
+async function buildVerificationForProject({ project, runtime, executionOptions = { mode: 'all', selectedTables: [] } }) {
+  const scopedProject = scopeProjectForExecution(project, executionOptions);
+  const schemaPlan = buildProvisioningPlan({
+    sourceCatalog: scopedProject.sourceCatalog,
+    targetCatalog: scopedProject.targetCatalog,
+    targetSchema: scopedProject.targetSchema,
+    tableMappings: scopedProject.tableMappings || [],
+  });
+  const report = await analyzePreflight({
+    project: scopedProject,
+    schemaPlan,
+    sampleSourceRows: async (tableName, limit) => sampleMysqlTableRows(runtime.sourceConnection, project.sourceSchema, tableName, limit || 10),
+    countSourceNulls: async (tableName, columnName) => countMysqlColumnNulls(runtime.sourceConnection, project.sourceSchema, tableName, columnName),
+    transformSampleRows: async (mapping, rows) => transformSampleRowsForMapping({ project, runtime, mapping, rows }),
+  });
+  const pendingSchemaActions = schemaPlan.tables.filter((table) => ['create_table', 'alter_table_add_columns'].includes(table.action));
+  const blockingSchemaIssues = schemaPlan.tables.filter((table) => ['missing_target_table', 'target_name_conflict', 'manual_fix_required'].includes(table.action) || (table.issues || []).length > 0);
+  const executionPlan = executionEngine.buildExecutionPlan(scopedProject, executionOptions || { mode: 'all', selectedTables: [] });
+  return buildVerificationPayload({ project: scopedProject, report, schemaPlan, pendingSchemaActions, blockingSchemaIssues, executionPlan });
+}
+
+async function transformSampleRowsForMapping({ project, runtime, mapping, rows }) {
+  return transformRowsForTable({
+    rows,
+    tableMapping: mapping,
+    sourceConnection: runtime.sourceConnection,
+    schema: project.sourceSchema,
+  });
+}
+
+function rejectIfVerificationNotReady(res, verification) {
+  if (verification.readyToLoad) return false;
+  const first = (verification.issues || []).find((issue) => issue.severity === 'blocker' && issue.status !== 'allowed');
+  const schemaIssue = (verification.hardBlockingSchemaIssues || [])[0] || (verification.pendingSchemaActions || [])[0];
+  const reason = first?.message || (schemaIssue ? `Target schema action required for ${schemaIssue.targetTable || schemaIssue.sourceTable || 'a table'}.` : 'Verification has unresolved blockers.');
+  res.status(409).json({
+    ok: false,
+    error: reason,
+    verification: {
+      verificationFingerprint: verification.verificationFingerprint,
+      openBlockerCount: verification.openBlockerCount,
+      allowedBlockerCount: verification.allowedBlockerCount,
+      nonAllowableBlockerCount: verification.nonAllowableBlockerCount,
+      warningCount: verification.warningCount,
+      readyToLoad: verification.readyToLoad,
+    },
+  });
+  return true;
 }
 
 function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-migrate' } = {}) {
@@ -338,14 +502,15 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     if (!ensureMysqlPassword(payload.sourceConnection, res)) return;
     if (!ensurePostgresPassword(payload.targetConnection, res)) return;
     try {
-      const sourceCatalog = await introspectMysqlSchema(payload.sourceConnection, { schema: payload.sourceSchema, includeViews: payload.includeViews });
+      const sourceConnection = normalizeMysqlConnection(payload.sourceConnection);
+      const sourceCatalog = await introspectMysqlSchema(sourceConnection, { schema: payload.sourceSchema, includeViews: payload.includeViews });
       const targetCatalog = await introspectPostgresSchema(payload.targetConnection, { schema: payload.targetSchema, includeViews: payload.includeViews });
       const project = await persistence.saveProject({
         id: makeId('project'),
         name: payload.name,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        sourceConnection: { ...payload.sourceConnection, password: undefined, ref: payload.sourceConnection.ref || summarizeConnectionRefs({ sourceConnection: payload.sourceConnection }).source || payload.sourceConnection.database },
+        sourceConnection: { ...sourceConnection, password: undefined, sslKey: undefined, connectionString: '', ref: sourceConnection.ref || sourceConnection.database || 'source' },
         targetConnection: { ...payload.targetConnection, connectionString: '', pooler: payload.targetConnection.pooler ? { ...payload.targetConnection.pooler, password: undefined } : undefined, ref: payload.targetConnection.ref || summarizeConnectionRefs({ targetConnection: payload.targetConnection }).target || payload.targetConnection.pooler?.database || 'target' },
         sourceSchema: payload.sourceSchema,
         targetSchema: payload.targetSchema,
@@ -355,6 +520,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         sourceCatalog,
         targetCatalog,
         tableMappings: [],
+        allowedVerificationIssues: [],
         mappingSummary: {
           mode: 'manual',
           sourceTables: sourceCatalog.tables?.length || 0,
@@ -398,6 +564,36 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     res.json({ ok: true, project });
   });
 
+  router.put('/projects/:id/verification-allowances', async (req, res) => {
+    const parsed = VerificationAllowancesUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+    const existing = await persistence.getProject(req.params.id);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Project not found' });
+    const now = new Date().toISOString();
+    const seen = new Set();
+    const allowedVerificationIssues = [];
+    for (const item of parsed.data.allowedVerificationIssues || []) {
+      if (seen.has(item.issueKey)) continue;
+      seen.add(item.issueKey);
+      allowedVerificationIssues.push({
+        issueKey: item.issueKey,
+        kind: item.kind,
+        sourceTable: item.sourceTable || '',
+        targetTable: item.targetTable || '',
+        sourceColumn: item.sourceColumn || '',
+        targetColumn: item.targetColumn || '',
+        reason: item.reason.trim(),
+        allowedAt: item.allowedAt || now,
+      });
+    }
+    const project = await persistence.saveProject({
+      ...existing,
+      allowedVerificationIssues,
+      updatedAt: now,
+    });
+    res.json({ ok: true, project });
+  });
+
   router.post('/projects/:id/preflight', async (req, res) => {
     const project = await persistence.getProject(req.params.id);
     if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
@@ -414,6 +610,8 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         project,
         schemaPlan,
         sampleSourceRows: async (tableName, limit) => sampleMysqlTableRows(runtime.sourceConnection, project.sourceSchema, tableName, limit || 10),
+        countSourceNulls: async (tableName, columnName) => countMysqlColumnNulls(runtime.sourceConnection, project.sourceSchema, tableName, columnName),
+        transformSampleRows: async (mapping, rows) => transformSampleRowsForMapping({ project, runtime, mapping, rows }),
       });
       await persistence.saveReport({ id: makeId('preflight'), projectId: project.id, type: 'preflight', createdAt: new Date().toISOString(), report });
       res.json({ ok: true, report, fingerprint: fingerprint(report) });
@@ -496,32 +694,65 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     try {
       const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
       if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
-      const schemaPlan = buildProvisioningPlan({
-        sourceCatalog: project.sourceCatalog,
-        targetCatalog: project.targetCatalog,
-        targetSchema: project.targetSchema,
-        tableMappings: project.tableMappings || [],
-      });
-      const report = await analyzePreflight({
+      const verification = await buildVerificationForProject({
         project,
-        schemaPlan,
-        sampleSourceRows: async (tableName, limit) => sampleMysqlTableRows(runtime.sourceConnection, project.sourceSchema, tableName, limit || 10),
+        runtime,
+        executionOptions: {
+          mode: req.body?.mode === 'selected' ? 'selected' : 'all',
+          selectedTables: Array.isArray(req.body?.selectedTables) ? req.body.selectedTables : [],
+          dryRun: Boolean(req.body?.dryRun),
+          errorPolicy: req.body?.errorPolicy || 'fail-fast',
+          concurrency: Number(req.body?.concurrency || 1),
+          batchSize: Number(req.body?.batchSize || 1000),
+          cdcMode: req.body?.cdcMode || 'off',
+          loadPhase: req.body?.loadPhase || 'configured',
+          cutoverMode: req.body?.cutoverMode || 'manual',
+          watermarkColumn: req.body?.watermarkColumn || undefined,
+        },
       });
-      const pendingSchemaActions = schemaPlan.tables.filter((table) => ['create_table', 'alter_table_add_columns'].includes(table.action));
-      const blockingSchemaIssues = schemaPlan.tables.filter((table) => ['missing_target_table', 'target_name_conflict', 'manual_fix_required'].includes(table.action) || (table.issues || []).length > 0);
-      const tableReadiness = report.tables.map((table) => ({
-        sourceTable: table.sourceTable,
-        targetTable: table.targetTable,
-        readiness: table.readiness,
-        completeness: table.completeness,
-        schemaAction: table.schemaAction,
-        blockerCount: table.blockers.length,
-        warningCount: table.warnings.length,
-      }));
-      const executionPlan = executionEngine.buildExecutionPlan(project, { mode: 'all', selectedTables: [] });
-      const readyToLoad = report.summary.blockerCount === 0 && pendingSchemaActions.length === 0 && blockingSchemaIssues.length === 0;
-      const verificationFingerprint = fingerprint({ report, schemaPlan, updatedAt: project.updatedAt });
-      res.json({ ok: true, verification: { report, schemaPlan, tableReadiness, pendingSchemaActions, blockingSchemaIssues, executionPlan, readyToLoad, verificationFingerprint } });
+      res.json({ ok: true, verification });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message || String(error) });
+    }
+  });
+
+  router.post('/projects/:id/transform-preview', async (req, res) => {
+    const parsed = TransformPreviewSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+    const project = await persistence.getProject(req.params.id);
+    if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
+    try {
+      const runtime = resolveRuntimeConnections(project, { sourceConnection: parsed.data.sourceConnection });
+      if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
+      const watermarks = await persistence.getWatermarks(project.id) || { projectId: project.id, tables: {} };
+      const previewMode = parsed.data.mode || 'all';
+      const selectedTables = previewMode === 'selected' ? (parsed.data.selectedTables || []) : [];
+      const loadPhase = parsed.data.loadPhase || 'configured';
+      const preview = await buildTransformPreview({
+        project,
+        mode: previewMode,
+        selectedTables,
+        sampleLimit: parsed.data.sampleLimit || 5,
+        loadPhase,
+        sourceConnection: runtime.sourceConnection,
+        sampleSourceRows: async (tableName, limit, mapping, extra = {}) => {
+          const columns = extra.columns?.length
+            ? extra.columns
+            : collectRequiredSourceColumnsForTableMapping(mapping);
+          return sampleMysqlTableRows(
+            runtime.sourceConnection,
+            project.sourceSchema,
+            tableName,
+            limit || 5,
+            {
+              ...buildSampleOptionsForMapping(mapping, { watermarks, loadPhase: parsed.data.loadPhase || 'configured' }),
+              columns: columns.length ? columns : ['*'],
+            },
+          );
+        },
+      });
+      await persistence.saveReport({ id: makeId('transformpreview'), projectId: project.id, type: 'transform-preview', createdAt: new Date().toISOString(), report: redactPreviewRowsForPersistence(preview) });
+      res.json({ ok: true, preview, transformFingerprint: preview.transformFingerprint });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message || String(error) });
     }
@@ -577,19 +808,31 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     try {
       const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
       if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
-      const watermarks = await persistence.getWatermarks(project.id) || { projectId: project.id, tables: {} };
+      const mode = req.body?.mode === 'selected' ? 'selected' : 'all';
+      const selectedTables = mode === 'selected' && Array.isArray(req.body?.selectedTables) ? req.body.selectedTables : [];
       const loadPhase = req.body?.loadPhase || 'configured';
+      const verification = await buildVerificationForProject({ project, runtime, executionOptions: { ...(req.body || {}), mode, selectedTables, loadPhase } });
+      if (rejectIfVerificationNotReady(res, verification)) return;
+      const watermarks = await persistence.getWatermarks(project.id) || { projectId: project.id, tables: {} };
       const preview = await buildDryRunPreview({
         project,
+        mode,
+        selectedTables,
+        sampleLimit: Number(req.body?.sampleLimit || 5),
+        loadPhase,
         sampleSourceRows: async (tableName, limit, mapping) => sampleMysqlTableRows(
           runtime.sourceConnection,
           project.sourceSchema,
           tableName,
           limit || 5,
-          buildSampleOptionsForMapping(mapping, { watermarks, loadPhase }),
+          {
+            ...buildSampleOptionsForMapping(mapping, { watermarks, loadPhase }),
+            columns: collectRequiredSourceColumnsForTableMapping(mapping),
+          },
         ),
+        transformSampleRows: async (mapping, rows) => transformSampleRowsForMapping({ project, runtime, mapping, rows }),
       });
-      await persistence.saveReport({ id: makeId('dryrun'), projectId: project.id, type: 'dry-run', createdAt: new Date().toISOString(), report: preview });
+      await persistence.saveReport({ id: makeId('dryrun'), projectId: project.id, type: 'dry-run', createdAt: new Date().toISOString(), report: redactPreviewRowsForPersistence(preview) });
       res.json({ ok: true, preview });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message || String(error) });
@@ -610,22 +853,61 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
       return res.status(400).json({ ok: false, error: 'No enabled table mappings are selected for execution.' });
     }
 
-    if (parsed.data.cutoverMode === 'guarded') {
-      const schemaPlan = buildProvisioningPlan({
-        sourceCatalog: project.sourceCatalog,
-        targetCatalog: project.targetCatalog,
-        targetSchema: project.targetSchema,
-        tableMappings: project.tableMappings || [],
+    const verification = await buildVerificationForProject({ project, runtime, executionOptions: parsed.data });
+    if (!parsed.data.verificationFingerprint || parsed.data.verificationFingerprint !== verification.verificationFingerprint) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Verification is stale. Re-run verification before execution.',
+        verification: {
+          verificationFingerprint: verification.verificationFingerprint,
+          openBlockerCount: verification.openBlockerCount,
+          allowedBlockerCount: verification.allowedBlockerCount,
+          nonAllowableBlockerCount: verification.nonAllowableBlockerCount,
+          warningCount: verification.warningCount,
+          readyToLoad: verification.readyToLoad,
+        },
       });
-      const report = await analyzePreflight({
-        project,
-        schemaPlan,
-        sampleSourceRows: async (tableName, limit) => sampleMysqlTableRows(runtime.sourceConnection, project.sourceSchema, tableName, limit || 10),
+    }
+    if (rejectIfVerificationNotReady(res, verification)) return;
+
+    const currentTransformFingerprint = transformFingerprint(project);
+    if (!parsed.data.transformFingerprint || parsed.data.transformFingerprint !== currentTransformFingerprint) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Transform preview is stale. Run the Transform preview before execution.',
+        transform: {
+          transformFingerprint: currentTransformFingerprint,
+        },
       });
-      const currentVerificationFingerprint = fingerprint({ report, schemaPlan, updatedAt: project.updatedAt });
-      if (!parsed.data.verificationFingerprint || parsed.data.verificationFingerprint !== currentVerificationFingerprint) {
-        return res.status(409).json({ ok: false, error: 'Verification is stale. Re-run verification before guarded execution.' });
-      }
+    }
+    const transformPreviewReport = await findTransformPreviewReport({
+      projectId: project.id,
+      fingerprint: currentTransformFingerprint,
+      executionOptions: parsed.data,
+    });
+    if (!transformPreviewReport) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Transform preview report is missing or does not match this run scope. Run Transform preview again before execution.',
+        transform: {
+          transformFingerprint: currentTransformFingerprint,
+          requiredScope: normalizePreviewScope({
+            mode: parsed.data.mode,
+            selectedTables: parsed.data.selectedTables,
+            loadPhase: parsed.data.loadPhase,
+          }),
+        },
+      });
+    }
+    if ((transformPreviewReport.report?.summary?.transformErrorCount || 0) > 0) {
+      return res.status(422).json({
+        ok: false,
+        error: 'Transform preview has errors. Resolve transform errors before execution.',
+        transform: {
+          transformFingerprint: currentTransformFingerprint,
+          errorCount: transformPreviewReport.report.summary.transformErrorCount || 0,
+        },
+      });
     }
 
     const runId = makeId('run');
@@ -655,9 +937,11 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         consistentRead: runtime.sourceConnection?.consistentRead || { enabled: false },
         consistencyMode: runtime.sourceConnection?.consistentRead?.enabled ? 'table-snapshot' : 'best-effort',
         verificationFingerprint: parsed.data.verificationFingerprint || null,
+        transformFingerprint: parsed.data.transformFingerprint || null,
       },
     };
     await persistence.saveRun(runRecord);
+    const runControl = createRunControl(runId);
     res.json({ ok: true, runId });
 
     setImmediate(async () => {
@@ -666,7 +950,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         await executionEngine.executeRun({
           runId,
           project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
-          options: parsed.data,
+          options: { ...parsed.data, isCancelled: () => runControl.cancelled },
           publish(event, data) {
             publishRunEvent(runId, event, data);
           },
@@ -674,11 +958,27 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         const finished = await persistence.getRun(runId);
         publishRunEvent(runId, 'status', { status: finished?.status || 'done' });
       } catch (error) {
-        await persistence.saveRun({ ...(await persistence.getRun(runId)), status: 'error', error: error.message || String(error), updatedAt: new Date().toISOString() });
-        publishRunEvent(runId, 'log', { level: 'error', message: error.message || String(error) });
-        publishRunEvent(runId, 'status', { status: 'error' });
+        await saveTerminalRunStatus(runId, error);
+      } finally {
+        runControls.delete(runId);
       }
     });
+  });
+
+  router.post('/runs/:id/cancel', async (req, res) => {
+    const run = await persistence.getRun(req.params.id);
+    if (!run) return res.status(404).json({ ok: false, error: 'Run not found' });
+    if (run.status === 'cancelling') return res.json({ ok: true, runId: run.id, status: 'cancelling' });
+    if (!['queued', 'running'].includes(run.status)) {
+      return res.status(409).json({ ok: false, error: `run is ${run.status}` });
+    }
+    const control = runControls.get(run.id);
+    if (control) control.cancelled = true;
+    const status = control ? 'cancelling' : 'cancelled';
+    await persistence.saveRun({ ...run, status, updatedAt: new Date().toISOString() });
+    publishRunEvent(run.id, 'log', { level: 'warn', message: 'Cancellation requested. The current chunk will finish before the run stops.' });
+    publishRunEvent(run.id, 'status', { status });
+    res.json({ ok: true, runId: run.id, status });
   });
 
   router.post('/runs/:id/resume', async (req, res) => {
@@ -689,20 +989,22 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
     if (!ensureMysqlPassword(runtime.sourceConnection, res)) return;
     if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
+    const runControl = createRunControl(run.id);
     res.json({ ok: true, runId: run.id, status: 'resume-scheduled' });
     setImmediate(async () => {
       try {
         await executionEngine.resumeRun({
           runId: run.id,
           project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
+          options: { isCancelled: () => runControl.cancelled },
           publish(event, data) { publishRunEvent(run.id, event, data); },
         });
         const finished = await persistence.getRun(run.id);
         publishRunEvent(run.id, 'status', { status: finished?.status || 'done' });
       } catch (error) {
-        await persistence.saveRun({ ...(await persistence.getRun(run.id)), status: 'error', error: error.message || String(error), updatedAt: new Date().toISOString() });
-        publishRunEvent(run.id, 'log', { level: 'error', message: error.message || String(error) });
-        publishRunEvent(run.id, 'status', { status: 'error' });
+        await saveTerminalRunStatus(run.id, error);
+      } finally {
+        runControls.delete(run.id);
       }
     });
   });
@@ -743,13 +1045,14 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         consistencyMode: run.executionProfile?.consistencyMode || 'best-effort',
       },
     });
+    const runControl = createRunControl(rerunId);
     res.json({ ok: true, runId: rerunId, selectedTables: failedTables });
     setImmediate(async () => {
       try {
         await executionEngine.executeRun({
           runId: rerunId,
           project: { ...project, runtimeSourceConnection: runtime.sourceConnection, runtimeTargetConnection: runtime.targetConnection },
-          options: rerunOptions,
+          options: { ...rerunOptions, isCancelled: () => runControl.cancelled },
           publish(event, data) {
             publishRunEvent(rerunId, event, data);
           },
@@ -757,9 +1060,9 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
         const finished = await persistence.getRun(rerunId);
         publishRunEvent(rerunId, 'status', { status: finished?.status || 'done' });
       } catch (error) {
-        await persistence.saveRun({ ...(await persistence.getRun(rerunId)), status: 'error', error: error.message || String(error), updatedAt: new Date().toISOString() });
-        publishRunEvent(rerunId, 'log', { level: 'error', message: error.message || String(error) });
-        publishRunEvent(rerunId, 'status', { status: 'error' });
+        await saveTerminalRunStatus(rerunId, error);
+      } finally {
+        runControls.delete(rerunId);
       }
     });
   });
@@ -837,7 +1140,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     if (!run) return res.status(404).json({ ok: false, error: 'Run not found' });
     const project = await persistence.getProject(run.projectId);
     if (!project) return res.status(404).json({ ok: false, error: 'Project not found' });
-    const runtime = resolveRuntimeConnections(project, { targetConnection: req.body?.targetConnection });
+    const runtime = resolveRuntimeConnections(project, { sourceConnection: req.body?.sourceConnection, targetConnection: req.body?.targetConnection });
     if (!ensurePostgresPassword(runtime.targetConnection, res)) return;
     const corrections = Array.isArray(req.body?.corrections) ? req.body.corrections : [];
     const replay = await replayCorrectedRows({
@@ -845,6 +1148,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
       runId: run.id,
       project,
       targetConnection: runtime.targetConnection,
+      sourceConnection: runtime.sourceConnection,
       corrections,
     });
     res.json({ ok: true, replay });
@@ -891,6 +1195,7 @@ function registerMysqlPgMigrateRoutes(app, { basePath = '/api/tools/mysql-pg-mig
     const payload = parsed.data;
     if (!payload.id) payload.id = makeId('project');
     payload.schemaVersion = payload.schemaVersion || 2;
+    payload.allowedVerificationIssues = payload.allowedVerificationIssues || [];
     payload.importedAt = new Date().toISOString();
     payload.updatedAt = new Date().toISOString();
     const project = await persistence.saveProject(payload);

@@ -126,7 +126,88 @@ function validateIncrementalStrategy({ strategy, sourceTable, mapping, tableBloc
   }
 }
 
-async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
+function pluralRows(count) {
+  return Number(count) === 1 ? 'row' : 'rows';
+}
+
+async function resolveSourceNullCount({ countSourceNulls, tableName, columnName }) {
+  if (typeof countSourceNulls !== 'function' || !tableName || !columnName) return { known: false, count: null };
+  try {
+    const count = await countSourceNulls(tableName, columnName);
+    if (Number.isFinite(Number(count))) return { known: true, count: Number(count) };
+  } catch {
+    // Verification can still proceed; unknown NULL counts become reviewable blockers.
+  }
+  return { known: false, count: null };
+}
+
+async function addCompatibilityDiagnostics({ mapping, sourceColumn, targetColumn, columnMapping, compatibility, tableBlockers, tableWarnings, countSourceNulls }) {
+  const sourceColumnName = sourceColumn?.name || columnMapping.sourceColumn;
+  const targetColumnName = targetColumn?.name || columnMapping.targetColumn;
+  const comparison = compatibility?.comparison || {};
+
+  if (comparison.compatibleType === false) {
+    tableBlockers.push({
+      kind: 'type_not_safely_assignable',
+      sourceTable: mapping.sourceTable,
+      targetTable: mapping.targetTable || null,
+      sourceColumn: sourceColumnName,
+      targetColumn: targetColumnName,
+      message: `Target column "${targetColumnName || 'unknown'}" cannot safely store values from source column "${sourceColumnName || 'unknown'}" (${comparison.proposedType || 'source type'} to ${comparison.targetType || 'target type'}). Change the target type, choose a different target column, or add a transform.`,
+      comparison,
+      allowability: { allowable: false, reason: 'Target type cannot safely store the mapped source values.' },
+    });
+  }
+
+  if (comparison.nullableCompatible === false) {
+    const nullScan = await resolveSourceNullCount({ countSourceNulls, tableName: mapping.sourceTable, columnName: sourceColumnName });
+    const common = {
+      kind: 'target_not_null_source_nullable',
+      sourceTable: mapping.sourceTable,
+      targetTable: mapping.targetTable || null,
+      sourceColumn: sourceColumnName,
+      targetColumn: targetColumnName,
+      targetConstraint: 'NOT NULL',
+      nullCountKnown: nullScan.known,
+      nullCount: nullScan.count,
+      comparison,
+    };
+    if (nullScan.known && nullScan.count === 0) {
+      tableWarnings.push({
+        ...common,
+        message: `Target column "${targetColumnName || 'unknown'}" is NOT NULL and source column "${sourceColumnName || 'unknown'}" is nullable in schema, but an exact scan found 0 NULL rows. Current data will not violate this constraint; keep it reviewed if future source data can contain NULL.`,
+        allowability: { allowable: false, reason: 'This is a warning because the exact source NULL count is zero.' },
+      });
+    } else if (nullScan.known) {
+      tableBlockers.push({
+        ...common,
+        message: `Target column "${targetColumnName || 'unknown'}" is NOT NULL, but source column "${sourceColumnName || 'unknown'}" has ${nullScan.count} NULL ${pluralRows(nullScan.count)}. Add a transform/default/filter, make the target nullable, or fix the data.`,
+        allowability: { allowable: false, reason: 'Exact source scan found NULL rows that would violate the target NOT NULL constraint.' },
+      });
+    } else {
+      tableBlockers.push({
+        ...common,
+        message: `Target column "${targetColumnName || 'unknown'}" is NOT NULL and source column "${sourceColumnName || 'unknown'}" is nullable in schema. Exact NULL count could not be computed, so this requires explicit approval or a schema/mapping fix.`,
+        allowability: { allowable: true, reason: 'Exact source NULL count is unavailable; this is a reviewable risk.' },
+      });
+    }
+  }
+
+  if (comparison.compatibleType !== false && comparison.nullableCompatible !== false) {
+    tableBlockers.push({
+      kind: 'compatibility_review_required',
+      sourceTable: mapping.sourceTable,
+      targetTable: mapping.targetTable || null,
+      sourceColumn: sourceColumnName,
+      targetColumn: targetColumnName,
+      message: `Column "${sourceColumnName || 'unknown'}" maps to "${targetColumnName || 'unknown'}" and needs compatibility review before loading.`,
+      comparison,
+      allowability: { allowable: true, reason: 'The incompatibility is reviewable and was not classified as a proven unsafe type or NULL-data violation.' },
+    });
+  }
+}
+
+async function analyzePreflight({ project, sampleSourceRows, schemaPlan, countSourceNulls, transformSampleRows }) {
   const sourceTables = new Map((project.sourceCatalog.tables || []).map((table) => [table.name, table]));
   const targetTables = new Map((project.targetCatalog.tables || []).map((table) => [table.name, table]));
   const schemaPlanByTarget = new Map((schemaPlan?.tables || []).map((table) => [table.targetTable, table]));
@@ -279,11 +360,25 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
       }
 
       const compatibility = targetColumn ? classifyTypeCompatibility(sourceColumn, targetColumn) : { status: 'provisioned', message: 'target_column_will_be_created' };
-      const state = normalizeCompatibilityToState(compatibility);
+      const blockerCountBeforeCompatibility = tableBlockers.length;
+      const warningCountBeforeCompatibility = tableWarnings.length;
+      if (compatibility.status === 'incompatible') {
+        await addCompatibilityDiagnostics({ mapping, sourceColumn, targetColumn, columnMapping, compatibility, tableBlockers, tableWarnings, countSourceNulls });
+      }
+      if (compatibility.status === 'risky') tableWarnings.push({ kind: 'risky_cast', sourceColumn: sourceColumn.name, targetColumn: targetColumn?.name || columnMapping.targetColumn, message: compatibility.message, comparison: compatibility.comparison });
+      if (compatibility.status === 'compatible_with_transform') tableWarnings.push({ kind: 'transform_required', sourceColumn: sourceColumn.name, targetColumn: targetColumn?.name || columnMapping.targetColumn, message: compatibility.message, comparison: compatibility.comparison });
+      if (compatibility.status === 'provisioned') tableWarnings.push({ kind: 'target_column_will_be_created', sourceColumn: sourceColumn.name, targetColumn: columnMapping.targetColumn || sourceColumn.name });
+
+      const compatibilityAddedBlocker = tableBlockers.length > blockerCountBeforeCompatibility;
+      const compatibilityAddedWarning = tableWarnings.length > warningCountBeforeCompatibility;
+      const displayCompatibility = compatibility.status === 'incompatible' && !compatibilityAddedBlocker && compatibilityAddedWarning
+        ? { ...compatibility, status: 'risky' }
+        : compatibility;
+      const state = normalizeCompatibilityToState(displayCompatibility);
       const columnState = normalizeColumnMappingState({
         sourceColumn,
         targetColumn,
-        compatibility,
+        compatibility: displayCompatibility,
         mappingEnabled: columnMapping.enabled !== false,
         transformType: columnMapping.transform?.type || 'direct',
         schemaAction: schemaEntry?.action,
@@ -292,19 +387,15 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
       columnReports.push({
         sourceColumn: sourceColumn.name,
         targetColumn: targetColumn ? targetColumn.name : (columnMapping.targetColumn || sourceColumn.name),
-        compatibility,
+        compatibility: displayCompatibility,
         state,
         columnState,
         mappingEnabled: columnMapping.enabled !== false,
         transformType: columnMapping.transform?.type || 'direct',
       });
 
-      if (compatibility.status === 'incompatible') tableBlockers.push({ kind: 'incompatible_type', sourceColumn: sourceColumn.name, targetColumn: targetColumn?.name || columnMapping.targetColumn, message: compatibility.message });
-      if (compatibility.status === 'risky') tableWarnings.push({ kind: 'risky_cast', sourceColumn: sourceColumn.name, targetColumn: targetColumn?.name || columnMapping.targetColumn, message: compatibility.message });
-      if (compatibility.status === 'compatible_with_transform') tableWarnings.push({ kind: 'transform_required', sourceColumn: sourceColumn.name, targetColumn: targetColumn?.name || columnMapping.targetColumn, message: compatibility.message });
-      if (compatibility.status === 'provisioned') tableWarnings.push({ kind: 'target_column_will_be_created', sourceColumn: sourceColumn.name, targetColumn: columnMapping.targetColumn || sourceColumn.name });
-
-      if (compatibility.status === 'incompatible') readiness = 'blocked';
+      if (compatibility.status === 'incompatible' && compatibilityAddedBlocker) readiness = 'blocked';
+      if (compatibility.status === 'incompatible' && !compatibilityAddedBlocker && compatibilityAddedWarning && readiness !== 'blocked') readiness = readiness === 'provision' ? 'provision' : 'review';
       if (compatibility.status === 'risky' && readiness !== 'blocked') readiness = readiness === 'provision' ? 'provision' : 'review';
       if (compatibility.status === 'compatible_with_transform' && readiness !== 'blocked') readiness = readiness === 'provision' ? 'provision' : 'review';
       if (compatibility.status === 'provisioned' && readiness !== 'blocked') readiness = 'provision';
@@ -327,7 +418,15 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
           validateTransformRule(columnMapping.transform, { value: sampleRows[0]?.[columnMapping.sourceColumn], row: sampleRows[0] });
         }
         shouldIncludeRow({ row: sampleRows[0], tableMapping: mapping });
-        transformRow({ row: sampleRows[0], tableMapping: mapping });
+        if (typeof transformSampleRows === 'function') {
+          const outcome = await transformSampleRows(mapping, sampleRows);
+          if (outcome?.rejected?.length) {
+            const first = outcome.rejected[0];
+            throw first.error || new Error(first.message || 'Transform preview failed');
+          }
+        } else {
+          transformRow({ row: sampleRows[0], tableMapping: mapping });
+        }
       }
     } catch (error) {
       tableWarnings.push({ kind: 'transform_runtime_warning', table: mapping.sourceTable, message: error.message || String(error) });
@@ -375,22 +474,50 @@ async function analyzePreflight({ project, sampleSourceRows, schemaPlan }) {
   };
 }
 
-async function buildDryRunPreview({ project, sampleSourceRows }) {
+function normalizePreviewScope({ mode = 'all', selectedTables = [], sampleLimit = 5, loadPhase = 'configured' } = {}) {
+  const normalizedMode = mode === 'selected' ? 'selected' : 'all';
+  const normalizedSelectedTables = normalizedMode === 'selected'
+    ? Array.from(new Set((selectedTables || []).map((item) => String(item || '').trim()).filter(Boolean))).sort()
+    : [];
+  return {
+    mode: normalizedMode,
+    selectedTables: normalizedSelectedTables,
+    sampleLimit: Number(sampleLimit || 5),
+    loadPhase: loadPhase || 'configured',
+  };
+}
+
+async function buildDryRunPreview({ project, sampleSourceRows, transformSampleRows, mode = 'all', selectedTables = [], sampleLimit = 5, loadPhase = 'configured' }) {
   const previews = [];
-  for (const mapping of (project.tableMappings || []).filter((item) => item.enabled !== false)) {
-    const rows = await sampleSourceRows(mapping.sourceTable, 5, mapping);
+  const scope = normalizePreviewScope({ mode, selectedTables, sampleLimit, loadPhase });
+  const selected = scope.mode === 'selected' ? new Set(scope.selectedTables) : null;
+  for (const mapping of (project.tableMappings || []).filter((item) => item.enabled !== false && (!selected || selected.has(item.sourceTable)))) {
+    const rows = await sampleSourceRows(mapping.sourceTable, scope.sampleLimit, mapping);
+    const transformed = typeof transformSampleRows === 'function'
+      ? await transformSampleRows(mapping, rows)
+      : {
+        transformedRows: rows.map((row) => transformRow({ row, tableMapping: mapping })),
+        filteredRowCount: rows.filter((row) => !shouldIncludeRow({ row, tableMapping: mapping })).length,
+        rejected: [],
+        lookupDependencies: [],
+      };
     previews.push({
       sourceTable: mapping.sourceTable,
       targetTable: mapping.targetTable,
+      writeMode: mapping.writeMode || 'append',
+      conflictKeys: mapping.conflictKeys || [],
       columnMappings: mapping.columnMappings || [],
       rowFilter: mapping.rowFilter || null,
       sampleRows: rows,
-      transformedRows: rows.map((row) => transformRow({ row, tableMapping: mapping })),
-      filteredRowCount: rows.filter((row) => !shouldIncludeRow({ row, tableMapping: mapping })).length,
+      transformedRows: transformed.transformedRows,
+      filteredRowCount: transformed.filteredRowCount,
+      transformErrors: (transformed.rejected || []).map((item) => ({ index: item.index, message: item.error?.message || String(item.error), row: item.row || null })),
+      lookupDependencies: transformed.lookupDependencies || [],
     });
   }
   return {
     generatedAt: new Date().toISOString(),
+    scope,
     tables: previews,
   };
 }
@@ -465,6 +592,10 @@ async function validateRunReport({ run, persistence, project, countSourceRows, c
       tablesDone: tableVerification.filter((table) => table.status === 'done').length,
       tablesPartial: tableVerification.filter((table) => table.status === 'partial').length,
       tablesErrored: tableVerification.filter((table) => table.status === 'error').length,
+      rowsTransformed: run.counters?.rowsTransformed || 0,
+      rowsFiltered: run.counters?.rowsFiltered || 0,
+      rowsTransformRejected: run.counters?.rowsTransformRejected || 0,
+      rowsWriteRejected: run.counters?.rowsWriteRejected || 0,
       consistencyMode: run.executionProfile?.consistencyMode || (run.executionProfile?.consistentRead?.enabled ? 'consistent-read' : 'best-effort'),
       concurrency: run.executionProfile?.concurrency || 1,
       batchSize: run.executionProfile?.batchSize || null,

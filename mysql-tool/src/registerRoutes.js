@@ -6,8 +6,9 @@ const { requireToolDep } = require('../requireToolDep');
 const express = requireToolDep('express');
 const { z } = requireToolDep('zod');
 
-const { runBackup, buildMysqlArgs } = require('./backupRunner');
+const { runBackup, buildMysqlArgs, normalizeMysqlConnection } = require('./backupRunner');
 const { zipFolderToFileStream } = require('./zipStream');
+const { createJobStore } = require('../../src/jobStore');
 
 const BACKUPS_DIR = path.join(__dirname, '..', 'backups');
 const PROFILES_JSON = path.join(__dirname, '..', 'mysqltool.profiles.json');
@@ -63,12 +64,15 @@ function jobLog(job, msg) {
 }
 
 const ConnectionSchema = z.object({
-  host: z.string().min(1),
+  host: z.string().optional().default(''),
   port: z.coerce.number().int().positive().default(3306),
-  user: z.string().min(1),
+  user: z.string().optional().default(''),
   password: z.string().optional(),
-  database: z.string().min(1),
+  database: z.string().optional().default(''),
   sslMode: z.string().default('PREFERRED'),
+  sslCa: z.string().optional(),
+  sslCert: z.string().optional(),
+  sslKey: z.string().optional(),
   connectionString: z.string().optional(),
 });
 
@@ -96,14 +100,29 @@ async function loadProfilesTemplate() {
 }
 
 function ensurePassword(connection, res) {
-  if (String(connection.password || '').length > 0) return true;
+  if (String(normalizeMysqlConnection(connection).password || '').length > 0) return true;
   res.status(400).json({ ok: false, error: 'Password is required for MySQL connections' });
   return false;
+}
+
+function normalizeRequestConnection(connection, res) {
+  const normalized = normalizeMysqlConnection(connection);
+  const missing = ['host', 'user', 'database'].filter((key) => !String(normalized[key] || '').trim());
+  if (missing.length) {
+    res.status(400).json({ ok: false, error: `Missing MySQL connection field(s): ${missing.join(', ')}` });
+    return null;
+  }
+  return normalized;
 }
 
 function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {}) {
   const router = express.Router();
   const jobs = new Map();
+  const jobStore = createJobStore({ backupsDir: BACKUPS_DIR });
+  const jobsReady = jobStore.hydrate(jobs).catch((error) => {
+    console.warn(`WARN: could not load mysql-tool job metadata: ${error?.message || String(error)}`);
+  });
+  const persistJob = (job) => jobStore.persist(job).catch(() => undefined);
   router.use(express.json({ limit: '2mb' }));
 
   router.get('/health', async (_req, res) => {
@@ -117,12 +136,14 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
   router.post('/test-connection', async (req, res) => {
     const parsed = TestConnectionRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-    if (!ensurePassword(parsed.data.connection, res)) return;
+    const connection = normalizeRequestConnection(parsed.data.connection, res);
+    if (!connection) return;
+    if (!ensurePassword(connection, res)) return;
     const mysqlCmd = process.env.MYSQL_PATH || 'mysql';
-    const env = { ...process.env, MYSQL_PWD: parsed.data.connection.password || process.env.MYSQL_PWD || '' };
+    const env = { ...process.env, MYSQL_PWD: connection.password || process.env.MYSQL_PWD || '' };
     try {
       await new Promise((resolve, reject) => {
-        const child = spawn(mysqlCmd, [...buildMysqlArgs(parsed.data.connection, { includePassword: false }), `--database=${parsed.data.connection.database}`, '--batch', '--raw', '-e', 'select 1;'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(mysqlCmd, [...buildMysqlArgs(connection), `--database=${connection.database}`, '--batch', '--raw', '-e', 'select 1;'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
         let err = '';
         child.stderr.on('data', (d) => { err += d.toString(); });
         child.on('error', reject);
@@ -135,20 +156,25 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
   });
 
   router.post('/backup', async (req, res) => {
+    await jobsReady;
     const parsed = BackupRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-    if (!ensurePassword(parsed.data.connection, res)) return;
+    const connection = normalizeRequestConnection(parsed.data.connection, res);
+    if (!connection) return;
+    if (!ensurePassword(connection, res)) return;
     const job = createJob(jobs);
+    await persistJob(job);
     res.json({ ok: true, jobId: job.id });
 
     (async () => {
       job.status = 'running';
+      await persistJob(job);
       try {
         await fsp.mkdir(BACKUPS_DIR, { recursive: true });
         jobLog(job, 'Starting MySQL backup job...');
         jobLog(job, 'Note: this tool shells out to `mysqldump` and `mysql` installed on your machine.');
         const { jobDir, stamp } = await runBackup({
-          connection: parsed.data.connection,
+          connection,
           options: parsed.data.options,
           outDir: BACKUPS_DIR,
           log: (m) => jobLog(job, m),
@@ -164,6 +190,7 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
         if (job.cancelRequested) {
           job.status = 'cancelled';
           jobLog(job, 'Cancelled before zipping.');
+          await persistJob(job);
           return;
         }
         await zipFolderToFileStream({ folderPath: jobDir, outZipPath: zipPath, onProgress: ({ bytes }) => { job.progress = { phase: 'zip', bytes, percent: 98, at: Date.now() }; } });
@@ -176,10 +203,12 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
           job.status = 'done';
           jobLog(job, 'Done.');
         }
+        await persistJob(job);
       } catch (e) {
         if (job.cancelRequested || e?.code === 'JOB_CANCELLED') {
           job.status = 'cancelled';
           jobLog(job, 'Cancelled.');
+          await persistJob(job);
           return;
         }
         job.status = 'error';
@@ -188,31 +217,37 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
         job.code = e?.code || null;
         jobLog(job, `ERROR: ${job.error}`);
         if (job.code) jobLog(job, `ERROR_CODE: ${job.code}`);
+        await persistJob(job);
       }
     })();
   });
 
-  router.get('/jobs/:id', (req, res) => {
+  router.get('/jobs/:id', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'not found' });
     res.json({ ok: true, job: { id: job.id, status: job.status, createdAt: job.createdAt, zipReady: Boolean(job.zipPath), zipBytes: job.zipBytes ?? null, cancelRequested: Boolean(job.cancelRequested), error: job.error, code: job.code } });
   });
 
   router.post('/jobs/:id/cancel', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'not found' });
     if (job.status !== 'running') return res.status(409).json({ ok: false, error: `job is ${job.status}` });
     cancelJob(job);
     jobLog(job, 'Cancel requested. Sending SIGTERM to child processes...');
+    await persistJob(job);
     res.json({ ok: true });
   });
 
   router.get('/jobs', async (req, res) => {
+    await jobsReady;
     const list = listJobsFromStore(jobs, { q: req.query.q, limit: req.query.limit });
     res.json({ ok: true, jobs: list.map((j) => ({ id: j.id, status: j.status, createdAt: j.createdAt, zipReady: Boolean(j.zipPath), zipBytes: j.zipBytes ?? null, error: j.error || null })) });
   });
 
   router.post('/jobs/:id/delete', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'not found' });
     if (job.status === 'running') return res.status(409).json({ ok: false, error: 'job is running' });
@@ -223,10 +258,12 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
     jobs.delete(job.id);
+    await jobStore.remove(job);
     res.json({ ok: true });
   });
 
   router.post('/cleanup', async (req, res) => {
+    await jobsReady;
     const schema = z.object({ days: z.coerce.number().int().positive().default(14), keep: z.coerce.number().int().positive().default(50) });
     const parsed = schema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
@@ -244,12 +281,14 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
         // ignore cleanup errors
       }
       jobs.delete(j.id);
+      await jobStore.remove(j);
       deleted++;
     }
     res.json({ ok: true, deleted });
   });
 
-  router.get('/jobs/:id/events', (req, res) => {
+  router.get('/jobs/:id/events', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).end();
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -279,6 +318,7 @@ function registerMysqlToolRoutes(app, { basePath = '/api/tools/mysql-tool' } = {
   });
 
   router.get('/jobs/:id/download', async (req, res) => {
+    await jobsReady;
     const job = jobs.get(req.params.id);
     if (!job) return res.status(404).end();
     if (!job.zipPath) return res.status(409).json({ ok: false, error: 'zip not ready' });

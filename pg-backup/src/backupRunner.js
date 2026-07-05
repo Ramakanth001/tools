@@ -115,6 +115,29 @@ function buildPgDumpFilters(options) {
   return args;
 }
 
+function buildPgToolEnv(connectionString) {
+  const raw = String(connectionString || '').trim();
+  const env = {
+    ...process.env,
+    DATABASE_URL: raw,
+  };
+  try {
+    const url = new URL(raw);
+    if (!['postgres:', 'postgresql:'].includes(url.protocol)) return env;
+    if (url.hostname) env.PGHOST = url.hostname;
+    if (url.port) env.PGPORT = url.port;
+    if (url.username) env.PGUSER = decodeURIComponent(url.username);
+    if (url.password) env.PGPASSWORD = decodeURIComponent(url.password);
+    const database = decodeURIComponent(url.pathname || '').replace(/^\//, '');
+    if (database) env.PGDATABASE = database;
+    const sslmode = url.searchParams.get('sslmode');
+    if (sslmode) env.PGSSLMODE = sslmode;
+    return env;
+  } catch {
+    return env;
+  }
+}
+
 async function writeText(filePath, text) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
   await fsp.writeFile(filePath, text, 'utf8');
@@ -125,11 +148,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
   const jobDir = path.join(outDir, stamp);
   await fsp.mkdir(jobDir, { recursive: true });
 
-  const env = {
-    ...process.env,
-    // libpq tools accept connection string via DATABASE_URL
-    DATABASE_URL: connectionString,
-  };
+  const env = buildPgToolEnv(connectionString);
 
   const meta = {
     createdAt: new Date().toISOString(),
@@ -189,7 +208,6 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
         ...pgDumpFilters,
         '--file',
         dumpPath,
-        connectionString,
       ],
       { env, cwd: jobDir, log, onChild, isCancelled }
     );
@@ -202,7 +220,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
     const schemaPath = path.join(jobDir, 'schema.sql');
     await spawnLogged(
       pgDump,
-      ['--schema-only', '--no-owner', '--no-privileges', ...pgDumpFilters, '--file', schemaPath, connectionString],
+      ['--schema-only', '--no-owner', '--no-privileges', ...pgDumpFilters, '--file', schemaPath],
       { env, cwd: jobDir, log, onChild, isCancelled }
     );
     report({ phase: 'schemaOnly', percent: 55 });
@@ -214,7 +232,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
     const sqlPath = path.join(jobDir, 'db.sql');
     await spawnLogged(
       pgDump,
-      ['--format=plain', '--no-owner', '--no-privileges', ...pgDumpFilters, '--file', sqlPath, connectionString],
+      ['--format=plain', '--no-owner', '--no-privileges', ...pgDumpFilters, '--file', sqlPath],
       { env, cwd: jobDir, log, onChild, isCancelled }
     );
     report({ phase: 'plainSql', percent: 70 });
@@ -253,7 +271,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
       emit(log, `Query: ${q.file}`);
       const outPath = path.join(invDir, q.file);
       await new Promise((resolve, reject) => {
-        const child = spawn(psql, [connectionString, '-v', 'ON_ERROR_STOP=1', '-q', '-c', q.sql], {
+        const child = spawn(psql, ['-v', 'ON_ERROR_STOP=1', '-q', '-c', q.sql], {
           env,
           cwd: jobDir,
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -296,7 +314,7 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
       emit(log, 'Dumping globals (roles/privileges) via pg_dumpall ...');
       const globalsPath = path.join(jobDir, 'globals.sql');
       await new Promise((resolve, reject) => {
-        const child = spawn(pgDumpAll, ['--globals-only', '--no-role-passwords', `--dbname=${connectionString}`], {
+        const child = spawn(pgDumpAll, ['--globals-only', '--no-role-passwords'], {
           env,
           cwd: jobDir,
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -342,4 +360,4 @@ async function runBackup({ connectionString, options, outDir, log, progress, onC
   return { jobDir, stamp };
 }
 
-module.exports = { runBackup };
+module.exports = { runBackup, buildPgToolEnv };

@@ -49,14 +49,32 @@ async function withClient(connection, fn) {
   }
 }
 
+const MAX_POOL_CACHE_SIZE = 20;
 const poolCache = new Map();
 
 function getPool(connection) {
   const connectionString = buildPostgresConnectionString(connection);
-  if (!poolCache.has(connectionString)) {
-    poolCache.set(connectionString, new Pool({ ...buildPostgresClientConfig(connection), max: 10, idleTimeoutMillis: 30000 }));
+  const cached = poolCache.get(connectionString);
+  if (cached) {
+    cached.lastUsedAt = Date.now();
+    return cached.pool;
   }
-  return poolCache.get(connectionString);
+  const pool = new Pool({ ...buildPostgresClientConfig(connection), max: 10, idleTimeoutMillis: 30000 });
+  poolCache.set(connectionString, { pool, lastUsedAt: Date.now() });
+  if (poolCache.size > MAX_POOL_CACHE_SIZE) {
+    const [oldestKey, oldest] = Array.from(poolCache.entries()).sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)[0] || [];
+    if (oldestKey) {
+      poolCache.delete(oldestKey);
+      oldest.pool.end().catch(() => {});
+    }
+  }
+  return pool;
+}
+
+async function closePostgresPools() {
+  const pools = Array.from(poolCache.values()).map((entry) => entry.pool);
+  poolCache.clear();
+  await Promise.all(pools.map((pool) => pool.end().catch(() => {})));
 }
 
 async function withPooledClient(connection, fn) {
@@ -74,6 +92,19 @@ async function listPostgresSchemas(connection) {
     const result = await client.query(`SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema' ORDER BY nspname`);
     return result.rows.map((row) => row.nspname);
   });
+}
+
+async function getExactPostgresRowCounts(client, schema, tables = []) {
+  const counts = new Map();
+  for (const table of tables) {
+    try {
+      const result = await client.query(`SELECT COUNT(*)::bigint AS count FROM ${qualifyTable(schema, table.name)}`);
+      counts.set(table.name, String(result.rows?.[0]?.count ?? '0'));
+    } catch {
+      counts.set(table.name, null);
+    }
+  }
+  return counts;
 }
 
 async function introspectPostgresSchema(connection, { schema, includeViews = false }) {
@@ -223,19 +254,23 @@ async function introspectPostgresSchema(connection, { schema, includeViews = fal
       key.columns.push({ name: row.column_name, ordinal: Number(row.ordinal_position || 0) });
     }
 
-    const tables = tablesResult.rows
+    const baseTables = tablesResult.rows
       .map((row) => ({
         name: row.table_name,
         kind: row.kind,
-        rowEstimate: Number(row.row_estimate || 0),
+        rowEstimate: Math.max(0, Number(row.row_estimate || 0)),
         comment: row.comment || '',
         columns: columnsByTable.get(row.table_name) || [],
         indexes: indexesByTable.get(row.table_name) || [],
         foreignKeys: fksByTable.get(row.table_name) || [],
       }))
-      .filter((table) => includeViews || table.kind === 'table')
+      .filter((table) => includeViews || table.kind === 'table');
+    const exactRowCounts = await getExactPostgresRowCounts(client, safeSchema, baseTables);
+    const tables = baseTables
       .map((table) => ({
         ...table,
+        rows: exactRowCounts.get(table.name) ?? String(table.rowEstimate),
+        rowCountExact: exactRowCounts.get(table.name),
         primaryKey: (keysByTable.get(table.name) || [])
           .filter((key) => key.type === 'PRIMARY KEY')
           .flatMap((key) => key.columns.sort((a, b) => a.ordinal - b.ordinal).map((column) => column.name)),
@@ -496,11 +531,13 @@ function buildProvisioningPlan({ sourceCatalog, targetCatalog, targetSchema, tab
       }
       const sourceIndexes = sourceTable?.indexes || [];
       const seenIndexNames = new Set();
+      const uniqueKeySignatures = new Set((sourceTable?.uniqueKeys || []).map((key) => (key.columns || []).join('\u0000')));
       for (const index of sourceIndexes) {
         if (index.name === 'PRIMARY') continue;
         if (seenIndexNames.has(index.name)) continue;
         seenIndexNames.add(index.name);
         const sourceIndexColumns = sourceIndexes.filter((item) => item.name === index.name).sort((a, b) => a.seq - b.seq).map((item) => item.column);
+        if (index.unique && uniqueKeySignatures.has(sourceIndexColumns.join('\u0000'))) continue;
         const mappedIndexColumns = mapSourceColumns(sourceIndexColumns);
         if (!mappedIndexColumns?.length) continue;
         indexesToCreate.push({
@@ -630,4 +667,4 @@ async function countPostgresRows(connection, schema, tableName) {
   });
 }
 
-module.exports = { buildPostgresConnectionString, buildPostgresClientConfig, listPostgresSchemas, introspectPostgresSchema, samplePostgresTableRows, truncatePostgresTable, writeRowsToPostgres, writeBatchedRowsToPostgres, withClient, withPooledClient, mapMysqlColumnToPostgres, buildProvisioningPlan, createTargetTables, compareMysqlToPostgresColumn, countPostgresRows, normalizeSslMode, resolvePgSslConfig };
+module.exports = { buildPostgresConnectionString, buildPostgresClientConfig, listPostgresSchemas, introspectPostgresSchema, samplePostgresTableRows, truncatePostgresTable, writeRowsToPostgres, writeBatchedRowsToPostgres, withClient, withPooledClient, mapMysqlColumnToPostgres, buildProvisioningPlan, createTargetTables, compareMysqlToPostgresColumn, countPostgresRows, normalizeSslMode, resolvePgSslConfig, closePostgresPools };

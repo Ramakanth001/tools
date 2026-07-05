@@ -32,6 +32,9 @@ export function ActiveConnectionProvider({ children }) {
         password: '',
         database: s?.connection?.database || '',
         sslMode: s?.connection?.sslMode || 'PREFERRED',
+        sslCa: s?.connection?.sslCa || '',
+        sslCert: s?.connection?.sslCert || '',
+        sslKey: '',
         connectionString: s?.connection?.connectionString || '',
       },
     };
@@ -39,11 +42,11 @@ export function ActiveConnectionProvider({ children }) {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(getStorageKey('active_connection.session'), JSON.stringify({ connection: { host: active.connection?.host || '', port: active.connection?.port || 3306, user: active.connection?.user || '', database: active.connection?.database || '', sslMode: active.connection?.sslMode || 'PREFERRED', connectionString: active.connection?.connectionString || '' } }));
+      sessionStorage.setItem(getStorageKey('active_connection.session'), JSON.stringify({ connection: { host: active.connection?.host || '', port: active.connection?.port || 3306, user: active.connection?.user || '', database: active.connection?.database || '', sslMode: active.connection?.sslMode || 'PREFERRED', sslCa: active.connection?.sslCa || '', sslCert: active.connection?.sslCert || '', connectionString: active.connection?.connectionString || '' } }));
     } catch {
       // ignore
     }
-  }, [active.connection?.host, active.connection?.port, active.connection?.user, active.connection?.database, active.connection?.sslMode, active.connection?.connectionString]);
+  }, [active.connection?.host, active.connection?.port, active.connection?.user, active.connection?.database, active.connection?.sslMode, active.connection?.sslCa, active.connection?.sslCert, active.connection?.connectionString]);
 
   const value = useMemo(() => ({ active, setActive }), [active]);
   return <ActiveConnectionContext.Provider value={value}>{children}</ActiveConnectionContext.Provider>;

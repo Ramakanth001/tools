@@ -11,6 +11,7 @@ const mysqlPgMigrateManifest = require('../mysql-pg-migrate/tool.manifest.js');
 const { registerPgBackupRoutes } = require('../pg-backup/src/registerRoutes.js');
 const { registerMysqlToolRoutes } = require('../mysql-tool/src/registerRoutes.js');
 const { registerMysqlPgMigrateRoutes } = require('../mysql-pg-migrate/src/registerRoutes.js');
+const { applyLocalApiAuth } = require('./localAuth');
 
 const app = express();
 
@@ -18,6 +19,10 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DIST_INDEX = path.join(PUBLIC_DIR, 'index.html');
 
 const manifests = [pgBackupManifest, mysqlToolManifest, mysqlPgMigrateManifest];
+const port = Number(process.env.PORT || 8787);
+const host = process.env.HOST || '127.0.0.1';
+
+applyLocalApiAuth(app, { apiPrefixes: ['/api'], host, toolName: 'tools' });
 
 app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, app: 'tools', tools: manifests.map((m) => ({ id: m.id, name: m.name })) });
@@ -50,7 +55,10 @@ app.get(/.*/, async (_req, res) => {
   }
 });
 
-const port = Number(process.env.PORT || 8787);
-app.listen(port, () => {
-  console.log(`tools running on http://localhost:${port}`);
+app.listen(port, host, () => {
+  const shownHost = host === '127.0.0.1' ? 'localhost' : host;
+  if (host !== '127.0.0.1' && host !== '::1') {
+    console.warn(`WARNING: tools is listening on non-loopback host ${host}.`);
+  }
+  console.log(`tools running on http://${shownHost}:${port}`);
 });

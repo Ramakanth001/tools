@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { api } from '../lib/http.js';
+import { api, withAuthQuery } from '../lib/http.js';
 import { openJobEventSource } from '../lib/sse.js';
 import { useActiveConnection } from '../state/ActiveConnectionContext.jsx';
 import { getLogsUrl, getMysqlToolRuntime, getStorageKey, resolveApiUrl } from '../lib/runtime.js';
@@ -53,6 +53,8 @@ function saveProfiles(profiles) {
   localStorage.setItem(getProfilesKey(), JSON.stringify(profiles));
 }
 
+const DEFAULT_CONNECTION = { host: '127.0.0.1', port: 3306, user: 'root', password: '', database: '', sslMode: 'PREFERRED', sslCa: '', sslCert: '', sslKey: '', connectionString: '' };
+
 export default function RunScreen() {
   const { active, setActive } = useActiveConnection();
   const [profiles, setProfiles] = useState([]);
@@ -60,7 +62,7 @@ export default function RunScreen() {
   const [profileName, setProfileName] = useState('');
   const [profilesJson, setProfilesJson] = useState('');
   const [connection, setConnection] = useState(
-    active.connection || { host: '127.0.0.1', port: 3306, user: 'root', password: '', database: '', sslMode: 'PREFERRED', connectionString: '' }
+    active.connection || DEFAULT_CONNECTION
   );
 
   useEffect(() => {
@@ -94,7 +96,7 @@ export default function RunScreen() {
 
   function applyProfile(p) {
     if (!p) return;
-    setConnection((prev) => ({ ...prev, host: p.host || prev.host, port: Number(p.port || prev.port || 3306), user: p.user || prev.user, database: p.database || prev.database, sslMode: p.sslMode || prev.sslMode || 'PREFERRED', connectionString: p.connectionString || '', password: '' }));
+    setConnection((prev) => ({ ...prev, host: p.host || prev.host, port: Number(p.port || prev.port || 3306), user: p.user || prev.user, database: p.database || prev.database, sslMode: p.sslMode || prev.sslMode || 'PREFERRED', sslCa: p.sslCa || '', sslCert: p.sslCert || '', sslKey: '', connectionString: p.connectionString || '', password: '' }));
   }
 
   function onSelectProfile(id) {
@@ -108,7 +110,7 @@ export default function RunScreen() {
       setError('Missing profile name');
       return;
     }
-    const item = { id: `m_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`, name, host: connection.host, port: Number(connection.port || 3306), user: connection.user, database: connection.database, sslMode: connection.sslMode, connectionString: connection.connectionString.trim(), createdAt: new Date().toISOString() };
+    const item = { id: `m_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`, name, host: connection.host, port: Number(connection.port || 3306), user: connection.user, database: connection.database, sslMode: connection.sslMode, sslCa: connection.sslCa || '', sslCert: connection.sslCert || '', connectionString: connection.connectionString.trim(), createdAt: new Date().toISOString() };
     const next = [item, ...profiles].slice(0, 50);
     setProfiles(next);
     saveProfiles(next);
@@ -145,7 +147,7 @@ export default function RunScreen() {
     try {
       const parsed = JSON.parse(profilesJson || '[]');
       if (!Array.isArray(parsed)) throw new Error('Profiles JSON must be an array');
-      const next = parsed.filter((p) => p && typeof p === 'object').map((p) => ({ id: String(p.id || `m_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`), name: String(p.name || 'Unnamed profile'), host: p.host ? String(p.host) : '127.0.0.1', port: p.port != null ? Number(p.port) : 3306, user: p.user ? String(p.user) : 'root', database: p.database ? String(p.database) : '', sslMode: p.sslMode ? String(p.sslMode) : 'PREFERRED', connectionString: p.connectionString ? String(p.connectionString) : '', createdAt: p.createdAt ? String(p.createdAt) : new Date().toISOString() })).slice(0, 50);
+      const next = parsed.filter((p) => p && typeof p === 'object').map((p) => ({ id: String(p.id || `m_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`), name: String(p.name || 'Unnamed profile'), host: p.host ? String(p.host) : '127.0.0.1', port: p.port != null ? Number(p.port) : 3306, user: p.user ? String(p.user) : 'root', database: p.database ? String(p.database) : '', sslMode: p.sslMode ? String(p.sslMode) : 'PREFERRED', sslCa: p.sslCa ? String(p.sslCa) : '', sslCert: p.sslCert ? String(p.sslCert) : '', connectionString: p.connectionString ? String(p.connectionString) : '', createdAt: p.createdAt ? String(p.createdAt) : new Date().toISOString() })).slice(0, 50);
       setProfiles(next);
       saveProfiles(next);
       setProfileId('');
@@ -202,7 +204,7 @@ export default function RunScreen() {
           if (s.status === 'done') {
             setRunStatus('Done');
             setProgress((p) => ({ ...p, percent: 100, phase: 'done' }));
-            setDownloadUrl(resolveApiUrl(`/jobs/${encodeURIComponent(resp.jobId)}/download`));
+            setDownloadUrl(withAuthQuery(resolveApiUrl(`/jobs/${encodeURIComponent(resp.jobId)}/download`)));
           } else if (s.status === 'cancelled') {
             setRunStatus('Cancelled');
           } else {
@@ -261,7 +263,7 @@ export default function RunScreen() {
         <div className="field full">
           <div className="field-label">Connection string</div>
           <input value={connection.connectionString} onChange={(e) => setConnection((p) => ({ ...p, connectionString: e.target.value }))} placeholder="mysql://user:pass@host:3306/db" />
-          <div className="field-hint">Optional reference field. Commands use the fields below.</div>
+          <div className="field-hint">Optional mysql:// URL. Values from the URL fill any missing fields below at runtime.</div>
         </div>
         <div style={{ height: 10 }} />
         <div className="form-grid">
@@ -271,6 +273,9 @@ export default function RunScreen() {
           <div className="field"><div className="field-label">Database</div><input value={connection.database} onChange={(e) => setConnection((p) => ({ ...p, database: e.target.value }))} /></div>
           <div className="field"><div className="field-label">SSL mode</div><select value={connection.sslMode} onChange={(e) => setConnection((p) => ({ ...p, sslMode: e.target.value }))}><option value="PREFERRED">PREFERRED</option><option value="REQUIRED">REQUIRED</option><option value="DISABLED">DISABLED</option><option value="VERIFY_CA">VERIFY_CA</option><option value="VERIFY_IDENTITY">VERIFY_IDENTITY</option></select></div>
           <div className="field full"><div className="field-label">Password</div><input type="password" value={connection.password} onChange={(e) => setConnection((p) => ({ ...p, password: e.target.value }))} /></div>
+          <div className="field"><div className="field-label">SSL CA path</div><input value={connection.sslCa || ''} onChange={(e) => setConnection((p) => ({ ...p, sslCa: e.target.value }))} placeholder="/path/to/ca.pem" /></div>
+          <div className="field"><div className="field-label">SSL cert path</div><input value={connection.sslCert || ''} onChange={(e) => setConnection((p) => ({ ...p, sslCert: e.target.value }))} placeholder="/path/to/client-cert.pem" /></div>
+          <div className="field"><div className="field-label">SSL key path</div><input type="password" value={connection.sslKey || ''} onChange={(e) => setConnection((p) => ({ ...p, sslKey: e.target.value }))} placeholder="/path/to/client-key.pem" /></div>
         </div>
         <div style={{ height: 12 }} />
         <div className="toolbar"><button className="btn" onClick={testConnection} disabled={running}>Test connection</button><span className="badge">{testStatus}</span></div>

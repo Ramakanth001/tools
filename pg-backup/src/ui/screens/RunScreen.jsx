@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { api } from '../lib/http.js';
+import { api, withAuthQuery } from '../lib/http.js';
 import { openJobEventSource } from '../lib/sse.js';
 import { useActiveConnection } from '../state/ActiveConnectionContext.jsx';
 import { getLogsUrl, getPgBackupRuntime, getStorageKey, resolveApiUrl } from '../lib/runtime.js';
@@ -385,7 +385,7 @@ export default function RunScreen() {
           if (s.status === 'done') {
             setRunStatus('Done');
             setProgress((p) => ({ ...p, percent: 100, phase: 'done' }));
-            setDownloadUrl(resolveApiUrl(`/jobs/${encodeURIComponent(resp.jobId)}/download`));
+            setDownloadUrl(withAuthQuery(resolveApiUrl(`/jobs/${encodeURIComponent(resp.jobId)}/download`)));
           } else if (s.status === 'cancelled') {
             setRunStatus('Cancelled');
           } else {

@@ -1,8 +1,30 @@
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 
+const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+function isSafeId(id) {
+  return SAFE_ID_RE.test(String(id || ''));
+}
+
+function assertSafeId(id, label = 'id') {
+  if (isSafeId(id)) return String(id);
+  const err = new Error(`Invalid ${label}`);
+  err.code = 'INVALID_ID';
+  throw err;
+}
+
 function jsonPath(root, type, id) {
-  return path.join(root, type, `${id}.json`);
+  const safeId = assertSafeId(id, type);
+  const baseDir = path.resolve(root, type);
+  const filePath = path.resolve(baseDir, `${safeId}.json`);
+  const relative = path.relative(baseDir, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    const err = new Error(`Invalid ${type} path`);
+    err.code = 'INVALID_PATH';
+    throw err;
+  }
+  return filePath;
 }
 
 async function ensureDir(dir) {
@@ -43,6 +65,7 @@ function createPersistence({ rootDir }) {
       return writeJson(jsonPath(rootDir, 'projects', project.id), project);
     },
     async getProject(id) {
+      if (!isSafeId(id)) return null;
       return readJson(jsonPath(rootDir, 'projects', id));
     },
     async listProjects() {
@@ -52,6 +75,7 @@ function createPersistence({ rootDir }) {
       return writeJson(jsonPath(rootDir, 'runs', run.id), run);
     },
     async getRun(id) {
+      if (!isSafeId(id)) return null;
       return readJson(jsonPath(rootDir, 'runs', id));
     },
     async listRuns() {
@@ -60,22 +84,32 @@ function createPersistence({ rootDir }) {
     async saveReport(report) {
       return writeJson(jsonPath(rootDir, 'reports', report.id), report);
     },
+    async listReports(projectId, type) {
+      return (await listJson(path.join(rootDir, 'reports'))).filter((item) => {
+        if (projectId && item.projectId !== projectId) return false;
+        if (type && item.type !== type) return false;
+        return true;
+      });
+    },
     async saveReplay(replay) {
       return writeJson(jsonPath(rootDir, 'replays', replay.id), replay);
     },
     async listReplays(runId) {
+      if (runId && !isSafeId(runId)) return [];
       return (await listJson(path.join(rootDir, 'replays'))).filter((item) => item.runId === runId);
     },
     async saveError(errorRecord) {
       return writeJson(jsonPath(rootDir, 'errors', errorRecord.id), errorRecord);
     },
     async listErrors(runId) {
+      if (runId && !isSafeId(runId)) return [];
       return (await listJson(path.join(rootDir, 'errors'))).filter((item) => item.runId === runId);
     },
     async saveCheckpoint(checkpoint) {
       return writeJson(jsonPath(rootDir, 'checkpoints', checkpoint.id), checkpoint);
     },
     async listCheckpoints(runId) {
+      if (runId && !isSafeId(runId)) return [];
       return (await listJson(path.join(rootDir, 'checkpoints'))).filter((item) => item.runId === runId);
     },
     async saveWatermarks(projectId, watermarks) {
@@ -86,6 +120,7 @@ function createPersistence({ rootDir }) {
       });
     },
     async getWatermarks(projectId) {
+      if (!isSafeId(projectId)) return null;
       return readJson(jsonPath(rootDir, 'watermarks', projectId));
     },
     async updateTableWatermark(projectId, tableName, patch) {

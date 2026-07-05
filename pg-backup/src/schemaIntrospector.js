@@ -1,4 +1,5 @@
 const { spawn } = require('node:child_process');
+const { buildPgToolEnv } = require('./backupRunner');
 
 function commandExists(cmd) {
   return new Promise((resolve) => {
@@ -312,7 +313,6 @@ async function runPsqlJson({ connectionString, sql, timeoutMs = 60_000 }) {
   }
 
   const args = [
-    connectionString,
     '-v',
     'ON_ERROR_STOP=1',
     '-q',
@@ -326,7 +326,7 @@ async function runPsqlJson({ connectionString, sql, timeoutMs = 60_000 }) {
 
   return await new Promise((resolve, reject) => {
     const child = spawn(psql, args, {
-      env: { ...process.env, DATABASE_URL: connectionString },
+      env: buildPgToolEnv(connectionString),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';

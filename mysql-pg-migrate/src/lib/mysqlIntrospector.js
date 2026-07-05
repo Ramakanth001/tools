@@ -3,28 +3,61 @@ const { requireToolDep } = require('../../requireToolDep');
 
 const mysql = requireToolDep('mysql2/promise');
 
+function normalizeMysqlConnection(connection = {}) {
+  const normalized = { ...connection };
+  const raw = String(connection.connectionString || '').trim();
+  if (!raw) return normalized;
+  try {
+    const url = new URL(raw);
+    if (!['mysql:', 'mysql2:'].includes(url.protocol)) return normalized;
+    if (url.hostname) normalized.host = url.hostname;
+    if (url.port) normalized.port = Number(url.port);
+    if (url.username) normalized.user = decodeURIComponent(url.username);
+    if (url.password) normalized.password = decodeURIComponent(url.password);
+    const database = decodeURIComponent(url.pathname || '').replace(/^\//, '');
+    if (database) normalized.database = database;
+    const sslMode = url.searchParams.get('ssl-mode') || url.searchParams.get('sslMode') || url.searchParams.get('sslmode');
+    if (sslMode) normalized.sslMode = sslMode;
+    const sslCa = url.searchParams.get('ssl-ca') || url.searchParams.get('sslCa');
+    const sslCert = url.searchParams.get('ssl-cert') || url.searchParams.get('sslCert');
+    const sslKey = url.searchParams.get('ssl-key') || url.searchParams.get('sslKey');
+    if (sslCa) normalized.sslCa = sslCa;
+    if (sslCert) normalized.sslCert = sslCert;
+    if (sslKey) normalized.sslKey = sslKey;
+  } catch {
+    // Invalid connection strings fall back to the explicit fields.
+  }
+  return normalized;
+}
+
 function buildMysqlConnectionConfig(connection, { database } = {}) {
+  const resolved = normalizeMysqlConnection(connection);
   return {
-    host: connection.host,
-    port: Number(connection.port || 3306),
-    user: connection.user,
-    password: connection.password || '',
-    database: database || connection.database,
-    ssl: resolveMysqlSsl(connection.sslMode),
+    host: resolved.host,
+    port: Number(resolved.port || 3306),
+    user: resolved.user,
+    password: resolved.password || '',
+    database: database || resolved.database,
+    ssl: resolveMysqlSsl(resolved.sslMode, resolved),
     dateStrings: true,
     decimalNumbers: false,
   };
 }
 
-function resolveMysqlSsl(mode) {
+function resolveMysqlSsl(mode, connection = {}) {
   const input = String(mode || 'PREFERRED').toUpperCase();
-  if (input === 'DISABLED' || input === 'PREFERRED') return undefined;
-  if (input === 'VERIFY_CA' || input === 'VERIFY_IDENTITY') return { rejectUnauthorized: true };
-  return {};
+  if (input === 'DISABLED') return undefined;
+  const ssl = {};
+  if (connection.sslCa) ssl.ca = connection.sslCa;
+  if (connection.sslCert) ssl.cert = connection.sslCert;
+  if (connection.sslKey) ssl.key = connection.sslKey;
+  if (input === 'VERIFY_CA' || input === 'VERIFY_IDENTITY') ssl.rejectUnauthorized = true;
+  if (input === 'PREFERRED' && !Object.keys(ssl).length) return undefined;
+  return ssl;
 }
 
 async function startConsistentRead(conn, connection) {
-  const consistentRead = connection?.consistentRead;
+  const consistentRead = normalizeMysqlConnection(connection)?.consistentRead;
   if (!consistentRead?.enabled) return;
   const isolation = String(consistentRead.isolation || 'REPEATABLE READ').toUpperCase();
   await conn.query(`SET SESSION TRANSACTION ISOLATION LEVEL ${isolation}`);
@@ -32,12 +65,13 @@ async function startConsistentRead(conn, connection) {
 }
 
 async function withMysqlConnection(connection, fn, { database } = {}) {
+  const resolved = normalizeMysqlConnection(connection);
   const conn = await mysql.createConnection(buildMysqlConnectionConfig(connection, { database }));
   try {
-    await startConsistentRead(conn, connection);
+    await startConsistentRead(conn, resolved);
     return await fn(conn);
   } finally {
-    if (connection?.consistentRead?.enabled) {
+    if (resolved?.consistentRead?.enabled) {
       try {
         await conn.query('COMMIT');
       } catch {
@@ -51,9 +85,10 @@ async function withMysqlConnection(connection, fn, { database } = {}) {
 async function openMysqlReadSession(connection, { database } = {}) {
   const conn = await mysql.createConnection(buildMysqlConnectionConfig(connection, { database }));
   await startConsistentRead(conn, connection);
+  const resolved = normalizeMysqlConnection(connection);
   return {
-    connection,
-    database: database || connection.database,
+    connection: resolved,
+    database: database || resolved.database,
     conn,
     consistencyMode: connection?.consistentRead?.enabled ? 'table-snapshot' : 'best-effort',
     startedAt: new Date().toISOString(),
@@ -109,8 +144,26 @@ function normalizeBooleanish(column) {
   return /tinyint\(1\)/i.test(column.fullType || '') || /boolean/i.test(column.dataType || '');
 }
 
+async function getExactMysqlRowCounts(connection, schema, tables = []) {
+  if (!tables.length) return new Map();
+  return withMysqlConnection(connection, async (conn) => {
+    const counts = new Map();
+    for (const table of tables) {
+      try {
+        const [rows] = await conn.query(`SELECT COUNT(*) AS count FROM ${quoteMysqlIdentifier(schema)}.${quoteMysqlIdentifier(table.name)}`);
+        const count = rows?.[0]?.count ?? '0';
+        counts.set(table.name, String(count));
+      } catch (error) {
+        counts.set(table.name, null);
+      }
+    }
+    return counts;
+  }, { database: schema });
+}
+
 async function introspectMysqlSchema(connection, { schema, includeViews = false }) {
-  const safeSchema = String(schema || connection.database);
+  const resolved = normalizeMysqlConnection(connection);
+  const safeSchema = String(schema || resolved.database);
   const tablesRows = await runMysqlQuery(connection, `
     SELECT TABLE_NAME AS tableName,
            TABLE_TYPE AS tableType,
@@ -175,10 +228,11 @@ async function introspectMysqlSchema(connection, { schema, includeViews = false 
     name: String(pickMysqlValue(row, ['tableName', 'table_name', 'TABLE_NAME']) || '').trim(),
     type: pickMysqlValue(row, ['tableType', 'table_type', 'TABLE_TYPE']) === 'VIEW' ? 'view' : 'table',
     engine: pickMysqlValue(row, ['engine', 'ENGINE']) || null,
-    rowEstimate: Number(pickMysqlValue(row, ['tableRows', 'table_rows', 'TABLE_ROWS']) || 0),
+    rowEstimate: Math.max(0, Number(pickMysqlValue(row, ['tableRows', 'table_rows', 'TABLE_ROWS']) || 0)),
     collation: pickMysqlValue(row, ['tableCollation', 'table_collation', 'TABLE_COLLATION']) || null,
     comment: pickMysqlValue(row, ['tableComment', 'table_comment', 'TABLE_COMMENT']) || '',
   })).filter((table) => table.name && (includeViews || table.type === 'table'));
+  const exactRowCounts = await getExactMysqlRowCounts(connection, safeSchema, tables);
 
   const columnsByTable = new Map();
   for (const row of columnsRows) {
@@ -252,6 +306,8 @@ async function introspectMysqlSchema(connection, { schema, includeViews = false 
       name: table.name,
       kind: table.type,
       engine: table.engine,
+      rows: exactRowCounts.get(table.name) ?? String(table.rowEstimate),
+      rowCountExact: exactRowCounts.get(table.name),
       rowEstimate: table.rowEstimate,
       collation: table.collation,
       comment: table.comment,
@@ -388,7 +444,8 @@ function buildFetchSql({ schema, tableName, columns = ['*'], limit = 500, offset
 }
 
 async function fetchMysqlRowsPage(connection, schema, tableName, { columns = ['*'], limit = 500, offset = 0, keyset, sourceFilter } = {}) {
-  const query = buildFetchSql({ schema: String(schema || connection.database), tableName, columns, limit, offset, keyset, sourceFilter });
+  const resolved = normalizeMysqlConnection(connection);
+  const query = buildFetchSql({ schema: String(schema || resolved.database), tableName, columns, limit, offset, keyset, sourceFilter });
   const rows = await runMysqlQuery(connection, query.sql, query.params);
   return rows.map(normalizeMysqlRow);
 }
@@ -400,7 +457,8 @@ async function fetchMysqlRowsPageFromSession(session, schema, tableName, { colum
 }
 
 async function countMysqlRows(connection, schema, tableName, { sourceFilter, keyset } = {}) {
-  const safeSchema = String(schema || connection.database).replace(/`/g, '``');
+  const resolved = normalizeMysqlConnection(connection);
+  const safeSchema = String(schema || resolved.database).replace(/`/g, '``');
   const safeTable = String(tableName || '').replace(/`/g, '``');
   const whereParts = [];
   const params = [];
@@ -428,16 +486,29 @@ async function countMysqlRows(connection, schema, tableName, { sourceFilter, key
   return Number(rows?.[0]?.count || 0);
 }
 
+async function countMysqlColumnNulls(connection, schema, tableName, columnName) {
+  const resolved = normalizeMysqlConnection(connection);
+  const safeSchema = String(schema || resolved.database).replace(/`/g, '``');
+  const safeTable = String(tableName || '').replace(/`/g, '``');
+  const column = quoteMysqlIdentifier(columnName);
+  const rows = await runMysqlQuery(connection, `SELECT COUNT(*) AS count FROM \`${safeSchema}\`.\`${safeTable}\` WHERE ${column} IS NULL`);
+  return Number(rows?.[0]?.count || 0);
+}
+
 module.exports = {
   listMysqlSchemas,
   introspectMysqlSchema,
   sampleMysqlTableRows,
   runMysqlQuery,
+  runMysqlSessionQuery,
   fetchMysqlRowsPage,
   fetchMysqlRowsPageFromSession,
   countMysqlRows,
+  countMysqlColumnNulls,
   withMysqlConnection,
   openMysqlReadSession,
   closeMysqlReadSession,
   compareCursorValues,
+  quoteMysqlIdentifier,
+  normalizeMysqlConnection,
 };
