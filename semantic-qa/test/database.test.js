@@ -18,7 +18,7 @@ test('incremental commit reconciles deleted source IDs inside one transaction', 
   await commitIncremental(client, {
     names: { stage: 'stage_job', seen: 'seen_job' },
     mapping: { schema: 'public', table: 'qa' },
-    model: 'embeddinggemma', dimension: 768,
+    model: 'embeddinggemma', dimension: 768, formatVersion: 'embeddinggemma-asymmetric-v2', retrievalVersion: 'hybrid-v2',
     ollamaBaseUrl: 'http://127.0.0.1:11434', total: 10,
   });
   assert.equal(statements[0], 'BEGIN');

@@ -2,7 +2,12 @@ const { requireToolDep } = require('../requireToolDep');
 const database = require('./database');
 const ollama = require('./ollama');
 const { createSyncManager, sanitizeError } = require('./syncManager');
-const { buildSearchResponse } = require('./core');
+const {
+  buildLexicalQuery,
+  buildQueryEmbeddingText,
+  buildSearchResponse,
+  rerankMatches,
+} = require('./core');
 
 const express = requireToolDep('express');
 const { z } = requireToolDep('zod');
@@ -209,13 +214,24 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       const vectors = await embedding.embedTexts({
         baseUrl: data.ollamaBaseUrl,
         model: status.corpus.embeddingModel,
-        texts: [data.question],
+        texts: [buildQueryEmbeddingText(data.question, {
+          model: status.corpus.embeddingModel,
+          formatVersion: status.corpus.embeddingFormatVersion,
+        })],
       });
       if (vectors[0].length !== Number(status.corpus.embeddingDimension)) {
         return res.status(409).json({ ok: false, error: 'Embedding dimension changed; run a full rebuild.' });
       }
-      const result = await db.searchIndex(data.indexConnection, vectors[0], data.topK);
-      res.json({ ok: true, ...buildSearchResponse(result.rows, data.threshold) });
+      const candidateLimit = Math.max(60, data.topK * 12);
+      const result = await db.searchIndex(
+        data.indexConnection,
+        vectors[0],
+        buildLexicalQuery(data.question),
+        candidateLimit,
+      );
+      const matches = rerankMatches(result.rows, data.question, data.topK)
+        .map(({ rankingSignals: _rankingSignals, ...match }) => match);
+      res.json({ ok: true, retrieval: result.hybrid ? 'hybrid' : 'dense', ...buildSearchResponse(matches, data.threshold) });
     } catch (error) { routeError(res, error); }
   });
 

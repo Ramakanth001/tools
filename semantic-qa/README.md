@@ -12,6 +12,8 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 - Selectable ID, question, answer, metadata, group, and source-order columns
 - Local Ollama embeddings through `POST /api/embed`
 - pgvector storage with an HNSW cosine index
+- PostgreSQL full-text candidates with a GIN index and deterministic hybrid reranking
+- Question-intent checks, document-group deduplication, and sibling-chunk selection
 - Atomic full rebuilds and content-hash-based incremental synchronization
 - Deletion reconciliation after a successful source scan
 - Verbatim stored answers with source IDs and metadata
@@ -175,10 +177,10 @@ Import behavior:
 - uses `tblDiscourse.title` / `textDC` for discourse records;
 - converts legacy HTML markup and entities to readable plain text without summarizing or generating content;
 - retains the source type, original record ID, master ID, language, date, and chunk position as metadata;
-- divides long content at whitespace/paragraph boundaries, using language-aware limits for the installed embedding model;
+- divides long content at whitespace/paragraph boundaries, using language-aware limits and bounded adjacent-chunk overlap;
 - groups chunks by their original Q&A or discourse record and returns them in source order.
 
-For the current dump at `/Applications/XAMPP/xamppfiles/htdocs/universal.sql`, the import includes 419 active Q&As and 5,591 active discourses. They produce 18,154 indexed chunks: 878 from `tblQA` and 17,276 from `tblDiscourse`. Inactive records and unrelated Joomla tables are not indexed.
+For the current dump at `/Applications/XAMPP/xamppfiles/htdocs/universal.sql`, the import includes 419 active Q&As and 5,591 active discourses. With retrieval overlap they produce 19,777 indexed chunks: 956 from `tblQA` and 18,821 from `tblDiscourse`. Inactive records and unrelated Joomla tables are not indexed.
 
 The isolated local configuration is:
 
@@ -193,7 +195,7 @@ Run the repeatable MySQL-to-PostgreSQL projection after importing the dump into 
 npm --prefix ./semantic-qa run import:universal
 ```
 
-The optional environment variables are `UNIVERSAL_MYSQL_HOST`, `UNIVERSAL_MYSQL_PORT`, `UNIVERSAL_MYSQL_USER`, `UNIVERSAL_MYSQL_PASSWORD`, `UNIVERSAL_MYSQL_DATABASE`, `UNIVERSAL_PG_HOST`, `UNIVERSAL_PG_PORT`, `UNIVERSAL_PG_USER`, `UNIVERSAL_PG_PASSWORD`, `UNIVERSAL_PG_DATABASE`, `UNIVERSAL_QA_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_CHUNK_CHARS`, and `UNIVERSAL_INCLUDE_DISCOURSE`.
+The optional environment variables are `UNIVERSAL_MYSQL_HOST`, `UNIVERSAL_MYSQL_PORT`, `UNIVERSAL_MYSQL_USER`, `UNIVERSAL_MYSQL_PASSWORD`, `UNIVERSAL_MYSQL_DATABASE`, `UNIVERSAL_PG_HOST`, `UNIVERSAL_PG_PORT`, `UNIVERSAL_PG_USER`, `UNIVERSAL_PG_PASSWORD`, `UNIVERSAL_PG_DATABASE`, `UNIVERSAL_QA_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_OVERLAP_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_OVERLAP_CHARS`, and `UNIVERSAL_INCLUDE_DISCOURSE`.
 
 In the UI, open **Setup**, click **Load universal Q&A**, and run diagnostics. The preset includes the correct source/index connections, mapping, and a corpus-calibrated `0.50` clear-match threshold. After importing changed MySQL data, rerun the projection and use **Incremental sync**.
 
@@ -243,6 +245,14 @@ Open `http://localhost:5173/tools/semantic-qa`.
 
 After source data changes, use **Incremental sync**. It embeds new or changed records and deletes index rows whose source IDs no longer exist. A failed or cancelled sync leaves the previous live index intact.
 
+After a retrieval change or full rebuild, run the checked-in relevance regression set:
+
+```bash
+npm --prefix ./semantic-qa run eval:universal
+```
+
+It reports Recall@5, mean reciprocal rank, and the returned source groups for each reviewed question. Add representative production questions to `semantic-qa/eval/relevance-cases.json`; a relevance threshold alone is not a substitute for this evaluation set.
+
 ## Connection Settings
 
 You can provide either:
@@ -256,17 +266,21 @@ Passwords and complete connection strings remain in browser memory only. They ar
 
 ## Retrieval Behavior
 
-Each source record is embedded as:
+With EmbeddingGemma, each source record is embedded using the model's asymmetric document format:
 
 ```text
-Question:
-<stored question>
-
-Answer:
-<stored answer>
+title: <stored question> | text: <stored answer>
 ```
 
-Search embeds the new question with the same model and ranks records by cosine similarity. The default result count is `5`, and the default clear-match threshold is `0.60`.
+The user question is embedded as:
+
+```text
+task: question answering | query: <user question>
+```
+
+Search retrieves a wider candidate set from both HNSW cosine search and PostgreSQL full-text search. A deterministic reranker combines semantic similarity, lexical/entity coverage, question intent, document position, and source context. It then chooses the best answering chunk per source group and returns five distinct sources by default. No answer-generation model is involved.
+
+The default clear-match threshold is `0.60`; the universal preset uses `0.50`. Final ordering uses the combined relevance score. Clear-match status accepts either a sufficient relevance score or cosine score, preserving strong semantic-only matches; both values are returned for diagnostics.
 
 When no result meets the threshold, the response begins with:
 
@@ -313,7 +327,7 @@ All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection
 | `Source ID column must be unique` | Select a real unique/primary-key column or expose a database view with a stable unique ID. |
 | Empty question/answer errors | Fix the source rows; incomplete records are not silently skipped. |
 | Model or dimension changed | Select the intended model and run **Full rebuild**. |
-| Search always reports no clear answer | Confirm the index contains records, then calibrate the similarity threshold using representative questions. |
+| Search always reports no clear answer | Confirm the index contains records, then calibrate the relevance threshold using representative questions. |
 | Buttons are disabled on Index | Complete the source connection, index connection, and required corpus mapping first. |
 
 ## Tests

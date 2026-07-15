@@ -17,6 +17,13 @@ test('long answers become ordered chunks under the configured character limit', 
   assert.ok(chunks.at(-1).includes('second'));
 });
 
+test('overlapped chunks remain bounded and repeat source wording at boundaries', () => {
+  const chunks = chunkText(`${'alpha '.repeat(80)}\n\n${'beta '.repeat(80)}`, 300, 40);
+  assert.ok(chunks.length > 2);
+  assert.ok(chunks.every((chunk) => chunk.length <= 300));
+  assert.match(chunks[1], /alpha/);
+});
+
 test('import records retain source identity and chunk ordering', () => {
   const { records, rejected } = buildRecords([{
     qaId: 52,

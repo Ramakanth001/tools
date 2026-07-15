@@ -3,16 +3,50 @@ const assert = require('node:assert/strict');
 const {
   NO_MATCH_MESSAGE,
   assertIdentifier,
+  buildDocumentEmbeddingText,
   buildEmbeddingText,
+  buildLexicalQuery,
+  buildQueryEmbeddingText,
   contentHash,
   buildSearchResponse,
   orderMatches,
   redactConnection,
+  rerankMatches,
   toVectorLiteral,
 } = require('../src/core');
 
 test('builds a labeled question and answer embedding input without rewriting text', () => {
   assert.equal(buildEmbeddingText('Why?  ', 'Because.\nNext line.'), 'Question:\nWhy?  \n\nAnswer:\nBecause.\nNext line.');
+  assert.equal(
+    buildDocumentEmbeddingText('Who is Swami?', 'Stored answer.', { model: 'embeddinggemma' }),
+    'title: Who is Swami? | text: Stored answer.',
+  );
+  assert.equal(
+    buildQueryEmbeddingText('Who is Swami?', { model: 'embeddinggemma' }),
+    'task: question answering | query: Who is Swami?',
+  );
+  assert.equal(buildLexicalQuery('Who is Datta Swami?'), 'datta swami');
+});
+
+test('hybrid reranking respects question intent, chooses the answering sibling, and deduplicates groups', () => {
+  const rows = [
+    {
+      sourceId: 'where', question: 'Where can I meet Datta Swami?', answer: 'Call this phone number.',
+      similarity: 0.71, lexicalScore: 0.2, sourceGroup: 'where', metadata: { chunk_index: 1 },
+    },
+    {
+      sourceId: 'who:009', question: 'WHO IS SWAMI?', answer: 'A devotee founded the Mission.',
+      similarity: 0.70, lexicalScore: 0.2, sourceGroup: 'who', metadata: { chunk_index: 9 },
+    },
+    {
+      sourceId: 'who:001', question: 'WHO IS SWAMI?', answer: 'My name is Venu Gopala Krishna Murthy.',
+      similarity: 0.62, lexicalScore: 0.2, sourceGroup: 'who', metadata: { chunk_index: 1 },
+    },
+  ];
+  const matches = rerankMatches(rows, 'Who is Datta Swami?', 5);
+  assert.equal(matches[0].sourceId, 'who:001');
+  assert.equal(matches.filter((row) => row.sourceGroup === 'who').length, 1);
+  assert.ok(matches[0].relevanceScore > matches[1].relevanceScore);
 });
 
 test('content hashes are stable and change with source content', () => {

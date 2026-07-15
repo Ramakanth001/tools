@@ -59,7 +59,7 @@ export const UNIVERSAL_QA_SETTINGS = {
     idColumn: 'source_id',
     questionColumn: 'question',
     answerColumn: 'answer',
-    metadataColumns: ['source_type', 'original_record_id', 'master_id', 'language', 'record_date', 'chunk_index', 'chunk_count'],
+    metadataColumns: ['source_type', 'original_record_id', 'master_id', 'source_context', 'language', 'record_date', 'chunk_index', 'chunk_count'],
     groupColumn: 'source_group',
     orderColumn: 'chunk_index',
   },

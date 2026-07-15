@@ -1,0 +1,19 @@
+[
+  {
+    "question": "Who is Datta Swami?",
+    "relevantSourceGroups": ["discourse:737", "discourse:891", "discourse:702", "discourse:1322", "discourse:738"],
+    "minimumRelevantInTop": 3
+  },
+  {
+    "question": "Where can I meet Shri Datta Swami?",
+    "relevantSourceGroups": ["discourse:2854", "qa:320"]
+  },
+  {
+    "question": "What is the real nature of Datta?",
+    "relevantSourceGroups": ["qa:49"]
+  },
+  {
+    "question": "What is the difference between Lord Datta and Lord Dattatreya?",
+    "relevantSourceGroups": ["discourse:2068"]
+  }
+]

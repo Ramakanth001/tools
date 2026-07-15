@@ -9,7 +9,7 @@ The tool does not write an answer with AI. It retrieves answer text that already
 It works in two phases:
 
 1. **Offline indexing:** source text is cleaned, split into safe chunks, converted into numeric vectors by EmbeddingGemma through Ollama, and stored in PostgreSQL with pgvector.
-2. **Online search:** the new user question is converted into another vector, PostgreSQL finds nearby stored vectors, and the tool returns their stored text unchanged.
+2. **Online search:** the new user question is converted into another vector, PostgreSQL combines semantic and full-text candidates, deterministic code reranks them, and the tool returns their stored text unchanged.
 
 The most important distinction is:
 
@@ -30,7 +30,7 @@ EmbeddingGemma is already trained. This application does not fine-tune it, updat
 | Source PostgreSQL | `127.0.0.1:5433/universal_qa_source` |
 | Index PostgreSQL | `127.0.0.1:5433/universal_qa_index` |
 | Vector extension | pgvector 0.8.5 |
-| Live vector records | 18,154 |
+| Live vector records after the retrieval-v2 rebuild | 19,777 |
 | Original active records | 419 Q&As and 5,591 discourses |
 | Languages in the imported corpus | English, Malayalam, and Telugu |
 | Universal-corpus match threshold | 0.50 |
@@ -66,6 +66,7 @@ flowchart LR
         PGVECTOR["PostgreSQL + pgvector"]
         RECORDS["semantic_qa.records"]
         HNSW["HNSW cosine index"]
+        GIN["GIN full-text index"]
     end
 
     SQL --> MYSQL
@@ -80,6 +81,7 @@ flowchart LR
     SYNC --> RECORDS
     RECORDS --> PGVECTOR
     HNSW --> RECORDS
+    GIN --> RECORDS
     API --> OLLAMA
     API --> PGVECTOR
 ```
@@ -104,7 +106,7 @@ The legacy dump is first imported into MySQL as `universal_vector_source`. The a
 | `qaId` | Original source identity |
 | `title` | Stored question |
 | `answerBySwami` | Stored answer |
-| `briefQuestion` or `questionBk` | Additional source context, not currently embedded |
+| `briefQuestion` or `questionBk` | Additional source context used by hybrid reranking |
 | `masterLanguage` | Language metadata |
 | `masterId`, `recordDate` | Source metadata |
 
@@ -115,7 +117,7 @@ The legacy dump is first imported into MySQL as `universal_vector_source`. The a
 | `dcId` | Original source identity |
 | `title` | Stored question/title |
 | `textDC` | Stored answer/document text |
-| `summary` | Additional source context, not currently embedded |
+| `summary` | Additional source context used by hybrid reranking |
 | `masterLanguage` | Language metadata |
 | `masterId`, `recordDate` | Source metadata |
 
@@ -149,7 +151,7 @@ The importer uses conservative character limits:
 
 These are character limits, not token limits. Malayalam and Telugu use smaller limits because their tokenizer-to-character ratio can be higher than English.
 
-The chunker prefers paragraph boundaries. If one paragraph is still too large, it cuts at a nearby whitespace boundary. Every chunk contains:
+The chunker prefers paragraph boundaries. If one paragraph is still too large, it cuts at a nearby whitespace boundary. Adjacent chunks repeat a bounded contiguous source passage—300 characters for English discourses and 140 for Malayalam/Telugu—so an answer crossing a boundary remains retrievable. The repeated text is copied verbatim rather than generated. Every chunk contains:
 
 - a stable `source_id` such as `qa:52:001` or `discourse:533:005`;
 - a `source_group` pointing to the original Q&A or discourse;
@@ -161,9 +163,9 @@ Current output:
 
 | Source | Original active records | Search chunks |
 | --- | ---: | ---: |
-| `tblQA` | 419 | 878 |
-| `tblDiscourse` | 5,591 | 17,276 |
-| **Total** | **6,010** | **18,154** |
+| `tblQA` | 419 | 956 |
+| `tblDiscourse` | 5,591 | 18,821 |
+| **Total** | **6,010** | **19,777** |
 
 ## 5. What Ollama Does
 
@@ -209,17 +211,19 @@ The individual numbers do not have human-readable labels. Their usefulness comes
 - unrelated texts tend to point in different directions;
 - the same vector size is produced for a short question and a long chunk.
 
-During indexing, the tool embeds this exact structure:
+During indexing with EmbeddingGemma, the tool embeds this exact structure:
 
 ```text
-Question:
-<stored question or title>
-
-Answer:
-<stored answer chunk>
+title: <stored question or title> | text: <stored answer chunk>
 ```
 
-During search, it embeds the raw new user question. The resulting query vector is compared with all indexed record vectors through pgvector.
+During search, it embeds:
+
+```text
+task: question answering | query: <new user question>
+```
+
+The index stores an embedding-format version alongside the model and dimension. Searches use the format recorded with the live index, allowing the previous index to remain searchable while a new format is rebuilt. An incremental sync is rejected when the format changes.
 
 ### The same model must be used on both sides
 
@@ -288,7 +292,7 @@ Each searchable chunk stores:
 | `embedding` | `vector(768)` semantic representation |
 | `updated_at` | Index update time |
 
-The 768 raw float values alone require roughly 3 KiB per record if represented as 32-bit values. For 18,154 vectors, that is about 53 MiB before PostgreSQL row, text, metadata, and HNSW overhead. Actual database size is larger because exact answer text is also stored.
+The 768 raw float values alone require roughly 3 KiB per record if represented as 32-bit values. For 19,777 vectors, that is about 58 MiB before PostgreSQL row, text, metadata, GIN, and HNSW overhead. Actual database size is larger because exact answer text is also stored.
 
 ### `semantic_qa.sync_runs`
 
@@ -340,7 +344,7 @@ ORDER BY embedding <=> $query_vector
 LIMIT $top_k
 ```
 
-The universal corpus uses a calibrated clear-match threshold of `0.50`. The smaller sample/default configuration uses `0.60`. Longer discourse chunks tend to produce lower cosine scores than short, exact Q&A records, which is why thresholds must be calibrated using representative questions.
+The universal corpus uses a clear-match threshold of `0.50`. The smaller sample/default configuration uses `0.60`. Retrieval v2 applies this threshold to the combined relevance score, not directly to cosine similarity. It must be calibrated with representative questions after any model, chunking, or ranking change.
 
 If the best result is below the threshold, the application returns exactly:
 
@@ -403,7 +407,7 @@ Costs:
 - results are approximate rather than a guaranteed exhaustive comparison;
 - build/query quality and speed can be tuned with HNSW parameters, though this tool currently uses pgvector defaults.
 
-At the current 18,154-record scale, exact scanning would still be possible, but HNSW provides a better path as the corpus grows and keeps vector retrieval inside PostgreSQL.
+At the current 19,777-record scale, exact scanning would still be possible, but HNSW provides a better path as the corpus grows and keeps vector retrieval inside PostgreSQL.
 
 ## 11. Full Rebuild Internals
 
@@ -442,7 +446,7 @@ Detailed behavior:
 7. If any record fails embedding, the tool retries records individually to identify offending source IDs.
 8. Only after every source record succeeds does one transaction replace the live records table, create the HNSW index, and update corpus metadata.
 
-The 18,154-record local rebuild took approximately 61 minutes. Most of that time was local embedding inference, particularly for long and multilingual chunks. The final database swap and HNSW creation took seconds.
+The earlier 18,154-record legacy-format rebuild took approximately 61 minutes. The completed retrieval-v2 rebuild indexed 19,777 overlapped chunks in approximately 21 minutes 35 seconds on the current machine; Ollama model warm-up, input mix, and other local load can make full-build timing vary substantially. The final database swap and index creation takes only seconds.
 
 Cancellation, an Ollama error, a database error, or oversized input drops staging and leaves the previous live index searchable.
 
@@ -474,7 +478,7 @@ after successful complete scan
     commit once
 ```
 
-After the full universal rebuild, an unchanged incremental run scanned all 18,154 records in about two seconds and wrote zero embeddings.
+After the retrieval-v2 rebuild, an unchanged incremental run scanned all 19,777 records in approximately four seconds and wrote zero embeddings.
 
 If chunk boundaries change, source chunk IDs can also change. Incremental sync treats those as new IDs and deletes the obsolete chunk IDs only after the successful complete scan.
 
@@ -491,28 +495,29 @@ sequenceDiagram
     User->>UI: Enter one question
     UI->>API: POST /search
     API->>PG: Read live corpus model/dimension
-    API->>Ollama: Embed raw user question
+    API->>Ollama: Embed task-formatted user question
     Ollama-->>API: Query vector(768)
-    API->>PG: HNSW cosine Top-K query
-    PG-->>API: Stored text, metadata, and similarity
-    API->>API: Assign relevance ranks and source ordering
+    API->>PG: HNSW candidates + GIN full-text candidates
+    PG-->>API: Candidate chunks, siblings, metadata, scores
+    API->>API: Intent/entity rerank and group deduplication
     API-->>UI: Grounded matches only
 ```
 
 Step by step:
 
 1. The API reads the model and dimension recorded with the live corpus.
-2. Ollama embeds the new question using that model.
+2. Ollama embeds the new question using the query format recorded with that model and live corpus.
 3. The API rejects the query if the returned dimension differs from the indexed dimension.
-4. pgvector performs a cosine nearest-neighbor query and returns `topK` rows, normally five.
-5. Matches receive a relevance rank based on descending similarity.
-6. When group and order fields exist, groups are ordered by their best similarity and selected chunks inside a group follow source order. Each chunk retains its original relevance rank.
-7. The best similarity is compared with the configured threshold.
-8. The API returns stored question, answer, metadata, source ordering, similarity, and relevance rank.
+4. pgvector returns up to 60 HNSW candidates, while PostgreSQL's GIN index returns full-text candidates for the significant query terms.
+5. For chunked candidate documents, the API also loads their sibling chunks. This allows a strong document-title match to lead to the passage that actually answers the question.
+6. Deterministic reranking combines cosine similarity, full-text rank, entity coverage, question intent, source context, and a bounded opening-chunk prior.
+7. Candidate chunks are deduplicated by source group; the best answering chunk represents each original Q&A or discourse.
+8. The best combined relevance score is compared with the configured threshold.
+9. The API returns stored question, verbatim answer, metadata, source ordering, cosine similarity, combined relevance score, and relevance rank.
 
 There is no chat-model call after retrieval. The application does not merge chunks, explain the result, rewrite text, or fill gaps.
 
-Each question is independent. V1 has no conversational memory, follow-up interpretation, or query expansion.
+Each question is independent. The tool has no conversational memory, follow-up interpretation, generative query expansion, or generated answer step.
 
 ## 14. Multilingual Handling
 
@@ -539,17 +544,18 @@ If language-specific quality becomes insufficient, possible future approaches in
 
 ## 15. Ranking, Grouping, and Thresholds
 
-These are three separate concepts:
+These are four separate concepts:
 
 - **Similarity** is the numeric cosine score from pgvector.
-- **Relevance rank** is the original position after sorting by similarity.
-- **Display order** can place related selected chunks in source order.
+- **Lexical score** is PostgreSQL's full-text rank for the significant query terms.
+- **Relevance score** is the deterministic hybrid score used for final ordering. Clear-match thresholding accepts either a sufficient hybrid score or a sufficient cosine score, so a strong semantic-only match is not rejected merely because it shares few literal terms.
+- **Relevance rank** is the final position after hybrid reranking and source-group deduplication.
 
-For example, chunks 5, 1, and 3 of one discourse might be the three nearest vectors. Their relevance ranks remain 1, 2, and 3, but the UI can display those selected chunks as 1, 3, 5 so the visible source sequence is logical.
-
-Grouping does not automatically fetch every chunk of a matched discourse. It orders only the records already selected in the Top-K nearest-neighbor result.
+For example, chunk 9 might make a discourse a semantic candidate because its title matches strongly. Retrieval then inspects the discourse's sibling chunks and may select chunk 1 if its text better answers a “who” question. Only one best chunk per source group is returned, preventing one long discourse from filling all five result slots.
 
 The threshold is a product decision, not a mathematical truth. It should be calibrated separately when the model, chunking strategy, corpus, or languages change.
+
+The executable regression set in `eval/relevance-cases.json` records reviewed question-to-source-group judgments. `npm run eval:universal` measures Recall@5 and mean reciprocal rank against the live API. This catches ranking regressions that database health checks and embedding-dimension tests cannot detect.
 
 ## 16. Safety and Data Integrity
 
@@ -608,10 +614,12 @@ Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-
 | `src/server.js` | Standalone Express server and static UI hosting |
 | `src/registerRoutes.js` | Request schemas and public API routes |
 | `src/ollama.js` | Local Ollama URL validation and `/api/embed` calls |
-| `src/core.js` | Embedding text format, hashing, ranking, ordering, threshold response |
-| `src/database.js` | PostgreSQL discovery, snapshots, staging, commits, pgvector search |
+| `src/core.js` | Model-aware embedding formats, hashing, intent/entity scoring, group reranking, threshold response |
+| `src/database.js` | PostgreSQL discovery, snapshots, staging, commits, HNSW/GIN hybrid candidate search |
 | `src/syncManager.js` | Job lifecycle, batching, cancellation, SSE, full/incremental orchestration |
 | `scripts/importUniversalQa.js` | MySQL Q&A/discourse cleanup, chunking, and PostgreSQL source projection |
+| `scripts/evaluateRetrieval.js` | Live Recall@K and mean-reciprocal-rank regression runner |
+| `eval/relevance-cases.json` | Human-reviewed question-to-source-group relevance judgments |
 | `src/ui/SemanticQaTool.jsx` | Setup, Search, Index, and Settings screens |
 | `src/ui/settings.mjs` | Defaults, presets, and secret-safe persistence |
 

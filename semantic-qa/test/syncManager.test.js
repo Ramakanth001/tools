@@ -26,7 +26,12 @@ function makeDb({ existingHashes = new Map() } = {}) {
     db: {
       createPool: () => pool,
       ensureCoreSchema: async () => {},
-      getCorpus: async () => ({ embeddingModel: 'embeddinggemma', embeddingDimension: 3 }),
+      getCorpus: async () => ({
+        embeddingModel: 'embeddinggemma',
+        embeddingDimension: 3,
+        embeddingFormatVersion: 'embeddinggemma-asymmetric-v2',
+        retrievalSchemaVersion: 'hybrid-v2',
+      }),
       createSyncRun: async () => {},
       createSyncStage: async () => ({ stage: 'stage', seen: 'seen' }),
       openSourceSnapshot: async () => ({

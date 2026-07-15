@@ -1,5 +1,11 @@
 const { requireToolDep } = require('../requireToolDep');
-const { quoteIdentifier, assertIdentifier, toVectorLiteral } = require('./core');
+const {
+  quoteIdentifier,
+  assertIdentifier,
+  toVectorLiteral,
+  embeddingFormatForModel,
+  RETRIEVAL_SCHEMA_VERSION,
+} = require('./core');
 
 const { Pool } = requireToolDep('pg');
 
@@ -221,6 +227,14 @@ async function ensureCoreSchema(client) {
       finished_at timestamptz
     )
   `);
+  await client.query(`
+    ALTER TABLE semantic_qa.corpus
+    ADD COLUMN IF NOT EXISTS embedding_format_version text NOT NULL DEFAULT 'legacy-v1'
+  `);
+  await client.query(`
+    ALTER TABLE semantic_qa.corpus
+    ADD COLUMN IF NOT EXISTS retrieval_schema_version text NOT NULL DEFAULT 'dense-v1'
+  `);
 }
 
 async function recordsTableExists(client) {
@@ -241,6 +255,11 @@ async function createRecordsTable(client, tableName, dimension, { unlogged = fal
       source_order jsonb,
       content_hash text NOT NULL,
       embedding vector(${dim}) NOT NULL,
+      search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple'::regconfig, question), 'A') ||
+        setweight(to_tsvector('simple'::regconfig, coalesce(metadata->>'source_context', '')), 'B') ||
+        setweight(to_tsvector('simple'::regconfig, answer), 'D')
+      ) STORED,
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `);
@@ -253,10 +272,31 @@ async function createHnswIndex(client) {
   `);
 }
 
+async function searchVectorExists(client) {
+  const result = await client.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM pg_attribute
+      WHERE attrelid = 'semantic_qa.records'::regclass
+        AND attname = 'search_vector' AND NOT attisdropped
+    ) AS exists
+  `);
+  return result.rows[0].exists;
+}
+
+async function createSearchIndex(client) {
+  if (!(await searchVectorExists(client))) return;
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS semantic_qa_records_search_gin
+      ON semantic_qa.records USING gin (search_vector)
+  `);
+}
+
 async function getCorpus(client) {
   const result = await client.query(`
     SELECT id, source_mapping AS "sourceMapping", embedding_model AS "embeddingModel",
-           embedding_dimension AS "embeddingDimension", ollama_base_url AS "ollamaBaseUrl",
+           embedding_dimension AS "embeddingDimension", embedding_format_version AS "embeddingFormatVersion",
+           retrieval_schema_version AS "retrievalSchemaVersion",
+           ollama_base_url AS "ollamaBaseUrl",
            record_count::bigint AS "recordCount", last_synced_at AS "lastSyncedAt", updated_at AS "updatedAt"
     FROM semantic_qa.corpus WHERE id = 'default'
   `);
@@ -275,15 +315,20 @@ async function initializeIndex(connection, { model, dimension, ollamaBaseUrl }) 
         await createRecordsTable(client, 'records', dimension);
       }
       await createHnswIndex(client);
+      await createSearchIndex(client);
       if (!existingCorpus) {
+        const formatVersion = embeddingFormatForModel(model);
         await client.query(`
           INSERT INTO semantic_qa.corpus
-            (id, source_mapping, embedding_model, embedding_dimension, ollama_base_url)
-          VALUES ('default', '{}'::jsonb, $1, $2, $3)
-        `, [model, dimension, ollamaBaseUrl]);
+            (id, source_mapping, embedding_model, embedding_dimension, embedding_format_version, ollama_base_url)
+          VALUES ('default', '{}'::jsonb, $1, $2, $3, $4)
+        `, [model, dimension, formatVersion, ollamaBaseUrl]);
       }
       const corpus = existingCorpus || await getCorpus(client);
-      const requiresRebuild = corpus.embeddingModel !== model || Number(corpus.embeddingDimension) !== Number(dimension);
+      const requiresRebuild = corpus.embeddingModel !== model ||
+        Number(corpus.embeddingDimension) !== Number(dimension) ||
+        corpus.embeddingFormatVersion !== embeddingFormatForModel(model) ||
+        corpus.retrievalSchemaVersion !== RETRIEVAL_SCHEMA_VERSION;
       return { initialized: true, requiresRebuild, corpus, recordsTable: true };
     } finally {
       client.release();
@@ -307,6 +352,7 @@ async function getIndexStatus(connection) {
     try {
       const schema = await client.query(`SELECT to_regnamespace('semantic_qa') IS NOT NULL AS exists`);
       if (!schema.rows[0].exists) return { initialized: false, corpus: null, recordCount: 0, recentRuns: [] };
+      await ensureCoreSchema(client);
       const exists = await recordsTableExists(client);
       const corpus = await getCorpus(client);
       const count = exists ? await client.query('SELECT COUNT(*)::bigint AS count FROM semantic_qa.records') : { rows: [{ count: 0 }] };
@@ -415,7 +461,7 @@ async function updateSyncRun(client, job) {
   `, [job.id, job.status, job.processed, job.changed, job.total, job.error || null]);
 }
 
-async function commitIncremental(client, { names, mapping, model, dimension, ollamaBaseUrl, total }) {
+async function commitIncremental(client, { names, mapping, model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total }) {
   await client.query('BEGIN');
   try {
     await client.query(`
@@ -436,9 +482,10 @@ async function commitIncremental(client, { names, mapping, model, dimension, oll
     `);
     await client.query(`
       UPDATE semantic_qa.corpus SET source_mapping = $1::jsonb, embedding_model = $2,
-        embedding_dimension = $3, ollama_base_url = $4, record_count = $5,
+        embedding_dimension = $3, embedding_format_version = $4, retrieval_schema_version = $5,
+        ollama_base_url = $6, record_count = $7,
         last_synced_at = now(), updated_at = now() WHERE id = 'default'
-    `, [JSON.stringify(mapping), model, dimension, ollamaBaseUrl, total]);
+    `, [JSON.stringify(mapping), model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total]);
     await dropSyncStage(client, names);
     await client.query('COMMIT');
   } catch (error) {
@@ -447,23 +494,28 @@ async function commitIncremental(client, { names, mapping, model, dimension, oll
   }
 }
 
-async function commitRebuild(client, { names, mapping, model, dimension, ollamaBaseUrl, total }) {
+async function commitRebuild(client, { names, mapping, model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total }) {
   await client.query('BEGIN');
   try {
     await client.query('DROP TABLE IF EXISTS semantic_qa.records');
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.stage)} SET LOGGED`);
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.stage)} RENAME TO records`);
+    await client.query(`ALTER TABLE semantic_qa.records RENAME CONSTRAINT ${quoteIdentifier(`${names.stage}_pkey`)} TO records_pkey`);
     await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
     await createHnswIndex(client);
+    await createSearchIndex(client);
     await client.query(`
       INSERT INTO semantic_qa.corpus
-        (id, source_mapping, embedding_model, embedding_dimension, ollama_base_url, record_count, last_synced_at, updated_at)
-      VALUES ('default', $1::jsonb, $2, $3, $4, $5, now(), now())
+        (id, source_mapping, embedding_model, embedding_dimension, embedding_format_version,
+         retrieval_schema_version, ollama_base_url, record_count, last_synced_at, updated_at)
+      VALUES ('default', $1::jsonb, $2, $3, $4, $5, $6, $7, now(), now())
       ON CONFLICT (id) DO UPDATE SET source_mapping = EXCLUDED.source_mapping,
         embedding_model = EXCLUDED.embedding_model, embedding_dimension = EXCLUDED.embedding_dimension,
+        embedding_format_version = EXCLUDED.embedding_format_version,
+        retrieval_schema_version = EXCLUDED.retrieval_schema_version,
         ollama_base_url = EXCLUDED.ollama_base_url, record_count = EXCLUDED.record_count,
         last_synced_at = now(), updated_at = now()
-    `, [JSON.stringify(mapping), model, dimension, ollamaBaseUrl, total]);
+    `, [JSON.stringify(mapping), model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total]);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
@@ -471,22 +523,72 @@ async function commitRebuild(client, { names, mapping, model, dimension, ollamaB
   }
 }
 
-async function searchIndex(connection, vector, limit) {
+async function searchIndex(connection, vector, queryText, limit) {
   return withPool(connection, async (pool) => {
     const client = await pool.connect();
     try {
       await ensureCoreSchema(client);
       const corpus = await getCorpus(client);
       if (!corpus || !(await recordsTableExists(client))) return { corpus, rows: [] };
-      const result = await client.query(`
-        SELECT source_id AS "sourceId", question, answer, metadata,
-               source_group AS "sourceGroup", source_order AS "sourceOrder",
-               1 - (embedding <=> $1::vector) AS similarity
-        FROM semantic_qa.records
-        ORDER BY embedding <=> $1::vector
-        LIMIT $2
-      `, [toVectorLiteral(vector), limit]);
-      return { corpus, rows: result.rows };
+      const vectorLiteral = toVectorLiteral(vector);
+      const candidateLimit = Math.max(10, Math.min(200, Number(limit) || 60));
+      const hasLexicalIndex = await searchVectorExists(client);
+      const result = hasLexicalIndex
+        ? await client.query(`
+          WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms),
+          dense AS MATERIALIZED (
+            SELECT source_id FROM semantic_qa.records
+            ORDER BY embedding <=> $1::vector LIMIT $3
+          ),
+          lexical AS MATERIALIZED (
+            SELECT r.source_id FROM semantic_qa.records r CROSS JOIN query q
+            WHERE q.terms::text <> '' AND r.search_vector @@ q.terms
+            ORDER BY ts_rank_cd(r.search_vector, q.terms) DESC LIMIT $3
+          ),
+          candidates AS (SELECT source_id FROM dense UNION SELECT source_id FROM lexical)
+          SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+                 r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+                 1 - (r.embedding <=> $1::vector) AS similarity,
+                 ts_rank_cd(r.search_vector, q.terms) AS "lexicalScore"
+          FROM candidates c
+          JOIN semantic_qa.records r USING (source_id)
+          CROSS JOIN query q
+        `, [vectorLiteral, queryText, candidateLimit])
+        : await client.query(`
+          SELECT source_id AS "sourceId", question, answer, metadata,
+                 source_group AS "sourceGroup", source_order AS "sourceOrder",
+                 1 - (embedding <=> $1::vector) AS similarity,
+                 0::real AS "lexicalScore"
+          FROM semantic_qa.records
+          ORDER BY embedding <=> $1::vector
+          LIMIT $2
+        `, [vectorLiteral, candidateLimit]);
+
+      const expandableGroups = [...new Set(result.rows
+        .filter((row) => row.sourceGroup != null && Number(row.metadata?.chunk_count) > 1 && Number(row.metadata?.chunk_count) <= 100)
+        .map((row) => row.sourceGroup))];
+      let siblingRows = [];
+      if (expandableGroups.length) {
+        siblingRows = hasLexicalIndex
+          ? (await client.query(`
+            WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms)
+            SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+                   r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+                   1 - (r.embedding <=> $1::vector) AS similarity,
+                   ts_rank_cd(r.search_vector, q.terms) AS "lexicalScore"
+            FROM semantic_qa.records r CROSS JOIN query q
+            WHERE r.source_group = ANY($3::text[])
+          `, [vectorLiteral, queryText, expandableGroups])).rows
+          : (await client.query(`
+            SELECT source_id AS "sourceId", question, answer, metadata,
+                   source_group AS "sourceGroup", source_order AS "sourceOrder",
+                   1 - (embedding <=> $1::vector) AS similarity,
+                   0::real AS "lexicalScore"
+            FROM semantic_qa.records WHERE source_group = ANY($2::text[])
+          `, [vectorLiteral, expandableGroups])).rows;
+      }
+      const unique = new Map([...result.rows, ...siblingRows].map((row) => [row.sourceId, row]));
+      return { corpus, rows: [...unique.values()], hybrid: hasLexicalIndex };
     } finally {
       client.release();
     }

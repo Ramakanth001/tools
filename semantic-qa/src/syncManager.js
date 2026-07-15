@@ -1,6 +1,11 @@
 const crypto = require('node:crypto');
 const database = require('./database');
-const { buildEmbeddingText, contentHash } = require('./core');
+const {
+  buildDocumentEmbeddingText,
+  contentHash,
+  embeddingFormatForModel,
+  RETRIEVAL_SCHEMA_VERSION,
+} = require('./core');
 const { embedTexts, testOllama } = require('./ollama');
 
 function sanitizeError(error) {
@@ -59,7 +64,10 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       return await embed({
         baseUrl: config.ollamaBaseUrl,
         model: config.model,
-        texts: records.map((record) => buildEmbeddingText(record.question, record.answer)),
+        texts: records.map((record) => buildDocumentEmbeddingText(record.question, record.answer, {
+          model: config.model,
+          formatVersion: config.embeddingFormatVersion,
+        })),
         timeoutMs: 300000,
       });
     } catch (batchError) {
@@ -73,7 +81,10 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
           const [vector] = await embed({
             baseUrl: config.ollamaBaseUrl,
             model: config.model,
-            texts: [buildEmbeddingText(record.question, record.answer)],
+            texts: [buildDocumentEmbeddingText(record.question, record.answer, {
+              model: config.model,
+              formatVersion: config.embeddingFormatVersion,
+            })],
             timeoutMs: 300000,
           });
           recovered.push(vector);
@@ -96,6 +107,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       log(job, `Testing Ollama model ${config.model}...`);
       const modelInfo = await probe({ baseUrl: config.ollamaBaseUrl, model: config.model });
       const dimension = Number(modelInfo.dimension);
+      config.embeddingFormatVersion = embeddingFormatForModel(config.model);
 
       indexPool = db.createPool(config.indexConnection);
       indexClient = await indexPool.connect();
@@ -103,8 +115,12 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       const corpus = await db.getCorpus(indexClient);
       if (!corpus) throw new Error('Index is not initialized. Initialize it from the Index screen first.');
       if (job.mode === 'incremental' &&
-          (corpus.embeddingModel !== config.model || Number(corpus.embeddingDimension) !== dimension)) {
-        throw new Error('Embedding model or dimension changed; run a full rebuild.');
+          (corpus.embeddingModel !== config.model || Number(corpus.embeddingDimension) !== dimension ||
+           corpus.embeddingFormatVersion !== config.embeddingFormatVersion)) {
+        throw new Error('Embedding model, dimension, or embedding format changed; run a full rebuild.');
+      }
+      if (job.mode === 'incremental' && corpus.retrievalSchemaVersion !== RETRIEVAL_SCHEMA_VERSION) {
+        throw new Error('Retrieval index format changed; run a full rebuild.');
       }
 
       await db.createSyncRun(indexClient, job);
@@ -151,6 +167,8 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
         mapping: normalizedMapping,
         model: config.model,
         dimension,
+        formatVersion: config.embeddingFormatVersion,
+        retrievalVersion: RETRIEVAL_SCHEMA_VERSION,
         ollamaBaseUrl: config.ollamaBaseUrl,
         total: job.total,
       };

@@ -221,7 +221,8 @@ function SearchScreen({ runtime, settings, onNavigate }) {
               <div className="qa-answer-head">
                 <div>
                   <span className="badge">#{match.relevanceRank}</span>
-                  <span className="badge">{Number(match.similarity).toFixed(3)}</span>
+                  <span className="badge">Relevance {Number(match.relevanceScore ?? match.similarity).toFixed(3)}</span>
+                  {match.relevanceScore != null ? <span className="badge">Cosine {Number(match.similarity).toFixed(3)}</span> : null}
                 </div>
                 <span className="mono">Record {match.sourceId}</span>
               </div>
@@ -229,7 +230,9 @@ function SearchScreen({ runtime, settings, onNavigate }) {
               <div className="qa-verbatim">{match.answer}</div>
               {match.metadata && Object.keys(match.metadata).length ? (
                 <dl className="qa-metadata">
-                  {Object.entries(match.metadata).map(([key, value]) => <React.Fragment key={key}><dt>{key}</dt><dd>{value == null ? '—' : String(value)}</dd></React.Fragment>)}
+                  {Object.entries(match.metadata)
+                    .filter(([key]) => key !== 'source_context')
+                    .map(([key, value]) => <React.Fragment key={key}><dt>{key}</dt><dd>{value == null ? '—' : String(value)}</dd></React.Fragment>)}
                 </dl>
               ) : null}
               {match.sourceGroup != null || match.sourceOrder != null ? <div className="hint">Source group: {match.sourceGroup ?? '—'} · Source order: {match.sourceOrder == null ? '—' : String(match.sourceOrder)}</div> : null}

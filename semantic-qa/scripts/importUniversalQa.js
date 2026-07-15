@@ -59,17 +59,30 @@ function splitLongPart(value, maxChars) {
   return parts;
 }
 
-function chunkText(value, maxChars = 1800) {
+function trailingOverlap(value, maxChars) {
+  if (!maxChars) return '';
+  const text = String(value || '');
+  if (text.length <= maxChars) return text;
+  const roughStart = text.length - maxChars;
+  const window = text.slice(roughStart);
+  const boundary = window.search(/[\s.!?]\S/);
+  return window.slice(boundary >= 0 ? boundary + 1 : 0).trim();
+}
+
+function chunkText(value, maxChars = 1800, overlapChars = 0) {
   if (!Number.isInteger(maxChars) || maxChars < 200) throw new Error('maxChars must be an integer of at least 200');
   const text = String(value || '').trim();
   if (!text) return [];
 
-  const parts = text.split(/\n{2,}/).flatMap((part) => splitLongPart(part, maxChars));
+  const overlap = Math.max(0, Math.min(Math.floor(maxChars / 4), Number(overlapChars) || 0));
+  const contentLimit = maxChars - overlap - (overlap ? 2 : 0);
+
+  const parts = text.split(/\n{2,}/).flatMap((part) => splitLongPart(part, contentLimit));
   const chunks = [];
   let current = '';
   for (const part of parts) {
     const next = current ? `${current}\n\n${part}` : part;
-    if (next.length <= maxChars) {
+    if (next.length <= contentLimit) {
       current = next;
     } else {
       if (current) chunks.push(current);
@@ -77,7 +90,12 @@ function chunkText(value, maxChars = 1800) {
     }
   }
   if (current) chunks.push(current);
-  return chunks;
+  if (!overlap || chunks.length < 2) return chunks;
+  return chunks.map((chunk, index) => {
+    if (!index) return chunk;
+    const prefix = trailingOverlap(chunks[index - 1], overlap);
+    return prefix ? `${prefix}\n\n${chunk}` : chunk;
+  });
 }
 
 function buildRecords(rows, maxChars = 1800) {
@@ -90,7 +108,8 @@ function buildRecords(rows, maxChars = 1800) {
       rejected.push({ qaId: row.qaId, reason: !question ? 'empty title' : 'empty answer' });
       continue;
     }
-    const chunks = chunkText(answer, maxChars);
+    const overlapChars = Math.min(200, Math.floor(maxChars * 0.12));
+    const chunks = chunkText(answer, maxChars, overlapChars);
     chunks.forEach((chunk, index) => records.push({
       sourceId: chunks.length === 1 ? `qa:${row.qaId}` : `qa:${row.qaId}:${String(index + 1).padStart(3, '0')}`,
       sourceType: 'qa',
@@ -110,7 +129,12 @@ function buildRecords(rows, maxChars = 1800) {
   return { records, rejected };
 }
 
-function buildDiscourseRecords(rows, { englishMaxChars = 3600, otherMaxChars = 1400 } = {}) {
+function buildDiscourseRecords(rows, {
+  englishMaxChars = 3600,
+  otherMaxChars = 1400,
+  englishOverlapChars = 300,
+  otherOverlapChars = 140,
+} = {}) {
   const records = [];
   const rejected = [];
   for (const row of rows) {
@@ -121,7 +145,8 @@ function buildDiscourseRecords(rows, { englishMaxChars = 3600, otherMaxChars = 1
       continue;
     }
     const maxChars = row.masterLanguage === 'ENG' ? englishMaxChars : otherMaxChars;
-    const chunks = chunkText(answer, maxChars);
+    const overlapChars = row.masterLanguage === 'ENG' ? englishOverlapChars : otherOverlapChars;
+    const chunks = chunkText(answer, maxChars, overlapChars);
     chunks.forEach((chunk, index) => records.push({
       sourceId: chunks.length === 1 ? `discourse:${row.dcId}` : `discourse:${row.dcId}:${String(index + 1).padStart(3, '0')}`,
       sourceType: 'discourse',
@@ -191,6 +216,8 @@ async function runImport() {
   const qaMaxChars = Number(process.env.UNIVERSAL_QA_CHUNK_CHARS || process.env.UNIVERSAL_EMBED_CHUNK_CHARS || 1800);
   const discourseEnglishMaxChars = Number(process.env.UNIVERSAL_DISCOURSE_EN_CHUNK_CHARS || 3600);
   const discourseOtherMaxChars = Number(process.env.UNIVERSAL_DISCOURSE_OTHER_CHUNK_CHARS || 1400);
+  const discourseEnglishOverlapChars = Number(process.env.UNIVERSAL_DISCOURSE_EN_OVERLAP_CHARS || 300);
+  const discourseOtherOverlapChars = Number(process.env.UNIVERSAL_DISCOURSE_OTHER_OVERLAP_CHARS || 140);
   const includeDiscourse = process.env.UNIVERSAL_INCLUDE_DISCOURSE !== 'false';
   try {
     const [qaRows] = await source.query(`
@@ -211,6 +238,8 @@ async function runImport() {
     const discourseResult = buildDiscourseRecords(discourseRows, {
       englishMaxChars: discourseEnglishMaxChars,
       otherMaxChars: discourseOtherMaxChars,
+      englishOverlapChars: discourseEnglishOverlapChars,
+      otherOverlapChars: discourseOtherOverlapChars,
     });
     const records = [...qaResult.records, ...discourseResult.records];
     const rejected = [...qaResult.rejected, ...discourseResult.rejected];
@@ -264,6 +293,8 @@ async function runImport() {
       qaMaxChunkChars: qaMaxChars,
       discourseEnglishMaxChunkChars: discourseEnglishMaxChars,
       discourseOtherMaxChunkChars: discourseOtherMaxChars,
+      discourseEnglishOverlapChars,
+      discourseOtherOverlapChars,
       rejected: rejected.length,
     };
   } catch (error) {
