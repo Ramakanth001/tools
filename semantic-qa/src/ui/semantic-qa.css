@@ -1,0 +1,42 @@
+.semantic-qa .qa-stack { display: flex; flex-direction: column; gap: 16px; }
+.semantic-qa .qa-search-card { max-width: 980px; margin: 0 auto; width: 100%; }
+.semantic-qa .qa-question { margin: 16px 0 12px; min-height: 130px; font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.semantic-qa .qa-results { display: grid; gap: 14px; max-width: 1100px; margin: 0 auto; width: 100%; }
+.semantic-qa .qa-answer-head, .semantic-qa .qa-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.semantic-qa .qa-answer-head > div { display: flex; gap: 8px; }
+.semantic-qa .qa-stored-question { margin: 16px 0 10px; color: rgba(238,242,255,.72); font-weight: 750; }
+.semantic-qa .qa-verbatim { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; padding: 16px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
+.semantic-qa .qa-metadata { display: grid; grid-template-columns: minmax(100px, 180px) 1fr; margin: 14px 0; font-size: 12px; }
+.semantic-qa .qa-metadata dt, .semantic-qa .qa-metadata dd { margin: 0; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.semantic-qa .qa-metadata dt { color: var(--muted); font-weight: 800; }
+.semantic-qa .qa-no-match { max-width: 1100px; margin: 0 auto; width: 100%; font-weight: 800; }
+.semantic-qa .qa-connection { display: flex; flex-direction: column; gap: 12px; }
+.semantic-qa .qa-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-top: 16px; }
+.semantic-qa .qa-stat-grid > div { padding: 12px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 5px; }
+.semantic-qa .qa-stat-grid span { color: var(--muted); font-size: 11px; }
+.semantic-qa .qa-stat-grid strong { font-size: 14px; overflow-wrap: anywhere; }
+.semantic-qa .qa-progress { height: 10px; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,.07); margin: 14px 0 8px; }
+.semantic-qa .qa-progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), var(--success)); transition: width .2s ease; }
+.semantic-qa .qa-log { max-height: 260px; overflow: auto; white-space: pre-wrap; color: rgba(238,242,255,.72); background: rgba(0,0,0,.22); padding: 12px; border-radius: 12px; font: 11px/1.5 var(--mono); }
+.semantic-qa .qa-run-list { display: grid; gap: 8px; }
+.semantic-qa .qa-run-list > div { display: grid; grid-template-columns: minmax(220px, 1fr) 100px 100px 110px; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.semantic-qa .qa-onboarding { padding: 22px; }
+.semantic-qa .qa-diagnostics { display: grid; gap: 8px; margin-top: 18px; }
+.semantic-qa .qa-diagnostic-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(255,255,255,.035); }
+.semantic-qa .qa-status-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(148,163,184,.7); box-shadow: 0 0 0 4px rgba(148,163,184,.1); }
+.semantic-qa .qa-status-dot.ready { background: var(--success); box-shadow: 0 0 0 4px rgba(16,185,129,.12); }
+.semantic-qa .qa-status-dot.error { background: var(--danger); box-shadow: 0 0 0 4px rgba(239,68,68,.12); }
+.semantic-qa .qa-status-dot.not_configured { background: var(--warn); box-shadow: 0 0 0 4px rgba(245,158,11,.12); }
+.semantic-qa .qa-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.semantic-qa .qa-step-number { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 50%; background: rgba(124,58,237,.22); color: #c4b5fd; font-weight: 900; margin-bottom: 12px; }
+.semantic-qa .qa-command { white-space: pre-wrap; padding: 12px; border-radius: 10px; background: rgba(0,0,0,.22); color: rgba(238,242,255,.82); font: 11px/1.6 var(--mono); }
+.semantic-qa .qa-empty-state { max-width: 760px; margin: 20px auto; text-align: center; padding: 30px; }
+.semantic-qa .qa-empty-state .toolbar { justify-content: center; margin-top: 18px; }
+@media (max-width: 760px) {
+  .semantic-qa .panel-header, .semantic-qa .qa-answer-head, .semantic-qa .qa-card-title { align-items: flex-start; flex-direction: column; }
+  .semantic-qa .qa-run-list > div { grid-template-columns: 1fr 1fr; }
+  .semantic-qa .field { grid-column: 1 / -1 !important; }
+  .semantic-qa .qa-setup-grid { grid-template-columns: 1fr; }
+  .semantic-qa .qa-diagnostic-row { grid-template-columns: 12px 1fr; }
+  .semantic-qa .qa-diagnostic-row .badge { grid-column: 2; justify-self: start; }
+}
