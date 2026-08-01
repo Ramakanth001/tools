@@ -1,6 +1,7 @@
 import PgBackupTool from '../../pg-backup/src/ui/PgBackupTool.jsx';
 import MysqlTool from '../../mysql-tool/src/ui/MysqlTool.jsx';
 import MysqlPgMigrateTool from '../../mysql-pg-migrate/src/ui/main.jsx';
+import SemanticQaTool from '../../semantic-qa/src/ui/SemanticQaTool.jsx';
 
 export const TOOLS = [
   {
@@ -46,6 +47,21 @@ export const TOOLS = [
       homePath: '/tools/mysql-pg-migrate',
       logsPath: '/tools/mysql-pg-migrate/logs',
       storagePrefix: 'tools.mysql-pg-migrate',
+    },
+  },
+  {
+    id: 'semantic-qa',
+    name: 'semantic-qa',
+    description: 'Grounded semantic retrieval across an existing PostgreSQL Q&A corpus.',
+    path: '/tools/semantic-qa',
+    logsPath: '/tools/semantic-qa/logs',
+    component: SemanticQaTool,
+    runtime: {
+      toolId: 'semantic-qa',
+      apiBasePath: '/api/tools/semantic-qa',
+      homePath: '/tools/semantic-qa',
+      logsPath: '/tools/semantic-qa/logs',
+      storagePrefix: 'tools.semantic-qa',
     },
   },
 ];
