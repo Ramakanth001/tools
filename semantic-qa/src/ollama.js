@@ -33,6 +33,44 @@ async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000) {
   }
 }
 
+function normalizeModelReference(value) {
+  const model = String(value || 'embeddinggemma').trim().toLocaleLowerCase();
+  return model.includes(':') ? model : `${model}:latest`;
+}
+
+async function getModelIdentity({ baseUrl, model, timeoutMs = 30000 }) {
+  const normalizedBaseUrl = normalizeOllamaBaseUrl(baseUrl);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${normalizedBaseUrl}/api/tags`, { signal: controller.signal });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Ollama returned HTTP ${response.status}`);
+    const requested = normalizeModelReference(model);
+    const models = Array.isArray(payload.models) ? payload.models : [];
+    const entry = models.find((candidate) =>
+      [candidate?.name, candidate?.model]
+        .filter(Boolean)
+        .some((value) => normalizeModelReference(value) === requested));
+    if (!entry) throw new Error(`Ollama model ${String(model || 'embeddinggemma')} is not installed`);
+    if (!entry.digest) throw new Error(`Ollama did not report a digest for model ${entry.name || entry.model}`);
+    return {
+      model: String(model || 'embeddinggemma'),
+      resolvedModel: entry.name || entry.model,
+      digest: String(entry.digest),
+      modifiedAt: entry.modified_at || null,
+    };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('Ollama model identity request timed out');
+    if (error instanceof TypeError || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(error?.message || ''))) {
+      throw new Error(`Cannot reach Ollama at ${normalizedBaseUrl}. Install/start Ollama and pull the configured embedding model.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function embedTexts({ baseUrl, model, texts, timeoutMs }) {
   const input = Array.isArray(texts) ? texts : [texts];
   if (!input.length) return [];
@@ -48,8 +86,11 @@ async function embedTexts({ baseUrl, model, texts, timeoutMs }) {
 }
 
 async function testOllama(config) {
-  const [embedding] = await embedTexts({ ...config, texts: ['semantic-qa connectivity test'] });
-  return { ok: true, model: config.model, dimension: embedding.length };
+  const [identity, embeddings] = await Promise.all([
+    getModelIdentity(config),
+    embedTexts({ ...config, texts: ['semantic-qa connectivity test'] }),
+  ]);
+  return { ok: true, ...identity, dimension: embeddings[0].length };
 }
 
-module.exports = { normalizeOllamaBaseUrl, embedTexts, testOllama };
+module.exports = { normalizeOllamaBaseUrl, normalizeModelReference, getModelIdentity, embedTexts, testOllama };
