@@ -9,6 +9,7 @@
     "start": "node src/server.js",
     "import:universal": "node scripts/importUniversalQa.js",
     "eval:universal": "node scripts/evaluateRetrieval.js",
+    "eval:corpus": "node scripts/evaluateCorpusQueries.js",
     "test": "node --test test/*.test.js",
     "build": "node ../src/runPackageBin.js vite build --config vite.config.js",
     "preview": "node ../src/runPackageBin.js vite preview --config vite.config.js --port 5176",

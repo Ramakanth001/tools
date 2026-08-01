@@ -2,18 +2,92 @@
   {
     "question": "Who is Datta Swami?",
     "relevantSourceGroups": ["discourse:737", "discourse:891", "discourse:702", "discourse:1322", "discourse:738"],
-    "minimumRelevantInTop": 3
+    "relevantSourceIds": ["discourse:737:003", "discourse:737:004", "discourse:738:002", "discourse:891:001", "discourse:702:001", "discourse:1322:001"],
+    "minimumRelevantInTop": 2,
+    "requireTop1": true
   },
   {
     "question": "Where can I meet Shri Datta Swami?",
-    "relevantSourceGroups": ["discourse:2854", "qa:320"]
+    "relevantSourceGroups": ["discourse:2854", "qa:320"],
+    "relevantSourceIds": ["discourse:2854", "qa:320"],
+    "requireTop1": true
   },
   {
     "question": "What is the real nature of Datta?",
-    "relevantSourceGroups": ["qa:49"]
+    "relevantSourceGroups": ["qa:49"],
+    "relevantSourceIds": ["qa:49:001"],
+    "requireTop1": true
   },
   {
     "question": "What is the difference between Lord Datta and Lord Dattatreya?",
-    "relevantSourceGroups": ["discourse:2068"]
+    "relevantSourceGroups": ["discourse:2068"],
+    "relevantSourceIds": ["discourse:2068"],
+    "requireTop1": true
+  },
+  {
+    "question": "How can I stop watching pornography?",
+    "relevantSourceGroups": ["qa:396", "discourse:4531"],
+    "relevantSourceIds": ["qa:396", "discourse:4531"],
+    "requireTop1": true
+  },
+  {
+    "question": "Why do my prayers go unanswered?",
+    "relevantSourceGroups": ["qa:159", "discourse:3463", "discourse:4513"]
+  },
+  {
+    "question": "Is the world real or an illusion?",
+    "relevantSourceGroups": ["qa:60", "discourse:2496"]
+  },
+  {
+    "question": "How should I deal with anxiety about having a child?",
+    "relevantSourceGroups": ["qa:208"],
+    "relevantSourceIds": ["qa:208:001", "qa:208:002"],
+    "requireTop1": true
+  },
+  {
+    "question": "How can I serve Swami?",
+    "relevantSourceGroups": ["qa:323"],
+    "relevantSourceIds": ["qa:323"]
+  },
+  {
+    "question": "Question on test conduted by Lord Datta.",
+    "relevantSourceGroups": ["qa:421"],
+    "relevantSourceIds": ["qa:421"]
+  },
+  {
+    "question": "How to get direction in my life?",
+    "relevantSourceGroups": ["qa:430"],
+    "relevantSourceIds": ["qa:430"]
+  },
+  {
+    "question": "Question on rigidity",
+    "relevantSourceGroups": ["qa:434"],
+    "relevantSourceIds": ["qa:434"]
+  },
+  {
+    "question": "should we use oil based lamp?",
+    "relevantSourceGroups": ["discourse:1841"],
+    "relevantSourceIds": ["discourse:1841"],
+    "requireTop1": true
+  },
+  {
+    "question": "What is the capital of France?",
+    "expectStrongMatch": false
+  },
+  {
+    "question": "Should I use an oil lamp to heat my house?",
+    "expectStrongMatch": false
+  },
+  {
+    "question": "How do I bake a chocolate cake?",
+    "expectStrongMatch": false
+  },
+  {
+    "question": "Who won the 2026 FIFA World Cup?",
+    "expectStrongMatch": false
+  },
+  {
+    "question": "asdf qwer zxcv",
+    "expectStrongMatch": false
   }
 ]

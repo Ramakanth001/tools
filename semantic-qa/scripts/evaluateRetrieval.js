@@ -22,7 +22,7 @@ async function search(question) {
       ollamaBaseUrl: process.env.SEMANTIC_QA_EVAL_OLLAMA || 'http://127.0.0.1:11434',
       question,
       topK,
-      threshold: Number(process.env.SEMANTIC_QA_EVAL_THRESHOLD || 0.50),
+      threshold: Number(process.env.SEMANTIC_QA_EVAL_THRESHOLD || 0.49),
     }),
   });
   const payload = await response.json();
@@ -35,22 +35,61 @@ async function run() {
   for (const entry of cases) {
     const payload = await search(entry.question);
     const groups = payload.matches.map((match) => match.sourceGroup || match.sourceId);
-    const rank = groups.findIndex((group) => entry.relevantSourceGroups.includes(group)) + 1;
-    const relevantInTop = groups.filter((group) => entry.relevantSourceGroups.includes(group)).length;
-    const minimumRelevantInTop = Number(entry.minimumRelevantInTop || 1);
+    const sourceIds = payload.matches.map((match) => match.sourceId);
+    const relevantGroups = entry.relevantSourceGroups || [];
+    const relevantSourceIds = entry.relevantSourceIds || [];
+    const rank = relevantGroups.length
+      ? groups.findIndex((group) => relevantGroups.includes(group)) + 1
+      : 0;
+    const sourceIdRank = relevantSourceIds.length
+      ? sourceIds.findIndex((sourceId) => relevantSourceIds.includes(sourceId)) + 1
+      : 0;
+    const relevantInTop = groups.filter((group) => relevantGroups.includes(group)).length;
+    const minimumRelevantInTop = Number(entry.minimumRelevantInTop || (relevantGroups.length ? 1 : 0));
+    const retrievalPass = !relevantGroups.length ||
+      (rank > 0 && relevantInTop >= minimumRelevantInTop && (!entry.requireTop1 || rank === 1));
+    const answerPass = !relevantSourceIds.length || sourceIdRank > 0;
+    const confidencePass = typeof entry.expectStrongMatch !== 'boolean' ||
+      payload.strongMatch === entry.expectStrongMatch;
     results.push({
       question: entry.question,
-      pass: rank > 0 && relevantInTop >= minimumRelevantInTop,
+      pass: retrievalPass && answerPass && confidencePass,
       rank: rank || null,
+      sourceIdRank: sourceIdRank || null,
       relevantInTop,
       minimumRelevantInTop,
+      strongMatch: payload.strongMatch,
+      acceptedSourceId: payload.acceptedMatch?.sourceId || null,
       topGroups: groups,
+      topSourceIds: sourceIds,
     });
   }
-  const recallAtK = results.filter((result) => result.pass).length / results.length;
-  const meanReciprocalRank = results.reduce((sum, result) => sum + (result.rank ? 1 / result.rank : 0), 0) / results.length;
-  process.stdout.write(`${JSON.stringify({ topK, recallAtK, meanReciprocalRank, results }, null, 2)}\n`);
-  if (recallAtK < 1) process.exitCode = 1;
+  const positiveResults = results.filter((_result, index) => (cases[index].relevantSourceGroups || []).length);
+  const negativeResults = results.filter((_result, index) => cases[index].expectStrongMatch === false);
+  const recallAtK = positiveResults.length
+    ? positiveResults.filter((result) => result.rank).length / positiveResults.length
+    : 1;
+  const top1Accuracy = positiveResults.length
+    ? positiveResults.filter((result) => result.rank === 1).length / positiveResults.length
+    : 1;
+  const meanReciprocalRank = positiveResults.length
+    ? positiveResults.reduce((sum, result) => sum + (result.rank ? 1 / result.rank : 0), 0) / positiveResults.length
+    : 1;
+  const falseAcceptRate = negativeResults.length
+    ? negativeResults.filter((result) => result.strongMatch).length / negativeResults.length
+    : 0;
+  const passed = results.filter((result) => result.pass).length;
+  process.stdout.write(`${JSON.stringify({
+    topK,
+    passed,
+    total: results.length,
+    recallAtK,
+    top1Accuracy,
+    meanReciprocalRank,
+    falseAcceptRate,
+    results,
+  }, null, 2)}\n`);
+  if (passed !== results.length) process.exitCode = 1;
 }
 
 run().catch((error) => {
