@@ -1,6 +1,6 @@
 # semantic-qa
 
-`semantic-qa` is a retrieval-only question-answer search tool. It embeds an existing PostgreSQL Q&A corpus with a local Ollama embedding model, stores the vectors and an exact text snapshot in a separate pgvector database, and returns matching stored answers without generating or rewriting them.
+`semantic-qa` is a retrieval-first question-answer search tool. It embeds an existing PostgreSQL Q&A corpus with a local Ollama embedding model, stores the vectors and an exact text snapshot in a separate pgvector database, and can return either the best stored answer or a short semantic evidence summary made only from verbatim source excerpts.
 
 The tool includes a 20-record sample corpus and local-demo preset. It still requires running PostgreSQL and Ollama services. The **Setup** screen checks each dependency and shows what is missing.
 
@@ -17,10 +17,12 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 - Atomic full rebuilds and content-hash-based incremental synchronization
 - Deletion reconciliation after a successful source scan
 - Verbatim stored answers with source IDs and metadata
+- Meaning-based evidence pooling across as many as 15 independently relevant records
+- Grounded extractive summaries with up to three diverse, cited source passages
 - Configurable result count and clear-match threshold
 - Standalone and shared-workspace operation
 
-There is no chat-generation step. Ollama is used only to generate vectors.
+There is no chat-generation step. Ollama is used only to generate vectors. Summary text is never invented or rewritten; it is assembled from exact substrings of accepted source answers.
 
 ## Prerequisites
 
@@ -138,7 +140,7 @@ The sample mapping is:
 | Unique ID | `id` |
 | Question / answer | `question` / `answer` |
 | Metadata | `category`, `source_name` |
-| Group / source order | `category` / `source_order` |
+| Document group / chunk order | unused |
 
 In the UI, open **Setup** and click **Load sample demo** to apply all of these values.
 
@@ -197,7 +199,7 @@ npm --prefix ./semantic-qa run import:universal
 
 The optional environment variables are `UNIVERSAL_MYSQL_HOST`, `UNIVERSAL_MYSQL_PORT`, `UNIVERSAL_MYSQL_USER`, `UNIVERSAL_MYSQL_PASSWORD`, `UNIVERSAL_MYSQL_DATABASE`, `UNIVERSAL_PG_HOST`, `UNIVERSAL_PG_PORT`, `UNIVERSAL_PG_USER`, `UNIVERSAL_PG_PASSWORD`, `UNIVERSAL_PG_DATABASE`, `UNIVERSAL_QA_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_OVERLAP_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_OVERLAP_CHARS`, and `UNIVERSAL_INCLUDE_DISCOURSE`.
 
-In the UI, open **Setup**, click **Load universal Q&A**, and run diagnostics. The preset includes the correct source/index connections, mapping, and a corpus-calibrated `0.50` clear-match threshold. After importing changed MySQL data, rerun the projection and use **Incremental sync**.
+In the UI, open **Setup**, click **Load universal Q&A**, and run diagnostics. The preset includes the correct source/index connections, mapping, and a corpus-calibrated `0.49` clear-match threshold. After importing changed MySQL data, rerun the projection and use **Incremental sync**.
 
 ## Run the Tool
 
@@ -237,7 +239,7 @@ Open `http://localhost:5173/tools/semantic-qa`.
 3. Open **Settings**.
 4. Enter the source PostgreSQL connection and click **Test and discover catalog**.
 5. Select the source schema/table and map the unique ID, question, and answer columns.
-6. Optionally select metadata, source group, and source-order columns.
+6. Optionally select metadata. Map document group and chunk order only when several rows are ordered chunks of one original document; never use a category or topic as the group.
 7. Enter the separate index PostgreSQL connection and click **Test index database**.
 8. Open **Index** and click **Initialize**.
 9. Click **Full rebuild** for the first corpus load.
@@ -249,9 +251,10 @@ After a retrieval change or full rebuild, run the checked-in relevance regressio
 
 ```bash
 npm --prefix ./semantic-qa run eval:universal
+npm --prefix ./semantic-qa run eval:corpus
 ```
 
-It reports Recall@5, mean reciprocal rank, and the returned source groups for each reviewed question. Add representative production questions to `semantic-qa/eval/relevance-cases.json`; a relevance threshold alone is not a substitute for this evaluation set.
+The reviewed suite reports source-group and source-record ranks, Recall@5, top-one accuracy, mean reciprocal rank, and the false-accept rate for unanswerable questions. The broader corpus suite replays every available structured-Q&A `source_context` against its own source group and gates top-one recall, top-five recall, and confident wrong answers. Add representative production questions and expected answer records to `semantic-qa/eval/relevance-cases.json`; a relevance threshold alone is not a substitute for these evaluations.
 
 ## Connection Settings
 
@@ -270,6 +273,9 @@ With EmbeddingGemma, each source record is embedded using the model's asymmetric
 
 ```text
 title: <stored question> | text: <stored answer>
+
+Source context:
+<optional detailed question or summary>
 ```
 
 The user question is embedded as:
@@ -278,9 +284,13 @@ The user question is embedded as:
 task: question answering | query: <user question>
 ```
 
-Search retrieves a wider candidate set from both HNSW cosine search and PostgreSQL full-text search. A deterministic reranker combines semantic similarity, lexical/entity coverage, question intent, document position, and source context. It then chooses the best answering chunk per source group and returns five distinct sources by default. No answer-generation model is involved.
+Retrieval v3 oversamples both HNSW cosine and PostgreSQL full-text candidates, raises HNSW search breadth to match, and diversifies candidates by real chunked document before reranking. Full-text terms use broad OR recall, so one spelling or tokenization mismatch cannot discard an otherwise exact detailed question. A deterministic reranker combines semantic similarity, lexical coverage, source context, weak generic intent signals, and a small structured-Q&A prior. It chooses the genuinely highest-scoring chunk from each explicitly chunked document; arbitrary categories are never collapsed. No answer-generation model is involved.
 
-The default clear-match threshold is `0.60`; the universal preset uses `0.50`. Final ordering uses the combined relevance score. Clear-match status accepts either a sufficient relevance score or cosine score, preserving strong semantic-only matches; both values are returned for diagnostics.
+The default clear-match threshold is `0.60`; the universal preset uses `0.49`. Final ordering and clear-match status use only the combined relevance score. Raw cosine is diagnostic and can no longer override a weak reranked score. The API exposes at most one `acceptedMatch`; the UI presents only that record as the best answer.
+
+When **Semantic evidence summary** is enabled, search internally considers up to 15 ranked records independently. A record may enter `relevantMatches` only when it passes the same clear-match threshold and a dense-semantic floor. Only those accepted answers are split into bounded Unicode-aware passages. The passages are embedded again and ranked by cosine meaning similarity to the question; lexical scores cannot admit a summary line. A diversity pass selects up to three excerpts, preferring different source records and suppressing repeated text.
+
+Every returned summary excerpt is checked as an exact substring of its cited stored answer. A weak neighbor, question, metadata value, or source context can never become summary prose. If no passage passes semantic admission, the normal accepted stored answer remains available without a summary.
 
 When no result meets the threshold, the response begins with:
 
@@ -288,7 +298,9 @@ When no result meets the threshold, the response begins with:
 I could not find a clear answer in the existing data.
 ```
 
-The closest records are still returned. Answer text is rendered as plain text with original whitespace; it is never evaluated as HTML or passed through a generative chat model.
+The closest records are still returned for diagnostics, but the UI keeps them in a collapsed, inspection-only section rather than presenting them as answers. Answer text is rendered as plain text with original whitespace; it is never evaluated as HTML or passed through a generative chat model.
+
+The index stores the immutable Ollama model digest together with the embedding and retrieval format versions. Search is blocked with a full-rebuild instruction if the model tag now resolves to different weights or if application retrieval formats changed. This prevents queries from being compared against an incompatible vector space.
 
 ## API
 
@@ -310,7 +322,7 @@ Shared-host base path: `/api/tools/semantic-qa`
 | `GET` | `/sync/:jobId` | Read an in-memory job status |
 | `GET` | `/sync/:jobId/events` | Stream job progress with SSE |
 | `POST` | `/sync/:jobId/cancel` | Request cancellation |
-| `POST` | `/search` | Embed a question and return matching source records |
+| `POST` | `/search` | Embed a question, retrieve source records, and optionally build a grounded semantic evidence summary |
 
 All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection.
 
@@ -326,7 +338,7 @@ All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection
 | `permission denied to create extension/schema` | Use an index account with setup privileges or have an administrator enable pgvector and create the schema. |
 | `Source ID column must be unique` | Select a real unique/primary-key column or expose a database view with a stable unique ID. |
 | Empty question/answer errors | Fix the source rows; incomplete records are not silently skipped. |
-| Model or dimension changed | Select the intended model and run **Full rebuild**. |
+| Model, model digest, dimension, or retrieval format changed | Select the intended model and run **Full rebuild**. Search intentionally remains blocked until the compatible rebuild completes. |
 | Search always reports no clear answer | Confirm the index contains records, then calibrate the relevance threshold using representative questions. |
 | Buttons are disabled on Index | Complete the source connection, index connection, and required corpus mapping first. |
 

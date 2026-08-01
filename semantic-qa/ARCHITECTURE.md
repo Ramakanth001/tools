@@ -33,7 +33,7 @@ EmbeddingGemma is already trained. This application does not fine-tune it, updat
 | Live vector records after the retrieval-v2 rebuild | 19,777 |
 | Original active records | 419 Q&As and 5,591 discourses |
 | Languages in the imported corpus | English, Malayalam, and Telugu |
-| Universal-corpus match threshold | 0.50 |
+| Universal-corpus match threshold | 0.49 |
 
 The current local `ollama show embeddinggemma` output reports a 307.58-million-parameter Gemma architecture, BF16 quantization, a 2,048-token context, and 768-dimensional embeddings. These details belong to the installed model tag and could change if that tag is replaced later.
 
@@ -215,6 +215,9 @@ During indexing with EmbeddingGemma, the tool embeds this exact structure:
 
 ```text
 title: <stored question or title> | text: <stored answer chunk>
+
+Source context:
+<optional detailed question or summary>
 ```
 
 During search, it embeds:
@@ -223,7 +226,7 @@ During search, it embeds:
 task: question answering | query: <new user question>
 ```
 
-The index stores an embedding-format version alongside the model and dimension. Searches use the format recorded with the live index, allowing the previous index to remain searchable while a new format is rebuilt. An incremental sync is rejected when the format changes.
+The index stores embedding- and retrieval-format versions alongside the model and dimension. Search is rejected with a full-rebuild instruction when either stored format is older than the running application. An incremental sync is also rejected when the format changes, so vectors created from different document inputs can never be mixed.
 
 ### The same model must be used on both sides
 
@@ -232,10 +235,11 @@ Vectors made by different models do not share a reliable coordinate system. Even
 For that reason, the index stores:
 
 - embedding model name;
+- immutable model digest reported by Ollama;
 - embedding dimension;
 - Ollama URL used for the corpus.
 
-If the model or dimension changes, the tool requires a full rebuild before search is allowed.
+If the model tag resolves to different weights—even with the same name and dimension—or if the dimension or embedding format changes, the tool requires a full rebuild before search is allowed.
 
 ## 7. Training vs. Indexing
 
@@ -344,7 +348,7 @@ ORDER BY embedding <=> $query_vector
 LIMIT $top_k
 ```
 
-The universal corpus uses a clear-match threshold of `0.50`. The smaller sample/default configuration uses `0.60`. Retrieval v2 applies this threshold to the combined relevance score, not directly to cosine similarity. It must be calibrated with representative questions after any model, chunking, or ranking change.
+The universal corpus uses a clear-match threshold of `0.49`. The smaller sample/default configuration uses `0.60`. Retrieval v3 applies this threshold only to the final combined relevance score, never to raw cosine similarity. It must be calibrated with representative questions after any model, chunking, or ranking change.
 
 If the best result is below the threshold, the application returns exactly:
 
@@ -352,7 +356,7 @@ If the best result is below the threshold, the application returns exactly:
 I could not find a clear answer in the existing data.
 ```
 
-It still returns the closest records so the user can inspect them. The threshold controls the message; it does not remove the nearest results.
+It still returns the closest records so the user can inspect them, but the UI keeps those below-threshold neighbors in a collapsed, inspection-only panel. Only the single `acceptedMatch` can be presented as the best answer.
 
 ## 10. What HNSW Is
 
@@ -405,7 +409,7 @@ Costs:
 - index creation takes time;
 - the graph consumes additional disk and memory;
 - results are approximate rather than a guaranteed exhaustive comparison;
-- build/query quality and speed can be tuned with HNSW parameters, though this tool currently uses pgvector defaults.
+- build/query quality and speed can be tuned with HNSW parameters. Retrieval v3 raises `hnsw.ef_search` to match its bounded oversampled pool and enables strict iterative scanning on pgvector 0.8 or newer.
 
 At the current 19,777-record scale, exact scanning would still be possible, but HNSW provides a better path as the corpus grows and keeps vector retrieval inside PostgreSQL.
 
@@ -494,30 +498,41 @@ sequenceDiagram
 
     User->>UI: Enter one question
     UI->>API: POST /search
-    API->>PG: Read live corpus model/dimension
+    API->>PG: Read live corpus model/dimension/digest/formats
+    API->>Ollama: Verify configured model digest
     API->>Ollama: Embed task-formatted user question
     Ollama-->>API: Query vector(768)
     API->>PG: HNSW candidates + GIN full-text candidates
     PG-->>API: Candidate chunks, siblings, metadata, scores
-    API->>API: Intent/entity rerank and group deduplication
-    API-->>UI: Grounded matches only
+    API->>API: Hybrid rerank and explicit chunk deduplication
+    API->>API: Independently admit up to 15 relevant records
+    API->>Ollama: Embed bounded answer passages
+    Ollama-->>API: Passage vectors
+    API->>API: Select diverse verbatim evidence by semantic cosine
+    API-->>UI: Grounded evidence summary, one accepted answer, and inspection-only neighbors
 ```
 
 Step by step:
 
-1. The API reads the model and dimension recorded with the live corpus.
-2. Ollama embeds the new question using the query format recorded with that model and live corpus.
-3. The API rejects the query if the returned dimension differs from the indexed dimension.
-4. pgvector returns up to 60 HNSW candidates, while PostgreSQL's GIN index returns full-text candidates for the significant query terms.
-5. For chunked candidate documents, the API also loads their sibling chunks. This allows a strong document-title match to lead to the passage that actually answers the question.
-6. Deterministic reranking combines cosine similarity, full-text rank, entity coverage, question intent, source context, and a bounded opening-chunk prior.
-7. Candidate chunks are deduplicated by source group; the best answering chunk represents each original Q&A or discourse.
-8. The best combined relevance score is compared with the configured threshold.
-9. The API returns stored question, verbatim answer, metadata, source ordering, cosine similarity, combined relevance score, and relevance rank.
+1. The API reads the model name, immutable digest, dimension, and format versions recorded with the live corpus.
+2. It rejects stale formats or a configured Ollama model whose current digest differs from the indexed digest.
+3. Ollama embeds the new question using the query format recorded with that model and live corpus.
+4. The API rejects the query if the returned dimension differs from the indexed dimension.
+5. pgvector and PostgreSQL full-text search each oversample a bounded raw pool. HNSW breadth matches that pool, and broad OR lexical terms prevent a single token mismatch from eliminating a candidate.
+6. Each raw pool is diversified by original document only when metadata explicitly identifies multiple chunks. Ungrouped records and category labels remain independent.
+7. For the highest-priority chunked candidate documents, the API loads a bounded set of sibling chunks so it can select the passage that actually answers the question.
+8. Deterministic reranking combines cosine similarity, full-text rank, query coverage, exact detailed-question context, weak generic intent/position signals, and a small structured-Q&A prior.
+9. Explicit document chunks are deduplicated by source group; the genuinely highest-scoring passage retains its own score and represents that document.
+10. The top final relevance score is compared with the configured threshold. Raw cosine cannot override it.
+11. The API returns one accepted match when the threshold passes plus nearest records for diagnostics.
+12. If semantic summary mode is enabled, the same threshold is applied independently to an internal pool of up to 15 records, with an additional dense-similarity floor. Inspection-only neighbors cannot enter the pool.
+13. Only accepted answers are split into bounded Unicode-aware passages and embedded again. Passage admission and ordering use embedding cosine rather than word overlap.
+14. A diversity pass selects up to three exact source excerpts, checks every excerpt against its stored answer, and returns source IDs with each line.
+15. The UI presents the grounded summary first, retains the primary stored answer, and keeps all unused neighbors in the collapsed inspection-only panel.
 
-There is no chat-model call after retrieval. The application does not merge chunks, explain the result, rewrite text, or fill gaps.
+There is no chat-model call after retrieval. The application pools and orders exact source passages, but it does not explain them, rewrite text, add transitions, resolve conflicts, or fill gaps.
 
-Each question is independent. The tool has no conversational memory, follow-up interpretation, generative query expansion, or generated answer step.
+Each question is independent. The tool has no conversational memory, follow-up interpretation, generative query expansion, or generated answer step. Corpus text that looks like an instruction is inert because it is never executed as a prompt.
 
 ## 14. Multilingual Handling
 
@@ -548,14 +563,15 @@ These are four separate concepts:
 
 - **Similarity** is the numeric cosine score from pgvector.
 - **Lexical score** is PostgreSQL's full-text rank for the significant query terms.
-- **Relevance score** is the deterministic hybrid score used for final ordering. Clear-match thresholding accepts either a sufficient hybrid score or a sufficient cosine score, so a strong semantic-only match is not rejected merely because it shares few literal terms.
-- **Relevance rank** is the final position after hybrid reranking and source-group deduplication.
+- **Relevance score** is the deterministic hybrid score used for both final ordering and clear-match thresholding. Cosine remains visible for diagnostics but cannot independently accept a result.
+- **Relevance rank** is the final position after hybrid reranking and explicit document-chunk deduplication.
+- **Passage meaning** is a second cosine score computed between the question vector and a short answer excerpt. It determines which lines are extracted after their parent records independently pass the relevance gate; lexical overlap does not admit lines.
 
-For example, chunk 9 might make a discourse a semantic candidate because its title matches strongly. Retrieval then inspects the discourse's sibling chunks and may select chunk 1 if its text better answers a “who” question. Only one best chunk per source group is returned, preventing one long discourse from filling all five result slots.
+For example, chunk 9 might make a discourse a semantic candidate because its text matches strongly. Retrieval then inspects bounded siblings and returns whichever chunk has the highest passage score. It never forces chunk 1 or copies a better sibling's score onto an inferior opening. A `source_group` is treated as one document only when explicit `chunk_count > 1` metadata confirms that relationship; categories remain separate records.
 
 The threshold is a product decision, not a mathematical truth. It should be calibrated separately when the model, chunking strategy, corpus, or languages change.
 
-The executable regression set in `eval/relevance-cases.json` records reviewed question-to-source-group judgments. `npm run eval:universal` measures Recall@5 and mean reciprocal rank against the live API. This catches ranking regressions that database health checks and embedding-dimension tests cannot detect.
+The executable regression set in `eval/relevance-cases.json` records reviewed question-to-source-group and question-to-answer-record judgments plus unanswerable negatives. `npm run eval:universal` measures Recall@5, top-one accuracy, mean reciprocal rank, answer-record rank, and false accepts against the live API. `npm run eval:corpus` also replays every structured-Q&A detailed source question and gates broad top-one/top-five recall plus confident wrong answers. Together they catch wrong-sibling, candidate-recall, and overconfidence regressions that database health checks and embedding-dimension tests cannot detect.
 
 ## 16. Safety and Data Integrity
 
@@ -582,15 +598,18 @@ The executable regression set in `eval/relevance-cases.json` records reviewed qu
 - There is no generative answer completion.
 - A weak match produces the exact no-match message and closest source records.
 - Missing information is not invented.
+- Summary evidence is restricted to independently threshold-passing records.
+- Every summary line must be an exact substring of its cited stored answer.
+- Below-threshold neighbors remain inspection-only and are never embedded for summary selection.
 
 ## 17. API and UI Responsibilities
 
 ### UI screens
 
 - **Setup:** diagnostics and local presets.
-- **Settings:** source/index connections, Ollama model, field mapping, result count, and threshold.
+- **Settings:** source/index connections, Ollama model, field mapping, result count, threshold, and semantic-summary limits.
 - **Index:** initialization, status, full rebuild, incremental sync, progress, cancellation, and errors.
-- **Search:** independent semantic queries and plain-text answer cards.
+- **Search:** independent semantic queries, grounded extractive summaries, and plain-text source cards.
 
 ### Main API operations
 
@@ -603,7 +622,7 @@ The executable regression set in `eval/relevance-cases.json` records reviewed qu
 | `/sync` | Start full or incremental synchronization |
 | `/sync/:jobId/events` | Stream progress using server-sent events |
 | `/sync/:jobId/cancel` | Request safe cancellation |
-| `/search` | Embed one question and retrieve stored matches |
+| `/search` | Embed one question, retrieve stored matches, and optionally select grounded evidence excerpts |
 
 Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-qa`.
 
@@ -613,13 +632,15 @@ Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-
 | --- | --- |
 | `src/server.js` | Standalone Express server and static UI hosting |
 | `src/registerRoutes.js` | Request schemas and public API routes |
-| `src/ollama.js` | Local Ollama URL validation and `/api/embed` calls |
-| `src/core.js` | Model-aware embedding formats, hashing, intent/entity scoring, group reranking, threshold response |
+| `src/ollama.js` | Local Ollama URL validation, immutable model identity, and `/api/embed` calls |
+| `src/core.js` | Model-aware embedding formats, hashing, hybrid scoring, explicit chunk reranking, threshold response |
+| `src/semanticSummary.js` | Relevant-record admission, Unicode passage segmentation, dense evidence scoring, diversity, and exact-substring grounding |
 | `src/database.js` | PostgreSQL discovery, snapshots, staging, commits, HNSW/GIN hybrid candidate search |
 | `src/syncManager.js` | Job lifecycle, batching, cancellation, SSE, full/incremental orchestration |
 | `scripts/importUniversalQa.js` | MySQL Q&A/discourse cleanup, chunking, and PostgreSQL source projection |
-| `scripts/evaluateRetrieval.js` | Live Recall@K and mean-reciprocal-rank regression runner |
-| `eval/relevance-cases.json` | Human-reviewed question-to-source-group relevance judgments |
+| `scripts/evaluateRetrieval.js` | Live retrieval, answer-record, confidence, and false-accept regression runner |
+| `scripts/evaluateCorpusQueries.js` | Broad live replay of structured-Q&A detailed source questions |
+| `eval/relevance-cases.json` | Reviewed positive answer judgments and unanswerable negative cases |
 | `src/ui/SemanticQaTool.jsx` | Setup, Search, Index, and Settings screens |
 | `src/ui/settings.mjs` | Defaults, presets, and secret-safe persistence |
 
