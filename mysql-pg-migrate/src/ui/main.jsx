@@ -2077,6 +2077,7 @@ function defaultTransformForType(type, column = {}) {
   if (type === 'concat') return { type, config: { fields: [], delimiter: ' ' } };
   if (type === 'coalesce') return { type, config: { fields: [] } };
   if (type === 'conditional') return { type, config: { branches: [], otherwise: { type: 'direct', config: {} } } };
+  if (type === 'mojibake_repair') return { type, config: { mode: 'auto' } };
   return { type, config: {} };
 }
 
@@ -2087,7 +2088,7 @@ function TransformScreen() {
   const targetCatalog = resolveCatalog(currentProject?.targetCatalog, null);
   const sourceTables = catalogTables(sourceCatalog);
   const enabledMappings = (currentProject?.tableMappings || []).filter((mapping) => mapping.enabled !== false);
-  const transformTypes = ['direct', 'string', 'number', 'boolean', 'json', 'date', 'datetime', 'constant', 'null', 'template', 'lookup', 'lookup_table', 'expression', 'concat', 'coalesce', 'conditional'];
+  const transformTypes = ['direct', 'string', 'number', 'boolean', 'json', 'date', 'datetime', 'constant', 'null', 'template', 'lookup', 'lookup_table', 'expression', 'concat', 'coalesce', 'conditional', 'mojibake_repair'];
 
   function markTransformDirty() {
     setMappingDirty(true);
@@ -2290,6 +2291,22 @@ function TransformScreen() {
             if (parsed) patchColumn(tableIndex, colIndex, { transform: { type: 'conditional', config: parsed } });
           }}
         />
+      );
+    }
+
+    if (type === 'mojibake_repair') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+          <div className="field">
+            <div className="field-label">Mode</div>
+            <select value={config.mode || 'auto'} onChange={(e) => patchTransformConfig(tableIndex, colIndex, { mode: e.target.value })}>
+              <option value="auto">auto — detect and repair</option>
+              <option value="force">force — always repair</option>
+              <option value="detect_only">detect only — flag but don't repair</option>
+            </select>
+          </div>
+          <div className="hint">Detects and repairs Unicode mojibake encoding mismatches (Telugu, Sanskrit, IAST, UTF-8/Latin-1, Windows-1252)</div>
+        </div>
       );
     }
 

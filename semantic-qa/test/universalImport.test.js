@@ -9,6 +9,11 @@ test('legacy HTML becomes readable plain text without rewriting words', () => {
   );
 });
 
+test('repairs corrupt Telugu Mojibake in HTML discourses', () => {
+  const result = htmlToPlainText('à°®à°°à°šà°¿à°ªà±‹à°•à±à°®à± à°¦à°¤à±à°¨à°¿ à°®à°‚à°šà°¿à°®à°¾à°Ÿ');
+  assert.ok(result.includes('మరచిపో'), 'Should repair Telugu Mojibake into clean script');
+});
+
 test('long answers become ordered chunks under the configured character limit', () => {
   const chunks = chunkText(`${'first '.repeat(70)}\n\n${'second '.repeat(70)}`, 300);
   assert.ok(chunks.length > 2);
