@@ -207,6 +207,7 @@ async function ensureCoreSchema(client) {
       id text PRIMARY KEY,
       source_mapping jsonb NOT NULL DEFAULT '{}'::jsonb,
       embedding_model text NOT NULL,
+      embedding_model_digest text,
       embedding_dimension integer NOT NULL,
       ollama_base_url text NOT NULL,
       record_count bigint NOT NULL DEFAULT 0,
@@ -234,6 +235,10 @@ async function ensureCoreSchema(client) {
   await client.query(`
     ALTER TABLE semantic_qa.corpus
     ADD COLUMN IF NOT EXISTS retrieval_schema_version text NOT NULL DEFAULT 'dense-v1'
+  `);
+  await client.query(`
+    ALTER TABLE semantic_qa.corpus
+    ADD COLUMN IF NOT EXISTS embedding_model_digest text
   `);
 }
 
@@ -294,6 +299,7 @@ async function createSearchIndex(client) {
 async function getCorpus(client) {
   const result = await client.query(`
     SELECT id, source_mapping AS "sourceMapping", embedding_model AS "embeddingModel",
+           embedding_model_digest AS "embeddingModelDigest",
            embedding_dimension AS "embeddingDimension", embedding_format_version AS "embeddingFormatVersion",
            retrieval_schema_version AS "retrievalSchemaVersion",
            ollama_base_url AS "ollamaBaseUrl",
@@ -304,7 +310,7 @@ async function getCorpus(client) {
   return { ...result.rows[0], recordCount: Number(result.rows[0].recordCount) };
 }
 
-async function initializeIndex(connection, { model, dimension, ollamaBaseUrl }) {
+async function initializeIndex(connection, { model, modelDigest = null, dimension, ollamaBaseUrl }) {
   return withPool(connection, async (pool) => {
     const client = await pool.connect();
     try {
@@ -320,12 +326,14 @@ async function initializeIndex(connection, { model, dimension, ollamaBaseUrl }) 
         const formatVersion = embeddingFormatForModel(model);
         await client.query(`
           INSERT INTO semantic_qa.corpus
-            (id, source_mapping, embedding_model, embedding_dimension, embedding_format_version, ollama_base_url)
-          VALUES ('default', '{}'::jsonb, $1, $2, $3, $4)
-        `, [model, dimension, formatVersion, ollamaBaseUrl]);
+            (id, source_mapping, embedding_model, embedding_model_digest, embedding_dimension,
+             embedding_format_version, ollama_base_url)
+          VALUES ('default', '{}'::jsonb, $1, $2, $3, $4, $5)
+        `, [model, modelDigest, dimension, formatVersion, ollamaBaseUrl]);
       }
       const corpus = existingCorpus || await getCorpus(client);
       const requiresRebuild = corpus.embeddingModel !== model ||
+        String(corpus.embeddingModelDigest || '') !== String(modelDigest || '') ||
         Number(corpus.embeddingDimension) !== Number(dimension) ||
         corpus.embeddingFormatVersion !== embeddingFormatForModel(model) ||
         corpus.retrievalSchemaVersion !== RETRIEVAL_SCHEMA_VERSION;
@@ -461,7 +469,9 @@ async function updateSyncRun(client, job) {
   `, [job.id, job.status, job.processed, job.changed, job.total, job.error || null]);
 }
 
-async function commitIncremental(client, { names, mapping, model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total }) {
+async function commitIncremental(client, {
+  names, mapping, model, modelDigest = null, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total,
+}) {
   await client.query('BEGIN');
   try {
     await client.query(`
@@ -482,10 +492,10 @@ async function commitIncremental(client, { names, mapping, model, dimension, for
     `);
     await client.query(`
       UPDATE semantic_qa.corpus SET source_mapping = $1::jsonb, embedding_model = $2,
-        embedding_dimension = $3, embedding_format_version = $4, retrieval_schema_version = $5,
-        ollama_base_url = $6, record_count = $7,
+        embedding_model_digest = $3, embedding_dimension = $4, embedding_format_version = $5,
+        retrieval_schema_version = $6, ollama_base_url = $7, record_count = $8,
         last_synced_at = now(), updated_at = now() WHERE id = 'default'
-    `, [JSON.stringify(mapping), model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total]);
+    `, [JSON.stringify(mapping), model, modelDigest, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total]);
     await dropSyncStage(client, names);
     await client.query('COMMIT');
   } catch (error) {
@@ -494,7 +504,9 @@ async function commitIncremental(client, { names, mapping, model, dimension, for
   }
 }
 
-async function commitRebuild(client, { names, mapping, model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total }) {
+async function commitRebuild(client, {
+  names, mapping, model, modelDigest = null, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total,
+}) {
   await client.query('BEGIN');
   try {
     await client.query('DROP TABLE IF EXISTS semantic_qa.records');
@@ -506,17 +518,282 @@ async function commitRebuild(client, { names, mapping, model, dimension, formatV
     await createSearchIndex(client);
     await client.query(`
       INSERT INTO semantic_qa.corpus
-        (id, source_mapping, embedding_model, embedding_dimension, embedding_format_version,
-         retrieval_schema_version, ollama_base_url, record_count, last_synced_at, updated_at)
-      VALUES ('default', $1::jsonb, $2, $3, $4, $5, $6, $7, now(), now())
+        (id, source_mapping, embedding_model, embedding_model_digest, embedding_dimension,
+         embedding_format_version, retrieval_schema_version, ollama_base_url,
+         record_count, last_synced_at, updated_at)
+      VALUES ('default', $1::jsonb, $2, $3, $4, $5, $6, $7, $8, now(), now())
       ON CONFLICT (id) DO UPDATE SET source_mapping = EXCLUDED.source_mapping,
-        embedding_model = EXCLUDED.embedding_model, embedding_dimension = EXCLUDED.embedding_dimension,
+        embedding_model = EXCLUDED.embedding_model,
+        embedding_model_digest = EXCLUDED.embedding_model_digest,
+        embedding_dimension = EXCLUDED.embedding_dimension,
         embedding_format_version = EXCLUDED.embedding_format_version,
         retrieval_schema_version = EXCLUDED.retrieval_schema_version,
         ollama_base_url = EXCLUDED.ollama_base_url, record_count = EXCLUDED.record_count,
         last_synced_at = now(), updated_at = now()
-    `, [JSON.stringify(mapping), model, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total]);
+    `, [
+      JSON.stringify(mapping),
+      model,
+      modelDigest,
+      dimension,
+      formatVersion,
+      retrievalVersion,
+      ollamaBaseUrl,
+      total,
+    ]);
     await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  }
+}
+
+const MIN_CANDIDATE_LIMIT = 10;
+const DEFAULT_CANDIDATE_LIMIT = 60;
+const MAX_CANDIDATE_LIMIT = 200;
+const RAW_CANDIDATE_MULTIPLIER = 4;
+const MAX_RAW_CANDIDATES = 800;
+const MAX_EXPANDABLE_GROUPS = 24;
+const MAX_SIBLINGS_PER_GROUP = 100;
+const MAX_SIBLING_ROWS = 1200;
+
+function searchLimits(limit) {
+  const requested = Number(limit);
+  const candidateLimit = Math.max(
+    MIN_CANDIDATE_LIMIT,
+    Math.min(
+      MAX_CANDIDATE_LIMIT,
+      Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : DEFAULT_CANDIDATE_LIMIT,
+    ),
+  );
+  const rawCandidateLimit = Math.min(MAX_RAW_CANDIDATES, candidateLimit * RAW_CANDIDATE_MULTIPLIER);
+  return {
+    candidateLimit,
+    rawCandidateLimit,
+    efSearch: rawCandidateLimit,
+    maxExpandableGroups: MAX_EXPANDABLE_GROUPS,
+    maxSiblingsPerGroup: MAX_SIBLINGS_PER_GROUP,
+    maxSiblingRows: MAX_SIBLING_ROWS,
+  };
+}
+
+function supportsIterativeHnswScan(version) {
+  const match = String(version || '').match(/^(\d+)\.(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 0 || (major === 0 && minor >= 8);
+}
+
+async function configureHnswSearch(client, efSearch) {
+  await client.query(`SET LOCAL hnsw.ef_search = ${efSearch}`);
+  const versionResult = await client.query(`
+    SELECT extversion FROM pg_extension WHERE extname = 'vector'
+  `);
+  if (supportsIterativeHnswScan(versionResult.rows[0]?.extversion)) {
+    await client.query(`SET LOCAL hnsw.iterative_scan = 'strict_order'`);
+  }
+}
+
+function groupExpansionPriority(row) {
+  const similarity = Number(row.similarity);
+  const lexicalScore = Number(row.lexicalScore);
+  const dense = Number.isFinite(similarity) ? similarity : -Infinity;
+  const lexical = Number.isFinite(lexicalScore) && lexicalScore > 0
+    ? 1 - Math.exp(-6 * lexicalScore)
+    : -Infinity;
+  return Math.max(dense, lexical);
+}
+
+function selectExpandableGroups(rows, limit) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (row.sourceGroup == null) continue;
+    const chunkCount = Number(row.metadata?.chunk_count);
+    if (!Number.isFinite(chunkCount) || chunkCount <= 1) continue;
+    const key = String(row.sourceGroup);
+    const priority = groupExpansionPriority(row);
+    const existing = groups.get(key);
+    if (!existing || priority > existing.priority) groups.set(key, { key, priority });
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.priority - a.priority || a.key.localeCompare(b.key))
+    .slice(0, limit)
+    .map((entry) => entry.key);
+}
+
+async function searchRecords(client, corpus, vector, queryText, limit, hasLexicalIndex) {
+  const vectorLiteral = toVectorLiteral(vector);
+  const limits = searchLimits(limit);
+  await client.query('BEGIN');
+  try {
+    await configureHnswSearch(client, limits.efSearch);
+    const result = hasLexicalIndex
+      ? await client.query(`
+        WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms),
+        dense_raw AS MATERIALIZED (
+          SELECT source_id,
+                 CASE WHEN source_group IS NOT NULL AND
+                   CASE WHEN coalesce(metadata->>'chunk_count', '') ~ '^[0-9]+$'
+                     THEN (metadata->>'chunk_count')::numeric > 1 ELSE false END
+                 THEN source_group END AS document_group,
+                 embedding <=> $1::vector AS distance
+          FROM semantic_qa.records
+          ORDER BY embedding <=> $1::vector
+          LIMIT $4
+        ),
+        dense_ranked AS MATERIALIZED (
+          SELECT source_id, distance,
+                 row_number() OVER (
+                   PARTITION BY document_group, CASE WHEN document_group IS NULL THEN source_id END
+                   ORDER BY distance, source_id
+                 ) AS document_rank
+          FROM dense_raw
+        ),
+        dense AS MATERIALIZED (
+          SELECT source_id, distance FROM dense_ranked
+          WHERE document_rank = 1
+          ORDER BY distance, source_id
+          LIMIT $3
+        ),
+        lexical_raw AS MATERIALIZED (
+          SELECT r.source_id,
+                 CASE WHEN r.source_group IS NOT NULL AND
+                   CASE WHEN coalesce(r.metadata->>'chunk_count', '') ~ '^[0-9]+$'
+                     THEN (r.metadata->>'chunk_count')::numeric > 1 ELSE false END
+                 THEN r.source_group END AS document_group,
+                 ts_rank_cd(r.search_vector, q.terms) AS lexical_score
+          FROM semantic_qa.records r CROSS JOIN query q
+          WHERE q.terms::text <> '' AND r.search_vector @@ q.terms
+          ORDER BY ts_rank_cd(r.search_vector, q.terms) DESC, r.source_id
+          LIMIT $4
+        ),
+        lexical_ranked AS MATERIALIZED (
+          SELECT source_id, lexical_score,
+                 row_number() OVER (
+                   PARTITION BY document_group, CASE WHEN document_group IS NULL THEN source_id END
+                   ORDER BY lexical_score DESC, source_id
+                 ) AS document_rank
+          FROM lexical_raw
+        ),
+        lexical AS MATERIALIZED (
+          SELECT source_id, lexical_score FROM lexical_ranked
+          WHERE document_rank = 1
+          ORDER BY lexical_score DESC, source_id
+          LIMIT $3
+        ),
+        candidates AS (SELECT source_id FROM dense UNION SELECT source_id FROM lexical)
+        SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+               r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+               1 - (r.embedding <=> $1::vector) AS similarity,
+               ts_rank_cd(r.search_vector, q.terms) AS "lexicalScore"
+        FROM candidates c
+        JOIN semantic_qa.records r USING (source_id)
+        CROSS JOIN query q
+      `, [vectorLiteral, queryText, limits.candidateLimit, limits.rawCandidateLimit])
+      : await client.query(`
+        WITH dense_raw AS MATERIALIZED (
+          SELECT source_id,
+                 CASE WHEN source_group IS NOT NULL AND
+                   CASE WHEN coalesce(metadata->>'chunk_count', '') ~ '^[0-9]+$'
+                     THEN (metadata->>'chunk_count')::numeric > 1 ELSE false END
+                 THEN source_group END AS document_group,
+                 embedding <=> $1::vector AS distance
+          FROM semantic_qa.records
+          ORDER BY embedding <=> $1::vector
+          LIMIT $3
+        ),
+        dense_ranked AS MATERIALIZED (
+          SELECT source_id, distance,
+                 row_number() OVER (
+                   PARTITION BY document_group, CASE WHEN document_group IS NULL THEN source_id END
+                   ORDER BY distance, source_id
+                 ) AS document_rank
+          FROM dense_raw
+        ),
+        dense AS MATERIALIZED (
+          SELECT source_id, distance FROM dense_ranked
+          WHERE document_rank = 1
+          ORDER BY distance, source_id
+          LIMIT $2
+        )
+        SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+               r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+               1 - (r.embedding <=> $1::vector) AS similarity,
+               0::real AS "lexicalScore"
+        FROM dense
+        JOIN semantic_qa.records r USING (source_id)
+        ORDER BY dense.distance, r.source_id
+      `, [vectorLiteral, limits.candidateLimit, limits.rawCandidateLimit]);
+
+    const expandableGroups = selectExpandableGroups(result.rows, limits.maxExpandableGroups);
+    let siblingRows = [];
+    if (expandableGroups.length) {
+      siblingRows = hasLexicalIndex
+        ? (await client.query(`
+          WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms),
+          ranked_siblings AS MATERIALIZED (
+            SELECT r.source_id, r.question, r.answer, r.metadata, r.source_group, r.source_order, r.embedding,
+                   r.search_vector,
+                   row_number() OVER (
+                     PARTITION BY r.source_group
+                     ORDER BY r.source_order NULLS LAST, r.source_id
+                   ) AS sibling_rank,
+                   array_position($3::text[], r.source_group) AS group_rank
+            FROM semantic_qa.records r
+            WHERE r.source_group = ANY($3::text[])
+          ),
+          bounded_siblings AS MATERIALIZED (
+            SELECT * FROM ranked_siblings
+            WHERE sibling_rank <= $5
+            ORDER BY sibling_rank, group_rank
+            LIMIT $4
+          )
+          SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+                 r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+                 1 - (r.embedding <=> $1::vector) AS similarity,
+                 ts_rank_cd(r.search_vector, q.terms) AS "lexicalScore"
+          FROM bounded_siblings r CROSS JOIN query q
+          ORDER BY r.sibling_rank, r.group_rank
+        `, [
+          vectorLiteral,
+          queryText,
+          expandableGroups,
+          limits.maxSiblingRows,
+          limits.maxSiblingsPerGroup,
+        ])).rows
+        : (await client.query(`
+          WITH ranked_siblings AS MATERIALIZED (
+            SELECT r.source_id, r.question, r.answer, r.metadata, r.source_group, r.source_order, r.embedding,
+                   row_number() OVER (
+                     PARTITION BY r.source_group
+                     ORDER BY r.source_order NULLS LAST, r.source_id
+                   ) AS sibling_rank,
+                   array_position($2::text[], r.source_group) AS group_rank
+            FROM semantic_qa.records r
+            WHERE r.source_group = ANY($2::text[])
+          ),
+          bounded_siblings AS MATERIALIZED (
+            SELECT * FROM ranked_siblings
+            WHERE sibling_rank <= $4
+            ORDER BY sibling_rank, group_rank
+            LIMIT $3
+          )
+          SELECT source_id AS "sourceId", question, answer, metadata,
+                 source_group AS "sourceGroup", source_order AS "sourceOrder",
+                 1 - (embedding <=> $1::vector) AS similarity,
+                 0::real AS "lexicalScore"
+          FROM bounded_siblings
+          ORDER BY sibling_rank, group_rank
+        `, [
+          vectorLiteral,
+          expandableGroups,
+          limits.maxSiblingRows,
+          limits.maxSiblingsPerGroup,
+        ])).rows;
+    }
+    await client.query('COMMIT');
+    const unique = new Map([...result.rows, ...siblingRows].map((row) => [row.sourceId, row]));
+    return { corpus, rows: [...unique.values()], hybrid: hasLexicalIndex };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
@@ -530,65 +807,8 @@ async function searchIndex(connection, vector, queryText, limit) {
       await ensureCoreSchema(client);
       const corpus = await getCorpus(client);
       if (!corpus || !(await recordsTableExists(client))) return { corpus, rows: [] };
-      const vectorLiteral = toVectorLiteral(vector);
-      const candidateLimit = Math.max(10, Math.min(200, Number(limit) || 60));
       const hasLexicalIndex = await searchVectorExists(client);
-      const result = hasLexicalIndex
-        ? await client.query(`
-          WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms),
-          dense AS MATERIALIZED (
-            SELECT source_id FROM semantic_qa.records
-            ORDER BY embedding <=> $1::vector LIMIT $3
-          ),
-          lexical AS MATERIALIZED (
-            SELECT r.source_id FROM semantic_qa.records r CROSS JOIN query q
-            WHERE q.terms::text <> '' AND r.search_vector @@ q.terms
-            ORDER BY ts_rank_cd(r.search_vector, q.terms) DESC LIMIT $3
-          ),
-          candidates AS (SELECT source_id FROM dense UNION SELECT source_id FROM lexical)
-          SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
-                 r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
-                 1 - (r.embedding <=> $1::vector) AS similarity,
-                 ts_rank_cd(r.search_vector, q.terms) AS "lexicalScore"
-          FROM candidates c
-          JOIN semantic_qa.records r USING (source_id)
-          CROSS JOIN query q
-        `, [vectorLiteral, queryText, candidateLimit])
-        : await client.query(`
-          SELECT source_id AS "sourceId", question, answer, metadata,
-                 source_group AS "sourceGroup", source_order AS "sourceOrder",
-                 1 - (embedding <=> $1::vector) AS similarity,
-                 0::real AS "lexicalScore"
-          FROM semantic_qa.records
-          ORDER BY embedding <=> $1::vector
-          LIMIT $2
-        `, [vectorLiteral, candidateLimit]);
-
-      const expandableGroups = [...new Set(result.rows
-        .filter((row) => row.sourceGroup != null && Number(row.metadata?.chunk_count) > 1 && Number(row.metadata?.chunk_count) <= 100)
-        .map((row) => row.sourceGroup))];
-      let siblingRows = [];
-      if (expandableGroups.length) {
-        siblingRows = hasLexicalIndex
-          ? (await client.query(`
-            WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms)
-            SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
-                   r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
-                   1 - (r.embedding <=> $1::vector) AS similarity,
-                   ts_rank_cd(r.search_vector, q.terms) AS "lexicalScore"
-            FROM semantic_qa.records r CROSS JOIN query q
-            WHERE r.source_group = ANY($3::text[])
-          `, [vectorLiteral, queryText, expandableGroups])).rows
-          : (await client.query(`
-            SELECT source_id AS "sourceId", question, answer, metadata,
-                   source_group AS "sourceGroup", source_order AS "sourceOrder",
-                   1 - (embedding <=> $1::vector) AS similarity,
-                   0::real AS "lexicalScore"
-            FROM semantic_qa.records WHERE source_group = ANY($2::text[])
-          `, [vectorLiteral, expandableGroups])).rows;
-      }
-      const unique = new Map([...result.rows, ...siblingRows].map((row) => [row.sourceId, row]));
-      return { corpus, rows: [...unique.values()], hybrid: hasLexicalIndex };
+      return await searchRecords(client, corpus, vector, queryText, limit, hasLexicalIndex);
     } finally {
       client.release();
     }
@@ -618,5 +838,6 @@ module.exports = {
   updateSyncRun,
   commitIncremental,
   commitRebuild,
+  searchRecords,
   searchIndex,
 };
