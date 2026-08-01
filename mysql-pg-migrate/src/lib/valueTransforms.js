@@ -1,5 +1,6 @@
 const vm = require('node:vm');
 const { resolveTransformPreset } = require('./transformCatalog');
+const { repairMojibake } = require('./mojibakeRepair');
 
 const MAX_EXPRESSION_LENGTH = 1000;
 const DENIED_EXPRESSION_TOKENS = [
@@ -190,6 +191,11 @@ function applyTransform({ value, transform, sourceRow, lookupResolver }) {
       }
       return value;
     }
+    case 'mojibake_repair': {
+      if (value == null) return null;
+      const mode = String(config.mode || 'auto');
+      return repairMojibake(String(value), { mode });
+    }
     default:
       throw new Error(`Unsupported transform type: ${type}`);
   }
@@ -245,7 +251,7 @@ function validateTransformRule(transform, sample = {}) {
 }
 
 function supportedTransformTypes() {
-  return ['direct', 'string', 'number', 'boolean', 'json', 'date', 'datetime', 'constant', 'null', 'template', 'lookup', 'lookup_table', 'expression', 'concat', 'coalesce', 'conditional'];
+  return ['direct', 'string', 'number', 'boolean', 'json', 'date', 'datetime', 'constant', 'null', 'template', 'lookup', 'lookup_table', 'expression', 'concat', 'coalesce', 'conditional', 'mojibake_repair'];
 }
 
 module.exports = { applyTransform, transformRow, supportedTransformTypes, shouldIncludeRow, validateTransformRule, normalizeTransform, assertSafeExpression };

@@ -6,6 +6,8 @@ const TRANSFORM_PRESETS = {
   json_parse: { type: 'json', config: {} },
   full_name: { type: 'concat', config: { fields: ['first_name', 'last_name'], delimiter: ' ' } },
   keep_when_present: { type: 'conditional', config: { branches: [{ when: 'value != null && value !== ""', then: { type: 'direct', config: {} } }], otherwise: { type: 'null', config: {} } } },
+  repair_unicode_mojibake: { type: 'mojibake_repair', config: { mode: 'auto' } },
+  repair_iast_mojibake: { type: 'mojibake_repair', config: { mode: 'auto' } },
 };
 
 function listTransformPresets() {
@@ -25,6 +27,8 @@ function describePreset(name, rule) {
   if (name === 'json_parse') return 'Parse JSON string inputs';
   if (name === 'full_name') return 'Concatenate first_name and last_name';
   if (name === 'keep_when_present') return 'Keep value only when present; otherwise null';
+  if (name === 'repair_unicode_mojibake') return 'Detect and repair Unicode mojibake encoding mismatches (Telugu, Sanskrit, IAST, etc.)';
+  if (name === 'repair_iast_mojibake') return 'Detect and repair mojibake-corrupted IAST diacritics';
   return `Preset for ${rule.type}`;
 }
 

@@ -2,6 +2,7 @@ const path = require('node:path');
 const { createRequire } = require('node:module');
 
 const mysqlRequire = createRequire(path.resolve(__dirname, '../../mysql-pg-migrate/package.json'));
+const { repairMojibake } = require('../../mysql-pg-migrate/src/lib/mojibakeRepair');
 
 const NAMED_ENTITIES = {
   Delta: 'Δ', aacute: 'á', acirc: 'â', agrave: 'à', amp: '&', apos: "'", aring: 'å', auml: 'ä',
@@ -38,12 +39,14 @@ function htmlToPlainText(value) {
     .replace(/<\/(?:p|div|li|h[1-6]|tr|blockquote)>/gi, '\n\n')
     .replace(/<[^>]+>/g, '');
 
-  return decodeHtmlEntities(withLayout)
+  const cleaned = decodeHtmlEntities(withLayout)
     .replace(/\r\n?/g, '\n')
     .replace(/[\t \f\v]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  return repairMojibake(cleaned, { mode: 'auto' });
 }
 
 function splitLongPart(value, maxChars) {
