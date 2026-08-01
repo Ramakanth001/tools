@@ -23,7 +23,12 @@
     "dev:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run dev",
     "start:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run start",
     "build:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run build",
-    "preview:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run preview"
+    "preview:mysql-pg-migrate": "npm --prefix ./mysql-pg-migrate run preview",
+    "dev:semantic-qa": "npm --prefix ./semantic-qa run dev",
+    "start:semantic-qa": "npm --prefix ./semantic-qa run start",
+    "test:semantic-qa": "npm --prefix ./semantic-qa test",
+    "build:semantic-qa": "npm --prefix ./semantic-qa run build",
+    "preview:semantic-qa": "npm --prefix ./semantic-qa run preview"
   },
   "dependencies": {
     "archiver": "^7.0.1",
