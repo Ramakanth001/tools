@@ -12,12 +12,19 @@ async function waitForTerminal(manager, id) {
   throw new Error('Job did not finish');
 }
 
-function makeDb({ existingHashes = new Map() } = {}) {
+function makeDb({ existingHashes = new Map(), corpusOverrides = {} } = {}) {
   const state = { staged: [], committed: null, dropped: false, runUpdates: [] };
   const client = { release() {} };
   const pool = { async connect() { return client; }, async end() {} };
   const records = [
-    { sourceId: '1', question: 'Question one', answer: 'Answer one', metadata: {}, sourceGroup: null, sourceOrder: null },
+    {
+      sourceId: '1',
+      question: 'Question one',
+      answer: 'Answer one',
+      metadata: { source_context: 'Detailed source question' },
+      sourceGroup: null,
+      sourceOrder: null,
+    },
     { sourceId: '2', question: 'Question two', answer: 'Answer two', metadata: { chapter: 2 }, sourceGroup: 'g', sourceOrder: 2 },
   ];
   return {
@@ -29,8 +36,10 @@ function makeDb({ existingHashes = new Map() } = {}) {
       getCorpus: async () => ({
         embeddingModel: 'embeddinggemma',
         embeddingDimension: 3,
-        embeddingFormatVersion: 'embeddinggemma-asymmetric-v2',
-        retrievalSchemaVersion: 'hybrid-v2',
+        embeddingFormatVersion: 'embeddinggemma-asymmetric-v3',
+        retrievalSchemaVersion: 'hybrid-v3',
+        embeddingModelDigest: null,
+        ...corpusOverrides,
       }),
       createSyncRun: async () => {},
       createSyncStage: async () => ({ stage: 'stage', seen: 'seen' }),
@@ -60,10 +69,14 @@ const config = () => ({
 
 test('incremental sync stages changed records and commits only after a complete scan', async () => {
   const { db, state } = makeDb();
+  const embeddedTexts = [];
   const manager = createSyncManager({
     db,
     probe: async () => ({ dimension: 3 }),
-    embed: async ({ texts }) => texts.map((_, index) => [index + 0.1, 0.2, 0.3]),
+    embed: async ({ texts }) => {
+      embeddedTexts.push(...texts);
+      return texts.map((_, index) => [index + 0.1, 0.2, 0.3]);
+    },
   });
   const started = manager.start(config());
   const finished = await waitForTerminal(manager, started.id);
@@ -73,6 +86,7 @@ test('incremental sync stages changed records and commits only after a complete 
   assert.equal(state.staged.length, 2);
   assert.equal(state.committed, 'incremental');
   assert.equal(state.dropped, false);
+  assert.match(embeddedTexts[0], /Detailed source question/);
 });
 
 test('embedding failure drops staging and never commits', async () => {
@@ -140,4 +154,18 @@ test('cancelling during embedding drops staging and keeps the live index untouch
   assert.equal(finished.status, 'cancelled');
   assert.equal(state.committed, null);
   assert.equal(state.dropped, true);
+});
+
+test('incremental sync refuses a changed model digest even when name and dimension match', async () => {
+  const { db, state } = makeDb({ corpusOverrides: { embeddingModelDigest: 'old-digest' } });
+  const manager = createSyncManager({
+    db,
+    probe: async () => ({ dimension: 3, digest: 'new-digest' }),
+    embed: async () => { throw new Error('must not embed'); },
+  });
+  const started = manager.start(config());
+  const finished = await waitForTerminal(manager, started.id);
+  assert.equal(finished.status, 'failed');
+  assert.match(finished.error, /digest.*full rebuild/i);
+  assert.equal(state.committed, null);
 });

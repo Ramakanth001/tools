@@ -67,6 +67,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
         texts: records.map((record) => buildDocumentEmbeddingText(record.question, record.answer, {
           model: config.model,
           formatVersion: config.embeddingFormatVersion,
+          context: record.metadata?.source_context,
         })),
         timeoutMs: 300000,
       });
@@ -84,6 +85,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
             texts: [buildDocumentEmbeddingText(record.question, record.answer, {
               model: config.model,
               formatVersion: config.embeddingFormatVersion,
+              context: record.metadata?.source_context,
             })],
             timeoutMs: 300000,
           });
@@ -107,6 +109,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       log(job, `Testing Ollama model ${config.model}...`);
       const modelInfo = await probe({ baseUrl: config.ollamaBaseUrl, model: config.model });
       const dimension = Number(modelInfo.dimension);
+      config.embeddingModelDigest = modelInfo.digest || null;
       config.embeddingFormatVersion = embeddingFormatForModel(config.model);
 
       indexPool = db.createPool(config.indexConnection);
@@ -116,8 +119,9 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       if (!corpus) throw new Error('Index is not initialized. Initialize it from the Index screen first.');
       if (job.mode === 'incremental' &&
           (corpus.embeddingModel !== config.model || Number(corpus.embeddingDimension) !== dimension ||
-           corpus.embeddingFormatVersion !== config.embeddingFormatVersion)) {
-        throw new Error('Embedding model, dimension, or embedding format changed; run a full rebuild.');
+           corpus.embeddingFormatVersion !== config.embeddingFormatVersion ||
+           String(corpus.embeddingModelDigest || '') !== String(config.embeddingModelDigest || ''))) {
+        throw new Error('Embedding model, digest, dimension, or embedding format changed; run a full rebuild.');
       }
       if (job.mode === 'incremental' && corpus.retrievalSchemaVersion !== RETRIEVAL_SCHEMA_VERSION) {
         throw new Error('Retrieval index format changed; run a full rebuild.');
@@ -166,6 +170,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
         names: stageNames,
         mapping: normalizedMapping,
         model: config.model,
+        modelDigest: config.embeddingModelDigest,
         dimension,
         formatVersion: config.embeddingFormatVersion,
         retrievalVersion: RETRIEVAL_SCHEMA_VERSION,
