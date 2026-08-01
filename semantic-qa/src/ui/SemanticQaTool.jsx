@@ -165,7 +165,76 @@ function StatusMessage({ status }) {
   return <div className={`alert ${status.kind === 'error' ? 'warn' : ''}`}>{status.message}</div>;
 }
 
-function SearchScreen({ runtime, settings, onNavigate }) {
+function sameMatch(left, right) {
+  if (!left || !right) return false;
+  if (left.sourceId != null && right.sourceId != null) {
+    return String(left.sourceId) === String(right.sourceId);
+  }
+  return left.relevanceRank === right.relevanceRank &&
+    left.question === right.question &&
+    left.answer === right.answer;
+}
+
+function MatchRecord({ match, label }) {
+  return (
+    <article className="card qa-answer">
+      <div className="qa-answer-head">
+        <div>
+          <span className="badge">{label}</span>
+          {match.relevanceRank != null ? <span className="badge">#{match.relevanceRank}</span> : null}
+          <span className="badge">Relevance {Number(match.relevanceScore ?? match.similarity).toFixed(3)}</span>
+          {match.relevanceScore != null ? <span className="badge">Cosine {Number(match.similarity).toFixed(3)}</span> : null}
+        </div>
+        <span className="mono">Record {match.sourceId}</span>
+      </div>
+      <div className="qa-stored-question">{match.question}</div>
+      <div className="qa-verbatim">{match.answer}</div>
+      {match.metadata && Object.keys(match.metadata).length ? (
+        <dl className="qa-metadata">
+          {Object.entries(match.metadata)
+            .filter(([key]) => key !== 'source_context')
+            .map(([key, value]) => <React.Fragment key={key}><dt>{key}</dt><dd>{value == null ? '—' : String(value)}</dd></React.Fragment>)}
+        </dl>
+      ) : null}
+      {match.sourceGroup != null || match.sourceOrder != null ? <div className="hint">Source group: {match.sourceGroup ?? '—'} · Source order: {match.sourceOrder == null ? '—' : String(match.sourceOrder)}</div> : null}
+    </article>
+  );
+}
+
+function GroundedSummary({ summary, relevantMatches }) {
+  const allowedSources = new Set((relevantMatches || []).map((match) => String(match.sourceId)));
+  const evidence = (summary?.evidence || []).filter((item) => allowedSources.has(String(item.sourceId)));
+  if (summary?.status !== 'ready' || !evidence.length) return null;
+  return (
+    <article className="card qa-grounded-summary">
+      <div className="qa-answer-head">
+        <div>
+          <span className="badge">Semantic evidence summary</span>
+          <span className="badge">{evidence.length} excerpt{evidence.length === 1 ? '' : 's'}</span>
+          <span className="badge">{new Set(evidence.map((item) => String(item.sourceId))).size} source{new Set(evidence.map((item) => String(item.sourceId))).size === 1 ? '' : 's'}</span>
+        </div>
+        <span className="mono">meaning-based · extractive</span>
+      </div>
+      <div className="hint qa-summary-note">
+        Every line is copied verbatim from an independently accepted record. Sentence embeddings select meaning and intent; no generative model rewrites the evidence.
+      </div>
+      <ol className="qa-summary-lines">
+        {evidence.map((item, index) => (
+          <li key={`${item.sourceId}:${index}`}>
+            <div className="qa-summary-text">{item.text}</div>
+            <div className="qa-summary-citation">
+              <span className="badge">Source {item.sourceId}</span>
+              <span className="badge">Passage meaning {Number(item.semanticSimilarity).toFixed(3)}</span>
+              <span className="badge">Record relevance {Number(item.recordRelevance).toFixed(3)}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </article>
+  );
+}
+
+function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
   const [question, setQuestion] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -190,6 +259,11 @@ function SearchScreen({ runtime, settings, onNavigate }) {
           question,
           topK: settings.topK,
           threshold: settings.threshold,
+          summary: {
+            enabled: settings.summaryEnabled,
+            maxRecords: settings.summaryMaxRecords,
+            maxLines: settings.summaryMaxLines,
+          },
         },
         timeoutMs: 180000,
       }));
@@ -200,45 +274,80 @@ function SearchScreen({ runtime, settings, onNavigate }) {
     }
   };
 
+  const acceptedMatch = result?.acceptedMatch || null;
+  const summaryEvidenceIds = new Set(
+    result?.summary?.status === 'ready'
+      ? (result.summary.evidence || []).map((item) => String(item.sourceId))
+      : [],
+  );
+  const remainingMatches = (result?.matches || []).filter((match) => (
+    !sameMatch(match, acceptedMatch) &&
+    !summaryEvidenceIds.has(String(match.sourceId))
+  ));
+  const inspectorLabel = acceptedMatch ? 'Related / nearest source records' : 'Nearest source records';
+  const summaryCitationValid = result?.summary?.status !== 'ready' || (
+    result.summary.evidence?.length > 0 &&
+    result.summary.evidence.every((item) =>
+      (result.relevantMatches || []).some((match) => String(match.sourceId) === String(item.sourceId)))
+  );
+
   return (
     <div className="qa-stack">
       <form className="card qa-search-card" onSubmit={search}>
         <h3>Ask the indexed corpus</h3>
-        <div className="hint">Each question is handled independently. Answers are returned exactly as stored.</div>
+        <div className="hint">
+          Each question is handled independently. Semantic summary mode pools only threshold-passing records and returns short, verbatim evidence excerpts.
+        </div>
         <textarea className="qa-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Enter a question…" />
         <div className="toolbar">
-          <button className="btn primary" type="submit" disabled={busy || !question.trim()}>{busy ? 'Searching…' : 'Search answers'}</button>
+          <button className="btn primary" type="submit" disabled={busy || !question.trim()}>
+            {busy ? (settings.summaryEnabled ? 'Pooling evidence…' : 'Searching…') : (settings.summaryEnabled ? 'Search and summarize' : 'Search answers')}
+          </button>
+          <label className="chip qa-summary-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.summaryEnabled)}
+              onChange={(event) => setSettings((current) => ({ ...current, summaryEnabled: event.target.checked }))}
+            />
+            Semantic evidence summary
+          </label>
           <span className="badge">Top {settings.topK}</span>
           <span className="badge">Threshold {Number(settings.threshold).toFixed(2)}</span>
+          {settings.summaryEnabled ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
         </div>
       </form>
       {error ? <div className="alert warn">{error}</div> : null}
-      {result?.message ? <div className="alert warn qa-no-match">{result.message}</div> : null}
-      {result?.matches?.length ? (
+      {!acceptedMatch && result?.message ? <div className="alert warn qa-no-match">{result.message}</div> : null}
+      {!summaryCitationValid ? (
+        <div className="alert warn qa-no-match">The summary was withheld because its evidence citations did not pass relevance validation.</div>
+      ) : null}
+      {summaryCitationValid ? <GroundedSummary summary={result?.summary} relevantMatches={result?.relevantMatches} /> : null}
+      {acceptedMatch && result?.summary?.status === 'unavailable' ? (
+        <div className="alert warn qa-no-match">Relevant evidence was found, but its semantic summary could not be prepared. The stored answer remains available below.</div>
+      ) : null}
+      {acceptedMatch ? (
         <div className="qa-results">
-          {result.matches.map((match) => (
-            <article className="card qa-answer" key={match.sourceId}>
-              <div className="qa-answer-head">
-                <div>
-                  <span className="badge">#{match.relevanceRank}</span>
-                  <span className="badge">Relevance {Number(match.relevanceScore ?? match.similarity).toFixed(3)}</span>
-                  {match.relevanceScore != null ? <span className="badge">Cosine {Number(match.similarity).toFixed(3)}</span> : null}
-                </div>
-                <span className="mono">Record {match.sourceId}</span>
-              </div>
-              <div className="qa-stored-question">{match.question}</div>
-              <div className="qa-verbatim">{match.answer}</div>
-              {match.metadata && Object.keys(match.metadata).length ? (
-                <dl className="qa-metadata">
-                  {Object.entries(match.metadata)
-                    .filter(([key]) => key !== 'source_context')
-                    .map(([key, value]) => <React.Fragment key={key}><dt>{key}</dt><dd>{value == null ? '—' : String(value)}</dd></React.Fragment>)}
-                </dl>
-              ) : null}
-              {match.sourceGroup != null || match.sourceOrder != null ? <div className="hint">Source group: {match.sourceGroup ?? '—'} · Source order: {match.sourceOrder == null ? '—' : String(match.sourceOrder)}</div> : null}
-            </article>
-          ))}
+          <MatchRecord match={acceptedMatch} label={result?.summary?.status === 'ready' ? 'Primary stored source' : 'Best answer'} />
         </div>
+      ) : null}
+      {remainingMatches.length ? (
+        <details className="card" style={{ maxWidth: 1100, margin: '0 auto', width: '100%' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 800 }}>
+            {inspectorLabel} ({remainingMatches.length}) — inspection only
+          </summary>
+          <div className="hint" style={{ margin: '10px 0 14px' }}>
+            These are retrieval neighbors, not accepted answers and not summary evidence. Open them only to inspect why the search ranked nearby source records.
+          </div>
+          <div className="qa-results">
+            {remainingMatches.map((match, index) => (
+              <MatchRecord
+                match={match}
+                label={acceptedMatch ? 'Related / nearest source' : 'Nearest source'}
+                key={`${match.sourceId ?? 'match'}:${match.relevanceRank ?? index}`}
+              />
+            ))}
+          </div>
+        </details>
       ) : null}
     </div>
   );
@@ -274,7 +383,12 @@ function IndexScreen({ runtime, settings }) {
         ollamaBaseUrl: settings.ollamaBaseUrl,
         model: settings.model,
       }, timeoutMs: 180000 });
-      setMessage({ kind: response.requiresRebuild ? 'error' : 'success', message: response.requiresRebuild ? 'Index is initialized, but the selected model changed. Run a full rebuild.' : `Index initialized for ${response.model.model} (${response.model.dimension} dimensions).` });
+      setMessage({
+        kind: response.requiresRebuild ? 'error' : 'success',
+        message: response.requiresRebuild
+          ? 'The existing index is incompatible with the current model or retrieval format. Run a full rebuild.'
+          : `Index initialized for ${response.model.model} (${response.model.dimension} dimensions).`,
+      });
       await refresh();
     } catch (error) { setMessage({ kind: 'error', message: error.message }); }
     finally { setBusy(false); }
@@ -330,8 +444,9 @@ function IndexScreen({ runtime, settings }) {
         <StatusMessage status={message} />
         {!indexConfigured ? <div className="alert warn">Configure the index PostgreSQL credentials in Settings before initializing.</div> : null}
         {indexConfigured && !syncConfigured ? <div className="alert warn">Initialization is available, but synchronization also needs source credentials and a complete corpus mapping.</div> : null}
+        {status?.requiresRebuild ? <div className="alert warn">This index cannot be searched safely until a full rebuild completes. {(status.rebuildReasons || []).join('; ')}.</div> : null}
         <div className="qa-stat-grid">
-          <div><span>State</span><strong>{status ? (status.initialized ? 'Ready' : 'Not initialized') : 'Unknown'}</strong></div>
+          <div><span>State</span><strong>{status ? (status.requiresRebuild ? 'Rebuild required' : status.initialized ? 'Ready' : 'Not initialized') : 'Unknown'}</strong></div>
           <div><span>Records</span><strong>{status?.recordCount ?? '—'}</strong></div>
           <div><span>Model</span><strong>{status?.corpus?.embeddingModel || '—'}</strong></div>
           <div><span>Dimensions</span><strong>{status?.corpus?.embeddingDimension || '—'}</strong></div>
@@ -339,7 +454,7 @@ function IndexScreen({ runtime, settings }) {
         </div>
         <div className="toolbar" style={{ marginTop: 16 }}>
           <button className="btn" onClick={initialize} disabled={!indexConfigured || busy || ['queued', 'running'].includes(job?.status)}>Initialize</button>
-          <button className="btn primary" onClick={() => startSync('incremental')} disabled={!syncConfigured || busy || ['queued', 'running'].includes(job?.status)}>Incremental sync</button>
+          <button className="btn primary" onClick={() => startSync('incremental')} disabled={!syncConfigured || status?.requiresRebuild || busy || ['queued', 'running'].includes(job?.status)}>Incremental sync</button>
           <button className="btn danger" onClick={() => startSync('rebuild')} disabled={!syncConfigured || busy || ['queued', 'running'].includes(job?.status)}>Full rebuild</button>
           {['queued', 'running'].includes(job?.status) ? <button className="btn" onClick={cancel}>Cancel</button> : null}
         </div>
@@ -425,7 +540,17 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
           <div className="form-grid">
             <label className="field"><span className="field-label">Schema</span><select value={settings.mapping.schema} onChange={(event) => chooseSchema(event.target.value)}>{catalog.map((schema) => <option key={schema.name}>{schema.name}</option>)}</select></label>
             <label className="field"><span className="field-label">Table</span><select value={settings.mapping.table} onChange={(event) => chooseTable(event.target.value)}>{selectedSchema?.tables.map((table) => <option key={table.name}>{table.name}</option>)}</select></label>
-            {[['idColumn', 'Unique ID'], ['questionColumn', 'Question'], ['answerColumn', 'Answer'], ['groupColumn', 'Optional source group'], ['orderColumn', 'Optional source order']].map(([key, label]) => <label className="field" key={key}><span className="field-label">{label}</span><select value={settings.mapping[key] || ''} onChange={(event) => updateMapping({ [key]: event.target.value })}><option value="">Select…</option>{columns.map((column) => <option value={column.name} key={column.name}>{column.name}{column.primaryKey ? ' (PK)' : ''}</option>)}</select></label>)}
+            {[['idColumn', 'Unique ID'], ['questionColumn', 'Question'], ['answerColumn', 'Answer']].map(([key, label]) => <label className="field" key={key}><span className="field-label">{label}</span><select value={settings.mapping[key] || ''} onChange={(event) => updateMapping({ [key]: event.target.value })}><option value="">Select…</option>{columns.map((column) => <option value={column.name} key={column.name}>{column.name}{column.primaryKey ? ' (PK)' : ''}</option>)}</select></label>)}
+            <label className="field">
+              <span className="field-label">Document ID for chunk grouping (optional)</span>
+              <select value={settings.mapping.groupColumn || ''} onChange={(event) => updateMapping({ groupColumn: event.target.value })}><option value="">Select…</option>{columns.map((column) => <option value={column.name} key={column.name}>{column.name}{column.primaryKey ? ' (PK)' : ''}</option>)}</select>
+              <span className="hint">Use only when several rows are chunks of one document. All chunks of that document must share this value; do not use a category or topic.</span>
+            </label>
+            <label className="field">
+              <span className="field-label">Chunk order within document (optional)</span>
+              <select value={settings.mapping.orderColumn || ''} onChange={(event) => updateMapping({ orderColumn: event.target.value })}><option value="">Select…</option>{columns.map((column) => <option value={column.name} key={column.name}>{column.name}{column.primaryKey ? ' (PK)' : ''}</option>)}</select>
+              <span className="hint">Use with document grouping to preserve the order of chunks from the same document.</span>
+            </label>
           </div>
           <div className="section-title" style={{ marginTop: 14 }}>Metadata columns</div>
           <div className="chip-list" style={{ marginTop: 8 }}>{columns.filter((column) => ![settings.mapping.idColumn, settings.mapping.questionColumn, settings.mapping.answerColumn].includes(column.name)).map((column) => <label className="chip" key={column.name}><input type="checkbox" checked={settings.mapping.metadataColumns.includes(column.name)} onChange={(event) => updateMapping({ metadataColumns: event.target.checked ? [...settings.mapping.metadataColumns, column.name] : settings.mapping.metadataColumns.filter((name) => name !== column.name) })} />{column.name}</label>)}</div>
@@ -436,9 +561,16 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
         <div className="form-grid">
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Result count</span><input type="number" min="1" max="20" value={settings.topK} onChange={(event) => setSettings((current) => ({ ...current, topK: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Clear-match threshold</span><input type="number" min="-1" max="1" step="0.01" value={settings.threshold} onChange={(event) => setSettings((current) => ({ ...current, threshold: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Summary source pool</span><input type="number" min="1" max="15" value={settings.summaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxRecords: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Summary excerpt count</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Source page size</span><input type="number" min="25" max="1000" value={settings.fetchSize} onChange={(event) => setSettings((current) => ({ ...current, fetchSize: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Embedding batch size</span><input type="number" min="1" max="64" value={settings.embeddingBatchSize} onChange={(event) => setSettings((current) => ({ ...current, embeddingBatchSize: Number(event.target.value) }))} /></label>
         </div>
+        <label className="chip qa-summary-toggle" style={{ marginTop: 12 }}>
+          <input type="checkbox" checked={Boolean(settings.summaryEnabled)} onChange={(event) => setSettings((current) => ({ ...current, summaryEnabled: event.target.checked }))} />
+          Enable grounded semantic summaries by default
+        </label>
+        <div className="hint" style={{ marginTop: 10 }}>Summary evidence must independently pass the same clear-match threshold. Line selection uses dense passage embeddings and never rewrites source text.</div>
         <div className="hint" style={{ marginTop: 12 }}>Non-secret settings save automatically. Passwords and connection strings are never persisted.</div>
       </div>
     </div>
@@ -464,14 +596,14 @@ export default function SemanticQaTool({ runtime: providedRuntime }) {
     if (tab === 'setup') return <SetupScreen runtime={runtime} settings={settings} onNavigate={setTab} onLoadDemo={() => setSettings(mergeSettings(LOCAL_DEMO_SETTINGS))} onLoadUniversal={() => setSettings(mergeSettings(UNIVERSAL_QA_SETTINGS))} />;
     if (tab === 'index') return <IndexScreen runtime={runtime} settings={settings} />;
     if (tab === 'settings') return <SettingsScreen runtime={runtime} settings={settings} setSettings={setSettings} catalog={catalog} setCatalog={setCatalog} />;
-    return <SearchScreen runtime={runtime} settings={settings} onNavigate={setTab} />;
+    return <SearchScreen runtime={runtime} settings={settings} setSettings={setSettings} onNavigate={setTab} />;
   }, [tab, runtime.apiBasePath, settings, catalog]);
 
   return (
     <div className="semantic-qa">
       <div className="panel">
         <div className="panel-header">
-          <div><h3 style={{ margin: 0 }}>Semantic Q&A retrieval</h3><div className="hint" style={{ marginTop: 5 }}>Local embeddings. Verbatim source answers. No generated interpretation.</div></div>
+          <div><h3 style={{ margin: 0 }}>Semantic Q&A retrieval</h3><div className="hint" style={{ marginTop: 5 }}>Meaning-first retrieval with grounded, verbatim evidence summaries.</div></div>
           <div className="tabs" role="tablist">{[['setup', 'Setup'], ['search', 'Search'], ['index', 'Index'], ['settings', 'Settings']].map(([id, label]) => <button key={id} className="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>)}</div>
         </div>
         <div className="panel-body">{screen}</div>
