@@ -45,6 +45,19 @@ test('import records retain source identity and chunk ordering', () => {
   assert.equal(records.at(-1).chunkCount, records.length);
 });
 
+test('QA import preserves both distinct detailed-question fields as retrieval context', () => {
+  const { records } = buildRecords([{
+    qaId: 53,
+    masterId: 389,
+    title: 'How should I proceed?',
+    briefQuestion: '<p>Short framing.</p>',
+    questionBk: '<p>Full question with important details.</p>',
+    answerBySwami: '<p>Proceed with patience.</p>',
+    masterLanguage: 'ENG',
+  }], 300);
+  assert.equal(records[0].sourceContext, 'Short framing.\n\nFull question with important details.');
+});
+
 test('discourse records use language-aware chunks and distinct source identities', () => {
   const { records, rejected } = buildDiscourseRecords([{
     dcId: 66,

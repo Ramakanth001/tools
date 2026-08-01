@@ -98,6 +98,18 @@ function chunkText(value, maxChars = 1800, overlapChars = 0) {
   });
 }
 
+function combineSourceContext(...values) {
+  const seen = new Set();
+  return values
+    .map((value) => htmlToPlainText(value))
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .join('\n\n');
+}
+
 function buildRecords(rows, maxChars = 1800) {
   const records = [];
   const rejected = [];
@@ -118,7 +130,7 @@ function buildRecords(rows, maxChars = 1800) {
       masterId: row.masterId,
       question,
       answer: chunk,
-      sourceContext: htmlToPlainText(row.briefQuestion || row.questionBk || ''),
+      sourceContext: combineSourceContext(row.briefQuestion, row.questionBk),
       language: row.masterLanguage || '',
       recordDate: row.recordDate,
       multimediaFilename: row.multimediaFilename || '',
@@ -315,4 +327,12 @@ if (require.main === module) {
     });
 }
 
-module.exports = { buildDiscourseRecords, buildRecords, chunkText, decodeHtmlEntities, htmlToPlainText, runImport };
+module.exports = {
+  buildDiscourseRecords,
+  buildRecords,
+  chunkText,
+  combineSourceContext,
+  decodeHtmlEntities,
+  htmlToPlainText,
+  runImport,
+};
