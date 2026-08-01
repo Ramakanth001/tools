@@ -6,6 +6,9 @@ export const DEFAULT_SETTINGS = {
   mapping: { schema: '', table: '', idColumn: '', questionColumn: '', answerColumn: '', metadataColumns: [], groupColumn: '', orderColumn: '' },
   topK: 5,
   threshold: 0.60,
+  summaryEnabled: true,
+  summaryMaxRecords: 15,
+  summaryMaxLines: 3,
   fetchSize: 250,
   embeddingBatchSize: 32,
 };
@@ -37,14 +40,14 @@ export const LOCAL_DEMO_SETTINGS = {
     questionColumn: 'question',
     answerColumn: 'answer',
     metadataColumns: ['category', 'source_name'],
-    groupColumn: 'category',
-    orderColumn: 'source_order',
+    groupColumn: '',
+    orderColumn: '',
   },
 };
 
 export const UNIVERSAL_QA_SETTINGS = {
   ...LOCAL_DEMO_SETTINGS,
-  threshold: 0.50,
+  threshold: 0.49,
   sourceConnection: {
     ...LOCAL_DEMO_SETTINGS.sourceConnection,
     database: 'universal_qa_source',

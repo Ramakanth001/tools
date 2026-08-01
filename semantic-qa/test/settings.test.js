@@ -21,8 +21,14 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(LOCAL_DEMO_SETTINGS.sourceConnection.database, 'semantic_qa_source');
   assert.equal(LOCAL_DEMO_SETTINGS.indexConnection.database, 'semantic_qa_index');
   assert.equal(LOCAL_DEMO_SETTINGS.mapping.answerColumn, 'answer');
+  assert.equal(LOCAL_DEMO_SETTINGS.mapping.groupColumn, '');
+  assert.equal(LOCAL_DEMO_SETTINGS.mapping.orderColumn, '');
+  assert.ok(LOCAL_DEMO_SETTINGS.mapping.metadataColumns.includes('category'));
   assert.equal(UNIVERSAL_QA_SETTINGS.sourceConnection.database, 'universal_qa_source');
   assert.equal(UNIVERSAL_QA_SETTINGS.indexConnection.database, 'universal_qa_index');
   assert.equal(UNIVERSAL_QA_SETTINGS.mapping.idColumn, 'source_id');
-  assert.equal(UNIVERSAL_QA_SETTINGS.threshold, 0.50);
+  assert.equal(UNIVERSAL_QA_SETTINGS.threshold, 0.49);
+  assert.equal(UNIVERSAL_QA_SETTINGS.summaryEnabled, true);
+  assert.equal(UNIVERSAL_QA_SETTINGS.summaryMaxRecords, 15);
+  assert.equal(UNIVERSAL_QA_SETTINGS.summaryMaxLines, 3);
 });
