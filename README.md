@@ -1,12 +1,13 @@
 # Tools Workspace
 
-This repository is a local web workspace for database utilities. It has a shared React/Express host plus three tools:
+This repository is a local web workspace for database utilities. It has a shared React/Express host plus four tools:
 
 | Tool | Purpose | Standalone UI | Standalone API | Shared-host route |
 | --- | --- | --- | --- | --- |
 | `pg-backup` | PostgreSQL backup runner, schema snapshot, schema visualizer, history, settings | `http://localhost:5173` | `http://localhost:8787/api` | `/tools/pg-backup` |
 | `mysql-tool` | MySQL backup runner, history, settings | `http://localhost:5174` | `http://localhost:8788/api` | `/tools/mysql-tool` |
 | `mysql-pg-migrate` | MySQL-to-PostgreSQL migration workbench | `http://localhost:5175` | `http://localhost:8789/api` | `/tools/mysql-pg-migrate` |
+| `semantic-qa` | Verbatim semantic retrieval over a PostgreSQL Q&A corpus | `http://localhost:5176` | `http://localhost:8790/api` | `/tools/semantic-qa` |
 
 The shared host runs all tools from one UI:
 
@@ -50,14 +51,19 @@ The implementation gaps found while writing this guide are tracked separately in
 |   |-- src/ui/                   # MySQL backup UI
 |   |-- backups/                  # Generated MySQL backup folders/zips
 |   `-- mysqltool.profiles.json   # Optional profile template file
-`-- mysql-pg-migrate/
-    |-- src/server.js             # Standalone migration API/UI server
-    |-- src/registerRoutes.js     # Migration API routes
-    |-- src/lib/                  # Introspection, transforms, preflight, execution
-    |-- src/state/persistence.js  # JSON persistence layer
-    |-- src/ui/                   # Migration workbench UI
-    |-- state/                    # Projects, runs, checkpoints, reports, errors
-    `-- test/                     # Current migration tests
+|-- mysql-pg-migrate/
+|   |-- src/server.js             # Standalone migration API/UI server
+|   |-- src/registerRoutes.js     # Migration API routes
+|   |-- src/lib/                  # Introspection, transforms, preflight, execution
+|   |-- src/state/persistence.js  # JSON persistence layer
+|   |-- src/ui/                   # Migration workbench UI
+|   |-- state/                    # Projects, runs, checkpoints, reports, errors
+|   `-- test/                     # Current migration tests
+`-- semantic-qa/
+    |-- src/registerRoutes.js     # Retrieval, setup, and synchronization APIs
+    |-- src/database.js           # Source PostgreSQL and pgvector access
+    |-- src/ui/                   # Search, index, and settings UI
+    `-- test/                     # Retrieval and synchronization tests
 ```
 
 ## Prerequisites
@@ -121,6 +127,7 @@ Recommended bootstrap from the repository root:
 npm install
 npm --prefix ./pg-backup install
 npm --prefix ./mysql-pg-migrate install
+npm --prefix ./semantic-qa install
 ```
 
 Notes:
@@ -161,6 +168,7 @@ Shared-host tool routes:
 http://localhost:5173/tools/pg-backup
 http://localhost:5173/tools/mysql-tool
 http://localhost:5173/tools/mysql-pg-migrate
+http://localhost:5173/tools/semantic-qa
 ```
 
 The Vite dev server proxies `/api` to the shared Express host on `8787`.
@@ -262,6 +270,25 @@ npm run build:mysql-pg-migrate
 npm run start:mysql-pg-migrate
 ```
 
+### Semantic Q&A Retrieval
+
+Start Ollama and install an embedding model first, for example `ollama pull embeddinggemma`. The tool also needs a read-only source PostgreSQL connection and a separate PostgreSQL database where it can enable pgvector and create its `semantic_qa` schema.
+
+See the complete setup and troubleshooting guide in [`semantic-qa/README.md`](./semantic-qa/README.md).
+
+```bash
+npm run dev:semantic-qa
+```
+
+Open `http://localhost:5176`. The standalone API health endpoint is `http://localhost:8790/api/health`.
+
+Production-style:
+
+```bash
+npm run build:semantic-qa
+npm run start:semantic-qa
+```
+
 Run the current test suite:
 
 ```bash
@@ -286,6 +313,7 @@ Shared-host API base paths:
 pg-backup:         /api/tools/pg-backup
 mysql-tool:        /api/tools/mysql-tool
 mysql-pg-migrate:  /api/tools/mysql-pg-migrate
+semantic-qa:        /api/tools/semantic-qa
 ```
 
 Example:
