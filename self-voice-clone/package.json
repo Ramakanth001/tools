@@ -1,0 +1,16 @@
+{
+  "name": "self-voice-clone-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node scripts/runApi.js --reload",
+    "dev:api": "node scripts/runApi.js --reload",
+    "start": "node scripts/runApi.js",
+    "start:api": "node scripts/runApi.js",
+    "setup:python": "node scripts/setupPython.js",
+    "test": "node --test test/*.test.js && node scripts/runApiTests.js",
+    "test:proxy": "node --test test/*.test.js",
+    "test:api": "node scripts/runApiTests.js"
+  }
+}
