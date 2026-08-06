@@ -13,6 +13,8 @@ demo-data/
 
 mysql-pg-migrate/state
 **/public/assets/*
+!public/assets/
+!public/assets/*
 
 # Local Transcriber runtime, model cache, uploads, and artifacts
 transcriber/.venv/
@@ -22,3 +24,16 @@ transcriber/data/
 # Python bytecode
 **/__pycache__/
 *.py[cod]
+
+# Local Self Voice Clone runtime and sensitive voice data
+self-voice-clone/.venv/
+self-voice-clone/.cache/
+self-voice-clone/vclone/apps/api/.pytest_cache/
+self-voice-clone/vclone/apps/api/*.egg-info/
+self-voice-clone/vclone/apps/api/vclone.db
+self-voice-clone/vclone/apps/api/uploads/
+self-voice-clone/vclone/profiles/
+self-voice-clone/vclone/generated-audio/
+self-voice-clone/vclone/training-runs/
+self-voice-clone/vclone/training-data/*
+!self-voice-clone/vclone/training-data/sanskrit_benchmarks.json
