@@ -13,7 +13,7 @@ async function waitForTerminal(manager, id) {
 }
 
 function makeDb({ existingHashes = new Map(), corpusOverrides = {} } = {}) {
-  const state = { staged: [], committed: null, dropped: false, runUpdates: [] };
+  const state = { staged: [], stagedPassages: [], committed: null, dropped: false, runUpdates: [] };
   const client = { release() {} };
   const pool = { async connect() { return client; }, async end() {} };
   const records = [
@@ -37,12 +37,12 @@ function makeDb({ existingHashes = new Map(), corpusOverrides = {} } = {}) {
         embeddingModel: 'embeddinggemma',
         embeddingDimension: 3,
         embeddingFormatVersion: 'embeddinggemma-asymmetric-v3',
-        retrievalSchemaVersion: 'hybrid-v3',
+        retrievalSchemaVersion: 'passage-v4',
         embeddingModelDigest: null,
         ...corpusOverrides,
       }),
       createSyncRun: async () => {},
-      createSyncStage: async () => ({ stage: 'stage', seen: 'seen' }),
+      createSyncStage: async () => ({ stage: 'stage', passages: 'passages', seen: 'seen' }),
       openSourceSnapshot: async () => ({
         total: records.length,
         mapping: { schema: 'public', table: 'qa' },
@@ -53,6 +53,7 @@ function makeDb({ existingHashes = new Map(), corpusOverrides = {} } = {}) {
       insertSeen: async () => {},
       getExistingHashes: async () => existingHashes,
       insertStageRecords: async (_client, _table, rows) => state.staged.push(...rows),
+      insertStagePassages: async (_client, _table, rows) => state.stagedPassages.push(...rows),
       commitIncremental: async () => { state.committed = 'incremental'; },
       commitRebuild: async () => { state.committed = 'rebuild'; },
       dropSyncStage: async () => { state.dropped = true; },
@@ -67,7 +68,7 @@ const config = () => ({
   fetchSize: 25, embeddingBatchSize: 2,
 });
 
-test('incremental sync stages changed records and commits only after a complete scan', async () => {
+test('incremental sync embeds answer passages once and commits only after a complete scan', async () => {
   const { db, state } = makeDb();
   const embeddedTexts = [];
   const manager = createSyncManager({
@@ -84,9 +85,11 @@ test('incremental sync stages changed records and commits only after a complete 
   assert.equal(finished.processed, 2);
   assert.equal(finished.changed, 2);
   assert.equal(state.staged.length, 2);
+  assert.equal(state.stagedPassages.length, 2);
   assert.equal(state.committed, 'incremental');
   assert.equal(state.dropped, false);
-  assert.match(embeddedTexts[0], /Detailed source question/);
+  assert.match(embeddedTexts[0], /Answer one/);
+  assert.doesNotMatch(embeddedTexts[0], /Question one|Detailed source question/);
 });
 
 test('embedding failure drops staging and never commits', async () => {
@@ -99,9 +102,30 @@ test('embedding failure drops staging and never commits', async () => {
   const started = manager.start(config());
   const finished = await waitForTerminal(manager, started.id);
   assert.equal(finished.status, 'failed');
-  assert.match(finished.error, /source records/);
+  assert.match(finished.error, /answer passage/);
   assert.equal(state.committed, null);
   assert.equal(state.dropped, true);
+});
+
+test('transient embedding timeouts are retried as smaller batches', async () => {
+  const { db, state } = makeDb();
+  let calls = 0;
+  const manager = createSyncManager({
+    db,
+    probe: async () => ({ dimension: 3 }),
+    embed: async ({ texts }) => {
+      calls += 1;
+      if (calls === 1) throw new Error('Ollama request timed out');
+      return texts.map(() => [0.1, 0.2, 0.3]);
+    },
+  });
+  const started = manager.start(config());
+  const finished = await waitForTerminal(manager, started.id);
+  assert.equal(finished.status, 'completed');
+  assert.equal(calls, 3);
+  assert.equal(state.stagedPassages.length, 2);
+  assert.equal(state.committed, 'incremental');
+  assert.match(finished.logs.join('\n'), /retrying it as 1 \+ 1 passages/);
 });
 
 test('full rebuild embeds every record and uses the atomic rebuild commit', async () => {
@@ -116,6 +140,7 @@ test('full rebuild embeds every record and uses the atomic rebuild commit', asyn
   assert.equal(finished.status, 'completed');
   assert.equal(state.committed, 'rebuild');
   assert.equal(state.staged.length, 2);
+  assert.equal(state.stagedPassages.length, 2);
 });
 
 test('incremental sync avoids re-embedding unchanged records', async () => {
@@ -134,6 +159,7 @@ test('incremental sync avoids re-embedding unchanged records', async () => {
   assert.equal(finished.changed, 0);
   assert.equal(embeddingCalls, 0);
   assert.equal(state.staged.length, 0);
+  assert.equal(state.stagedPassages.length, 0);
   assert.equal(state.committed, 'incremental');
 });
 
