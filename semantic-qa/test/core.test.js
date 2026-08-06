@@ -9,12 +9,14 @@ const {
   buildDocumentEmbeddingText,
   buildEmbeddingText,
   buildLexicalQuery,
+  buildPassageEmbeddingText,
   buildQueryEmbeddingText,
   contentHash,
   buildSearchResponse,
   orderMatches,
   redactConnection,
   rerankMatches,
+  rerankPassageMatches,
   toVectorLiteral,
 } = require('../src/core');
 
@@ -29,12 +31,101 @@ test('builds a labeled question and answer embedding input without rewriting tex
     'task: question answering | query: Who is Swami?',
   );
   assert.equal(buildLexicalQuery('Who is Datta Swami?'), 'datta OR swami');
+  assert.equal(
+    buildPassageEmbeddingText('The light in Me signifies qualified monism.', { model: 'embeddinggemma' }),
+    'title:  | text: The light in Me signifies qualified monism.',
+  );
+});
+
+test('passage reranking accepts answer meaning without using the stored question or title', () => {
+  const matches = rerankPassageMatches([
+    {
+      sourceId: 'correct',
+      question: 'Is the resurrection of Jesus false?',
+      answer: 'The Light is in Me indicates qualified monism.',
+      passageIndex: 0,
+      passageText: 'Jesus saying The Light is in Me indicates qualified monism.',
+      passageStart: 0,
+      passageEnd: 61,
+      similarity: 0.48,
+      lexicalScore: 0.2,
+      metadata: {},
+    },
+    {
+      sourceId: 'wrong-title',
+      question: 'What is the meaning of a ray of light?',
+      answer: 'A dream contained a ray of light.',
+      passageIndex: 0,
+      passageText: 'A dream contained a ray of light.',
+      passageStart: 0,
+      passageEnd: 33,
+      similarity: 0.43,
+      lexicalScore: 1,
+      metadata: {},
+    },
+  ], 'What is the meaning of Jesus saying The light is in me?', 5);
+  assert.equal(matches[0].sourceId, 'correct');
+  assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
+  assert.equal(matches[0].rankingSignals.titleWeight, 0);
+  assert.equal(matches[0].rankingSignals.questionWeight, 0);
+  assert.equal(matches[0].matchedPassages[0].text, 'Jesus saying The Light is in Me indicates qualified monism.');
+});
+
+test('one independent semantic support passage can lift a borderline answer without lexical weight', () => {
+  const matches = rerankPassageMatches([
+    {
+      sourceId: 'stages', passageIndex: 5,
+      passageText: 'The Light is in Me means qualified monism between dualism and monism.',
+      passageStart: 100, passageEnd: 175, similarity: 0.4767, lexicalScore: 1,
+    },
+    {
+      sourceId: 'stages', passageIndex: 2,
+      passageText: 'Jesus also described monism and dualism as distinct philosophical stages.',
+      passageStart: 20, passageEnd: 92, similarity: 0.4354, lexicalScore: 0,
+    },
+  ], 'What does The Light is in Me mean?', 5);
+  assert.ok(matches[0].relevanceScore >= 0.49);
+  assert.equal(matches[0].rankingSignals.supportingPassages, 1);
+  assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
+});
+
+test('an explicit quoted phrase orders the matching semantic answer before a nearby rewording', () => {
+  const matches = rerankPassageMatches([
+    {
+      sourceId: 'nearby', passageIndex: 0,
+      passageText: 'Jesus said I am the Light, meaning complete monism.',
+      passageStart: 0, passageEnd: 55, similarity: 0.64,
+    },
+    {
+      sourceId: 'exact', passageIndex: 0,
+      passageText: 'The Light is in Me means qualified monism.',
+      passageStart: 0, passageEnd: 46, similarity: 0.54,
+    },
+  ], 'What does "The Light is in Me" mean?', 5);
+  assert.equal(matches[0].sourceId, 'exact');
+  assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
+  assert.equal(matches[0].rankingSignals.titleWeight, 0);
+});
+
+test('the final response order preserves an explicit quote identity constraint', () => {
+  const response = buildSearchResponse([
+    {
+      sourceId: 'nearby', relevanceScore: 0.70, similarity: 0.70,
+      matchedPassages: [{ text: 'I am the Light means monism.' }],
+    },
+    {
+      sourceId: 'exact', relevanceScore: 0.55, similarity: 0.55,
+      matchedPassages: [{ text: 'The Light is in Me means qualified monism.' }],
+    },
+  ], 0.49, 'What does "The Light is in Me" mean?');
+  assert.equal(response.acceptedMatch.sourceId, 'exact');
+  assert.equal(response.matches[0].relevanceRank, 1);
 });
 
 test('current embedding formats include distinct source context and retain the EmbeddingGemma prompts', () => {
   assert.equal(GENERIC_EMBEDDING_FORMAT, 'generic-qa-v3');
   assert.equal(EMBEDDINGGEMMA_FORMAT, 'embeddinggemma-asymmetric-v3');
-  assert.equal(RETRIEVAL_SCHEMA_VERSION, 'hybrid-v3');
+  assert.equal(RETRIEVAL_SCHEMA_VERSION, 'passage-v4');
   assert.equal(
     buildDocumentEmbeddingText('Who is Ada?', 'Ada was a mathematician.', {
       model: 'embeddinggemma',

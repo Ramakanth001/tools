@@ -6,7 +6,7 @@ const LEGACY_EMBEDDING_FORMAT = 'legacy-v1';
 const GENERIC_EMBEDDING_FORMAT = 'generic-qa-v3';
 const EMBEDDINGGEMMA_FORMAT = 'embeddinggemma-asymmetric-v3';
 const LEGACY_EMBEDDINGGEMMA_FORMAT = 'embeddinggemma-asymmetric-v2';
-const RETRIEVAL_SCHEMA_VERSION = 'hybrid-v3';
+const RETRIEVAL_SCHEMA_VERSION = 'passage-v4';
 
 const SEARCH_STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'can', 'could', 'did', 'do', 'does', 'for', 'from',
@@ -69,6 +69,10 @@ function buildDocumentEmbeddingText(question, answer, { model, formatVersion, co
   return buildEmbeddingText(question, documentText);
 }
 
+function buildPassageEmbeddingText(passage, { model, formatVersion } = {}) {
+  return buildDocumentEmbeddingText('', passage, { model, formatVersion });
+}
+
 function buildQueryEmbeddingText(question, { model, formatVersion } = {}) {
   const format = formatVersion || embeddingFormatForModel(model);
   if (isEmbeddingGemmaFormat(format)) {
@@ -86,6 +90,25 @@ function tokenizeSearchText(value) {
 
 function significantTokens(value) {
   return [...new Set(tokenizeSearchText(value).filter((token) => token.length > 1 && !SEARCH_STOP_WORDS.has(token)))];
+}
+
+function quotedPhrases(value) {
+  const phrases = [];
+  const expression = /"([^"\n]{3,})"|“([^”\n]{3,})”|'([^'\n]{3,})'|‘([^’\n]{3,})’/gu;
+  for (const match of String(value || '').matchAll(expression)) {
+    const phrase = normalizedComparableText(match.slice(1).find(Boolean)).toLocaleLowerCase();
+    if (phrase && !phrases.includes(phrase)) phrases.push(phrase);
+  }
+  return phrases;
+}
+
+function passageMatchesQuotedPhrases(row, phrases) {
+  if (!phrases.length) return false;
+  return (Array.isArray(row.matchedPassages) ? row.matchedPassages : [])
+    .some((passage) => {
+      const text = normalizedComparableText(passage.text).toLocaleLowerCase();
+      return phrases.every((phrase) => text.includes(phrase));
+    });
 }
 
 function buildLexicalQuery(question) {
@@ -201,6 +224,89 @@ function rerankMatches(rows, query, limit = 5) {
     .slice(0, Math.max(1, Number(limit) || 5));
 }
 
+function rerankPassageMatches(rows, query, limit = 5) {
+  const records = new Map();
+  for (const row of rows) {
+    const key = String(row.sourceId);
+    if (!records.has(key)) records.set(key, []);
+    records.get(key).push(row);
+  }
+
+  const rankedRecords = [];
+  for (const sourceRows of records.values()) {
+    const passages = sourceRows
+      .map((row) => ({
+        sourceId: row.sourceId,
+        passageIndex: Number(row.passageIndex),
+        text: row.passageText,
+        start: Number(row.passageStart),
+        end: Number(row.passageEnd),
+        semanticSimilarity: Math.max(0, Math.min(1, Number(row.similarity) || 0)),
+        lexicalScore: Number(row.lexicalScore) || 0,
+      }))
+      .sort((left, right) => (
+        right.semanticSimilarity - left.semanticSimilarity ||
+        right.lexicalScore - left.lexicalScore ||
+        left.passageIndex - right.passageIndex
+      ));
+    if (!passages.length) continue;
+
+    const best = passages[0];
+    const supportingPassages = passages.filter((passage, index) => (
+      index > 0 && passage.semanticSimilarity >= Math.max(0.35, best.semanticSimilarity - 0.12)
+    )).length;
+    // Passage meaning is the acceptance signal. Independent semantic support can
+    // only add a small bonus; word overlap and stored titles add nothing.
+    const relevanceScore = Math.min(
+      1,
+      best.semanticSimilarity + Math.min(0.03, supportingPassages * 0.015),
+    );
+    const representative = sourceRows.find((row) => Number(row.passageIndex) === best.passageIndex) || sourceRows[0];
+    rankedRecords.push({
+      ...representative,
+      similarity: best.semanticSimilarity,
+      lexicalScore: best.lexicalScore,
+      relevanceScore,
+      matchedPassages: passages.slice(0, 5),
+      rankingSignals: {
+        supportingPassages,
+        lexicalWeight: 0,
+        titleWeight: 0,
+        questionWeight: 0,
+      },
+    });
+  }
+
+  const groups = new Map();
+  for (const row of rankedRecords) {
+    const key = isDocumentChunk(row)
+      ? `document:${String(row.sourceGroup)}`
+      : `record:${String(row.sourceId)}`;
+    const current = groups.get(key);
+    if (!current ||
+        row.relevanceScore > current.relevanceScore ||
+        (row.relevanceScore === current.relevanceScore && row.similarity > current.similarity)) {
+      groups.set(key, row);
+    }
+  }
+  const sorted = [...groups.values()]
+    .sort((left, right) => (
+      right.relevanceScore - left.relevanceScore ||
+      right.similarity - left.similarity ||
+      String(left.sourceId).localeCompare(String(right.sourceId))
+    ));
+  const phrases = quotedPhrases(query);
+  if (phrases.length && sorted.some((row) => passageMatchesQuotedPhrases(row, phrases))) {
+    sorted.sort((left, right) => (
+      Number(passageMatchesQuotedPhrases(right, phrases)) - Number(passageMatchesQuotedPhrases(left, phrases)) ||
+      right.relevanceScore - left.relevanceScore ||
+      right.similarity - left.similarity ||
+      String(left.sourceId).localeCompare(String(right.sourceId))
+    ));
+  }
+  return sorted.slice(0, Math.max(1, Number(limit) || 5));
+}
+
 function contentHash(record) {
   const stable = {
     sourceId: String(record.sourceId),
@@ -220,9 +326,14 @@ function toVectorLiteral(values) {
   return `[${values.map((value) => Number(value)).join(',')}]`;
 }
 
-function orderMatches(rows) {
+function orderMatches(rows, query = '') {
+  const phrases = quotedPhrases(query);
+  const hasQuotedMatch = phrases.length && rows.some((row) => passageMatchesQuotedPhrases(row, phrases));
   return [...rows]
     .sort((a, b) => (
+      (hasQuotedMatch
+        ? Number(passageMatchesQuotedPhrases(b, phrases)) - Number(passageMatchesQuotedPhrases(a, phrases))
+        : 0) ||
       Number(b.relevanceScore ?? b.similarity) - Number(a.relevanceScore ?? a.similarity) ||
       Number(b.similarity) - Number(a.similarity) ||
       String(a.sourceId).localeCompare(String(b.sourceId))
@@ -230,8 +341,8 @@ function orderMatches(rows) {
     .map((row, index) => ({ ...row, similarity: Number(row.similarity), relevanceRank: index + 1 }));
 }
 
-function buildSearchResponse(rows, threshold) {
-  const matches = orderMatches(rows);
+function buildSearchResponse(rows, threshold, query = '') {
+  const matches = orderMatches(rows, query);
   const topScore = matches.length ? Number(matches[0].relevanceScore ?? matches[0].similarity) : -Infinity;
   const strongMatch = Number.isFinite(topScore) && topScore >= Number(threshold);
   return {
@@ -262,9 +373,11 @@ module.exports = {
   buildEmbeddingText,
   embeddingFormatForModel,
   buildDocumentEmbeddingText,
+  buildPassageEmbeddingText,
   buildQueryEmbeddingText,
   buildLexicalQuery,
   rerankMatches,
+  rerankPassageMatches,
   scoreCandidate,
   contentHash,
   toVectorLiteral,
