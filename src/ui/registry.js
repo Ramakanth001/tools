@@ -2,6 +2,7 @@ import PgBackupTool from '../../pg-backup/src/ui/PgBackupTool.jsx';
 import MysqlTool from '../../mysql-tool/src/ui/MysqlTool.jsx';
 import MysqlPgMigrateTool from '../../mysql-pg-migrate/src/ui/main.jsx';
 import SemanticQaTool from '../../semantic-qa/src/ui/SemanticQaTool.jsx';
+import TranscriberTool from '../../transcriber/src/ui/TranscriberTool.jsx';
 
 export const TOOLS = [
   {
@@ -62,6 +63,21 @@ export const TOOLS = [
       homePath: '/tools/semantic-qa',
       logsPath: '/tools/semantic-qa/logs',
       storagePrefix: 'tools.semantic-qa',
+    },
+  },
+  {
+    id: 'transcriber',
+    name: 'transcriber',
+    description: 'Local Whisper transcription for audio and video with TXT and SRT exports.',
+    path: '/tools/transcriber',
+    logsPath: '/tools/transcriber/logs',
+    component: TranscriberTool,
+    runtime: {
+      toolId: 'transcriber',
+      apiBasePath: '/api/tools/transcriber',
+      homePath: '/tools/transcriber',
+      logsPath: '/tools/transcriber/logs',
+      storagePrefix: 'tools.transcriber',
     },
   },
 ];
