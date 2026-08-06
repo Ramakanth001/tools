@@ -1,8 +1,8 @@
 [
   {
     "question": "Who is Datta Swami?",
-    "relevantSourceGroups": ["discourse:737", "discourse:891", "discourse:702", "discourse:1322", "discourse:738"],
-    "relevantSourceIds": ["discourse:737:003", "discourse:737:004", "discourse:738:002", "discourse:891:001", "discourse:702:001", "discourse:1322:001"],
+    "relevantSourceGroups": ["discourse:737", "discourse:891", "discourse:702", "discourse:1322", "discourse:738", "discourse:2865", "discourse:727", "discourse:2753", "discourse:4345", "qa:233"],
+    "relevantSourceIds": ["discourse:737:003", "discourse:737:004", "discourse:738:002", "discourse:891:001", "discourse:702:001", "discourse:1322:001", "discourse:2865:002", "discourse:727:009", "discourse:2753:004", "discourse:4345:002", "qa:233"],
     "minimumRelevantInTop": 2,
     "requireTop1": true
   },
@@ -14,14 +14,14 @@
   },
   {
     "question": "What is the real nature of Datta?",
-    "relevantSourceGroups": ["qa:49"],
-    "relevantSourceIds": ["qa:49:001"],
+    "relevantSourceGroups": ["qa:49", "discourse:550", "discourse:879", "discourse:816"],
+    "relevantSourceIds": ["qa:49:001", "discourse:550:008", "discourse:879:006", "discourse:816:001"],
     "requireTop1": true
   },
   {
     "question": "What is the difference between Lord Datta and Lord Dattatreya?",
-    "relevantSourceGroups": ["discourse:2068"],
-    "relevantSourceIds": ["discourse:2068"],
+    "relevantSourceGroups": ["discourse:2068", "discourse:675", "discourse:415", "discourse:5173"],
+    "relevantSourceIds": ["discourse:2068", "discourse:675:001", "discourse:415:002", "discourse:5173:001"],
     "requireTop1": true
   },
   {
@@ -32,11 +32,11 @@
   },
   {
     "question": "Why do my prayers go unanswered?",
-    "relevantSourceGroups": ["qa:159", "discourse:3463", "discourse:4513"]
+    "relevantSourceGroups": ["qa:159", "discourse:3463", "discourse:4513", "qa:98", "discourse:782"]
   },
   {
     "question": "Is the world real or an illusion?",
-    "relevantSourceGroups": ["qa:60", "discourse:2496"]
+    "relevantSourceGroups": ["qa:60", "discourse:2496", "discourse:1526", "discourse:4034", "discourse:708", "discourse:1523"]
   },
   {
     "question": "How should I deal with anxiety about having a child?",
@@ -46,13 +46,13 @@
   },
   {
     "question": "How can I serve Swami?",
-    "relevantSourceGroups": ["qa:323"],
-    "relevantSourceIds": ["qa:323"]
+    "relevantSourceGroups": ["qa:323", "discourse:728", "discourse:5594", "discourse:3037"],
+    "relevantSourceIds": ["qa:323", "discourse:728:001", "discourse:5594:003", "discourse:3037:002"]
   },
   {
     "question": "Question on test conduted by Lord Datta.",
-    "relevantSourceGroups": ["qa:421"],
-    "relevantSourceIds": ["qa:421"]
+    "relevantSourceGroups": ["qa:421", "discourse:707", "qa:87", "discourse:4486", "discourse:80"],
+    "relevantSourceIds": ["qa:421", "discourse:707:004", "qa:87:001", "discourse:4486", "discourse:80:005"]
   },
   {
     "question": "How to get direction in my life?",
@@ -66,8 +66,14 @@
   },
   {
     "question": "should we use oil based lamp?",
-    "relevantSourceGroups": ["discourse:1841"],
-    "relevantSourceIds": ["discourse:1841"],
+    "relevantSourceGroups": ["discourse:1841", "discourse:533", "discourse:1118", "qa:144", "discourse:1690", "discourse:383"],
+    "relevantSourceIds": ["discourse:1841", "discourse:533:003", "discourse:1118:002", "qa:144:004", "discourse:1690", "discourse:383:001"],
+    "requireTop1": true
+  },
+  {
+    "question": "What is the meaning of Jesus saying \"The light is in me\"?",
+    "relevantSourceGroups": ["discourse:1199", "discourse:1322", "discourse:228", "discourse:1008", "discourse:3427"],
+    "relevantSourceIds": ["discourse:1199:003", "discourse:1322:004", "discourse:228:002", "discourse:1008:002", "discourse:3427:024"],
     "requireTop1": true
   },
   {
