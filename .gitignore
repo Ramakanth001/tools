@@ -13,3 +13,12 @@ demo-data/
 
 mysql-pg-migrate/state
 **/public/assets/*
+
+# Local Transcriber runtime, model cache, uploads, and artifacts
+transcriber/.venv/
+transcriber/.cache/
+transcriber/data/
+
+# Python bytecode
+**/__pycache__/
+*.py[cod]
