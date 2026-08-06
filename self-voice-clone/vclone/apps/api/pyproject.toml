@@ -1,0 +1,53 @@
+[project]
+name = "vclone-api"
+version = "0.1.0"
+description = "MVP backend for personal voice clone TTS platform"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "sqlalchemy>=2.0.30",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.2.1",
+  "python-multipart>=0.0.9"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5"
+]
+quality = [
+  "numpy>=1.26",
+  "soundfile>=0.12.1",
+  "scipy>=1.11"
+]
+xtts = [
+  "TTS>=0.22.0"
+]
+asr = [
+  "faster-whisper>=1.0.0"
+]
+speaker = [
+  "speechbrain>=1.0.0",
+  "torchaudio>=2.2.0"
+]
+voxcpm = [
+  "voxcpm",
+  "soundfile>=0.12.1"
+]
+chatterbox = [
+  "chatterbox-tts"
+]
+clone-engines = [
+  "voxcpm",
+  "soundfile>=0.12.1"
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["alembic*"]
