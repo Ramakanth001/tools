@@ -1,6 +1,6 @@
 # Tools Workspace
 
-This repository is a local web workspace for database utilities. It has a shared React/Express host plus four tools:
+This repository is a local web workspace for developer utilities. It has a shared React/Express host plus five tools:
 
 | Tool | Purpose | Standalone UI | Standalone API | Shared-host route |
 | --- | --- | --- | --- | --- |
@@ -8,6 +8,7 @@ This repository is a local web workspace for database utilities. It has a shared
 | `mysql-tool` | MySQL backup runner, history, settings | `http://localhost:5174` | `http://localhost:8788/api` | `/tools/mysql-tool` |
 | `mysql-pg-migrate` | MySQL-to-PostgreSQL migration workbench | `http://localhost:5175` | `http://localhost:8789/api` | `/tools/mysql-pg-migrate` |
 | `semantic-qa` | Verbatim semantic retrieval over a PostgreSQL Q&A corpus | `http://localhost:5176` | `http://localhost:8790/api` | `/tools/semantic-qa` |
+| `transcriber` | Local Whisper audio/video transcription with TXT/SRT exports | `http://localhost:5177` | `http://localhost:8791/api` | `/tools/transcriber` |
 
 The shared host runs all tools from one UI:
 
@@ -59,11 +60,17 @@ The implementation gaps found while writing this guide are tracked separately in
 |   |-- src/ui/                   # Migration workbench UI
 |   |-- state/                    # Projects, runs, checkpoints, reports, errors
 |   `-- test/                     # Current migration tests
-`-- semantic-qa/
-    |-- src/registerRoutes.js     # Retrieval, setup, and synchronization APIs
-    |-- src/database.js           # Source PostgreSQL and pgvector access
-    |-- src/ui/                   # Search, index, and settings UI
-    `-- test/                     # Retrieval and synchronization tests
+|-- semantic-qa/
+|   |-- src/registerRoutes.js     # Retrieval, setup, and synchronization APIs
+|   |-- src/database.js           # Source PostgreSQL and pgvector access
+|   |-- src/ui/                   # Search, index, and settings UI
+|   `-- test/                     # Retrieval and synchronization tests
+`-- transcriber/
+    |-- python/                   # Adapted Whisper worker
+    |-- src/registerRoutes.js     # Upload, job, SSE, and artifact APIs
+    |-- src/ui/                   # Transcription UI
+    |-- data/                     # Ignored uploads, metadata, and artifacts
+    `-- test/                     # Worker and API tests
 ```
 
 ## Prerequisites
@@ -119,6 +126,15 @@ For MySQL-to-PostgreSQL migrations, the tool connects through Node drivers:
 
 It does not require `mysqldump`, `mysql`, `pg_dump`, or `psql` for the migration workflow.
 
+For local transcription, install Python 3.11 or 3.12 plus FFmpeg. The default Python 3.14 interpreter is not used for the isolated Whisper environment.
+
+```bash
+brew install python@3.11 ffmpeg
+python3.11 --version
+ffmpeg -version
+ffprobe -version
+```
+
 ## Install
 
 Recommended bootstrap from the repository root:
@@ -128,6 +144,7 @@ npm install
 npm --prefix ./pg-backup install
 npm --prefix ./mysql-pg-migrate install
 npm --prefix ./semantic-qa install
+npm run setup:transcriber
 ```
 
 Notes:
@@ -169,6 +186,7 @@ http://localhost:5173/tools/pg-backup
 http://localhost:5173/tools/mysql-tool
 http://localhost:5173/tools/mysql-pg-migrate
 http://localhost:5173/tools/semantic-qa
+http://localhost:5173/tools/transcriber
 ```
 
 The Vite dev server proxies `/api` to the shared Express host on `8787`.
@@ -289,10 +307,31 @@ npm run build:semantic-qa
 npm run start:semantic-qa
 ```
 
+### Local Whisper Transcriber
+
+Create the Python environment once, then start the standalone UI/API pair:
+
+```bash
+npm run setup:transcriber
+npm run dev:transcriber
+```
+
+Open `http://localhost:5177`. The standalone API health endpoint is `http://localhost:8791/api/health`.
+
+Production-style:
+
+```bash
+npm run build:transcriber
+npm run start:transcriber
+```
+
+The first job for a model downloads its weights into the ignored local cache. Uploaded audio/video and intermediate chunks are deleted after the job finishes; TXT/SRT artifacts remain in ignored job storage until deletion. See [`transcriber/README.md`](./transcriber/README.md) for endpoints, configuration, and troubleshooting.
+
 Run the current test suite:
 
 ```bash
 npm --prefix ./mysql-pg-migrate test
+npm run test:transcriber
 ```
 
 ## API Mount Paths
@@ -305,6 +344,8 @@ Standalone API base paths:
 pg-backup:         /api
 mysql-tool:        /api
 mysql-pg-migrate:  /api
+semantic-qa:        /api
+transcriber:        /api
 ```
 
 Shared-host API base paths:
@@ -314,6 +355,7 @@ pg-backup:         /api/tools/pg-backup
 mysql-tool:        /api/tools/mysql-tool
 mysql-pg-migrate:  /api/tools/mysql-pg-migrate
 semantic-qa:        /api/tools/semantic-qa
+transcriber:        /api/tools/transcriber
 ```
 
 Example:
@@ -613,6 +655,9 @@ Gitignored generated data:
 ```text
 **/backups/
 mysql-pg-migrate/state
+transcriber/.venv
+transcriber/.cache
+transcriber/data
 public/assets/*
 **/public/assets/*
 ```
@@ -625,6 +670,7 @@ Do not commit:
 - dry-run reports with sample data
 - error exports
 - local credential material
+- uploaded media, cached Whisper weights, and transcript artifacts
 
 ## Safety Model
 
@@ -639,6 +685,7 @@ Important caveats:
 - Database credentials are passed to subprocesses through environment variables where the database CLI requires them.
 - Migration dry-run and transform-preview report files redact sample row payloads when persisted; live UI responses still show preview samples.
 - Error exports and quarantine files can contain source row payloads.
+- Transcriber media, logs, and output text can contain sensitive spoken content; uploads are temporary but completed artifacts persist until deleted.
 
 Example non-loopback run:
 
@@ -720,6 +767,18 @@ npm --prefix ./pg-backup install
 
 Current scripts resolve Vite and concurrently through `src/runPackageBin.js`. If a binary cannot be resolved, install dependencies from the repository root and the relevant subtool.
 
+### Transcriber says setup is required
+
+Install Python 3.11/3.12 and FFmpeg, then recreate the isolated runtime:
+
+```bash
+npm run setup:transcriber
+ffmpeg -version
+ffprobe -version
+```
+
+Run diagnostics again in the UI. The first use of each Whisper model also needs network access to download model weights; later jobs use the local cache.
+
 ### Migration says source password is required
 
 The migration backend accepts the explicit MySQL password field or a password embedded in a `mysql://` source connection string. If the error persists, verify the URL is valid and includes a username, password, host, and database.
@@ -750,6 +809,7 @@ npm run dev
 npm run build
 npm run start
 npm --prefix ./mysql-pg-migrate test
+npm run test:transcriber
 ```
 
 Before changing migration behavior, add or update tests under:
