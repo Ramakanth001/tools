@@ -10,11 +10,13 @@ const mysqlToolManifest = require('../mysql-tool/tool.manifest.js');
 const mysqlPgMigrateManifest = require('../mysql-pg-migrate/tool.manifest.js');
 const semanticQaManifest = require('../semantic-qa/tool.manifest.js');
 const transcriberManifest = require('../transcriber/tool.manifest.js');
+const selfVoiceCloneManifest = require('../self-voice-clone/tool.manifest.js');
 const { registerPgBackupRoutes } = require('../pg-backup/src/registerRoutes.js');
 const { registerMysqlToolRoutes } = require('../mysql-tool/src/registerRoutes.js');
 const { registerMysqlPgMigrateRoutes } = require('../mysql-pg-migrate/src/registerRoutes.js');
 const { registerSemanticQaRoutes } = require('../semantic-qa/src/registerRoutes.js');
 const { registerTranscriberRoutes } = require('../transcriber/src/registerRoutes.js');
+const { registerSelfVoiceCloneProxy } = require('../self-voice-clone/src/registerRoutes.js');
 const { applyLocalApiAuth } = require('./localAuth');
 
 const app = express();
@@ -22,7 +24,7 @@ const app = express();
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DIST_INDEX = path.join(PUBLIC_DIR, 'index.html');
 
-const manifests = [pgBackupManifest, mysqlToolManifest, mysqlPgMigrateManifest, semanticQaManifest, transcriberManifest];
+const manifests = [pgBackupManifest, mysqlToolManifest, mysqlPgMigrateManifest, semanticQaManifest, transcriberManifest, selfVoiceCloneManifest];
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 
@@ -49,6 +51,7 @@ registerMysqlToolRoutes(app, { basePath: mysqlToolManifest.apiBasePath });
 registerMysqlPgMigrateRoutes(app, { basePath: mysqlPgMigrateManifest.apiBasePath });
 registerSemanticQaRoutes(app, { basePath: semanticQaManifest.apiBasePath });
 registerTranscriberRoutes(app, { basePath: transcriberManifest.apiBasePath });
+registerSelfVoiceCloneProxy(app, { basePath: selfVoiceCloneManifest.apiBasePath });
 
 app.use(express.static(PUBLIC_DIR));
 
@@ -61,10 +64,18 @@ app.get(/.*/, async (_req, res) => {
   }
 });
 
-app.listen(port, host, () => {
+const server = app.listen(port, host, () => {
   const shownHost = host === '127.0.0.1' ? 'localhost' : host;
   if (host !== '127.0.0.1' && host !== '::1') {
     console.warn(`WARNING: tools is listening on non-loopback host ${host}.`);
   }
   console.log(`tools running on http://${shownHost}:${port}`);
 });
+
+function shutdown(signal) {
+  console.log(`Received ${signal}, shutting down tools...`);
+  server.close(() => process.exit(0));
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
