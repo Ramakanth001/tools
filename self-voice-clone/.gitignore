@@ -1,0 +1,70 @@
+node_modules/
+vclone/apps/web/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Local databases and uploads
+*.db
+uploads/
+
+# Environment files
+.env
+.env.*
+
+# macOS / editor
+.DS_Store
+.vscode/
+
+# Next.js / build caches
+.next/
+dist/
+build/
+vclone/apps/web/.next/
+vclone/apps/api/.next/
+
+# Local temp artifacts
+*.log
+tmp/
+temp/
+
+# Generated local audio / subtitle artifacts
+bkp-srt-curated-TG.wav
+vclone/Swami-voice.wav
+vclone/Swami-srt.srt
+vclone/generated-audio/
+vclone/training-data/*
+!vclone/training-data/sanskrit_benchmarks.json
+
+# API runtime/user-generated data
+vclone/apps/api/uploads/
+
+# Python packaging artifacts
+vclone/apps/api/vclone_api.egg-info/
+
+# Generated voice diagnostics
+vclone/profiles/*/diagnostics/
+
+# Generated synthesis intermediates / deliveries
+*-paused.wav
+native-mix.wav
+output.wav
+output.flac
+
+
+
+# Common Python/tool caches
+.coverage
+.ruff_cache/
+.tox/
+.nox/
+.cache/
+*.sqlite3
