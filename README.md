@@ -1,6 +1,6 @@
 # Tools Workspace
 
-This repository is a local web workspace for developer utilities. It has a shared React/Express host plus five tools:
+This repository is a local web workspace for developer utilities. It has a shared React/Express host plus six tools:
 
 | Tool | Purpose | Standalone UI | Standalone API | Shared-host route |
 | --- | --- | --- | --- | --- |
@@ -9,6 +9,7 @@ This repository is a local web workspace for developer utilities. It has a share
 | `mysql-pg-migrate` | MySQL-to-PostgreSQL migration workbench | `http://localhost:5175` | `http://localhost:8789/api` | `/tools/mysql-pg-migrate` |
 | `semantic-qa` | Verbatim semantic retrieval over a PostgreSQL Q&A corpus | `http://localhost:5176` | `http://localhost:8790/api` | `/tools/semantic-qa` |
 | `transcriber` | Local Whisper audio/video transcription with TXT/SRT exports | `http://localhost:5177` | `http://localhost:8791/api` | `/tools/transcriber` |
+| `self-voice-clone` | Personal voice enrollment, diagnostics, adaptation, and local synthesis | Shared UI | `http://localhost:8792/v1` | `/tools/self-voice-clone` |
 
 The shared host runs all tools from one UI:
 
@@ -65,12 +66,17 @@ The implementation gaps found while writing this guide are tracked separately in
 |   |-- src/database.js           # Source PostgreSQL and pgvector access
 |   |-- src/ui/                   # Search, index, and settings UI
 |   `-- test/                     # Retrieval and synchronization tests
-`-- transcriber/
-    |-- python/                   # Adapted Whisper worker
-    |-- src/registerRoutes.js     # Upload, job, SSE, and artifact APIs
-    |-- src/ui/                   # Transcription UI
-    |-- data/                     # Ignored uploads, metadata, and artifacts
-    `-- test/                     # Worker and API tests
+|-- transcriber/
+|   |-- python/                   # Adapted Whisper worker
+|   |-- src/registerRoutes.js     # Upload, job, SSE, and artifact APIs
+|   |-- src/ui/                   # Transcription UI
+|   |-- data/                     # Ignored uploads, metadata, and artifacts
+|   `-- test/                     # Worker and API tests
+`-- self-voice-clone/
+    |-- src/ui/                   # Native shared-shell React UI
+    |-- src/registerRoutes.js     # Streaming proxy to FastAPI
+    |-- vclone/apps/api/          # Migrated FastAPI application and tests
+    `-- vclone/apps/api/uploads/  # Ignored migrated voice/profile assets
 ```
 
 ## Prerequisites
@@ -126,7 +132,7 @@ For MySQL-to-PostgreSQL migrations, the tool connects through Node drivers:
 
 It does not require `mysqldump`, `mysql`, `pg_dump`, or `psql` for the migration workflow.
 
-For local transcription, install Python 3.11 or 3.12 plus FFmpeg. The default Python 3.14 interpreter is not used for the isolated Whisper environment.
+For local transcription and voice cloning, install Python 3.11 or 3.12 plus FFmpeg. The default Python 3.14 interpreter is not used for the isolated environments.
 
 ```bash
 brew install python@3.11 ffmpeg
@@ -145,6 +151,7 @@ npm --prefix ./pg-backup install
 npm --prefix ./mysql-pg-migrate install
 npm --prefix ./semantic-qa install
 npm run setup:transcriber
+npm run setup:self-voice-clone
 ```
 
 Notes:
@@ -187,6 +194,7 @@ http://localhost:5173/tools/mysql-tool
 http://localhost:5173/tools/mysql-pg-migrate
 http://localhost:5173/tools/semantic-qa
 http://localhost:5173/tools/transcriber
+http://localhost:5173/tools/self-voice-clone
 ```
 
 The Vite dev server proxies `/api` to the shared Express host on `8787`.
@@ -327,11 +335,23 @@ npm run start:transcriber
 
 The first job for a model downloads its weights into the ignored local cache. Uploaded audio/video and intermediate chunks are deleted after the job finishes; TXT/SRT artifacts remain in ignored job storage until deletion. See [`transcriber/README.md`](./transcriber/README.md) for endpoints, configuration, and troubleshooting.
 
+### Self Voice Clone
+
+Create the isolated Python environment once, then run the normal shared workspace:
+
+```bash
+npm run setup:self-voice-clone
+npm run dev
+```
+
+Open `http://localhost:5173/tools/self-voice-clone`. FastAPI listens on loopback port `8792` and is exposed through `/api/tools/self-voice-clone`; the native React UI is part of the shared Vite build. Existing migrated profiles and uploads are local, sensitive, and ignored by Git. See [`self-voice-clone/README.md`](./self-voice-clone/README.md) for setup, data layout, engine configuration, and troubleshooting.
+
 Run the current test suite:
 
 ```bash
 npm --prefix ./mysql-pg-migrate test
 npm run test:transcriber
+npm run test:self-voice-clone
 ```
 
 ## API Mount Paths
@@ -346,6 +366,7 @@ mysql-tool:        /api
 mysql-pg-migrate:  /api
 semantic-qa:        /api
 transcriber:        /api
+self-voice-clone:   /v1 (FastAPI on loopback port 8792)
 ```
 
 Shared-host API base paths:
@@ -356,6 +377,7 @@ mysql-tool:        /api/tools/mysql-tool
 mysql-pg-migrate:  /api/tools/mysql-pg-migrate
 semantic-qa:        /api/tools/semantic-qa
 transcriber:        /api/tools/transcriber
+self-voice-clone:   /api/tools/self-voice-clone/v1
 ```
 
 Example:
