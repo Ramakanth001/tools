@@ -28,7 +28,13 @@
     "start:semantic-qa": "npm --prefix ./semantic-qa run start",
     "test:semantic-qa": "npm --prefix ./semantic-qa test",
     "build:semantic-qa": "npm --prefix ./semantic-qa run build",
-    "preview:semantic-qa": "npm --prefix ./semantic-qa run preview"
+    "preview:semantic-qa": "npm --prefix ./semantic-qa run preview",
+    "dev:transcriber": "npm --prefix ./transcriber run dev",
+    "start:transcriber": "npm --prefix ./transcriber run start",
+    "setup:transcriber": "npm --prefix ./transcriber run setup:python",
+    "test:transcriber": "npm --prefix ./transcriber test",
+    "build:transcriber": "npm --prefix ./transcriber run build",
+    "preview:transcriber": "npm --prefix ./transcriber run preview"
   },
   "dependencies": {
     "archiver": "^7.0.1",
