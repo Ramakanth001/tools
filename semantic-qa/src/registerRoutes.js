@@ -8,7 +8,8 @@ const {
   buildSearchResponse,
   embeddingFormatForModel,
   orderMatches,
-  rerankMatches,
+  rerankPassageMatches,
+  NO_MATCH_MESSAGE,
   RETRIEVAL_SCHEMA_VERSION,
 } = require('./core');
 const {
@@ -52,6 +53,10 @@ const OllamaSchema = z.object({
   model: z.string().trim().min(1).default('embeddinggemma'),
 });
 
+const SummaryModelSchema = z.object({
+  summaryModel: z.string().trim().min(1).default('gemma3:4b'),
+});
+
 function parseOrReply(schema, body, res) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
@@ -88,6 +93,9 @@ function indexCompatibility(status) {
   if (corpus.retrievalSchemaVersion !== RETRIEVAL_SCHEMA_VERSION) {
     rebuildReasons.push(`retrieval format ${corpus.retrievalSchemaVersion || 'unknown'} is outdated (expected ${RETRIEVAL_SCHEMA_VERSION})`);
   }
+  if (Number(status.recordCount) > 0 && Number(status.passageCount) === 0) {
+    rebuildReasons.push('the answer-passage index is empty');
+  }
   if (!corpus.embeddingModelDigest) {
     rebuildReasons.push('the index does not record an immutable embedding-model digest');
   }
@@ -105,12 +113,19 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
 
   router.post('/diagnostics', async (req, res) => {
     const ollamaInput = OllamaSchema.safeParse(req.body || {});
+    const summaryInput = SummaryModelSchema.safeParse(req.body || {});
     const sourceInput = ConnectionSchema.safeParse(req.body?.sourceConnection || {});
     const indexInput = ConnectionSchema.safeParse(req.body?.indexConnection || {});
-    const [ollamaCheck, sourceCheck, indexCheck] = await Promise.all([
+    const [ollamaCheck, summaryCheck, sourceCheck, indexCheck] = await Promise.all([
       ollamaInput.success
         ? diagnosticCheck(() => embedding.testOllama({ baseUrl: ollamaInput.data.ollamaBaseUrl, model: ollamaInput.data.model }))
         : Promise.resolve({ status: 'not_configured', error: 'Ollama URL and model are required.' }),
+      ollamaInput.success && summaryInput.success && typeof embedding.testChatModel === 'function'
+        ? diagnosticCheck(() => embedding.testChatModel({
+          baseUrl: ollamaInput.data.ollamaBaseUrl,
+          model: summaryInput.data.summaryModel,
+        }))
+        : Promise.resolve({ status: 'not_configured', error: 'A local summary model is required for synthesized answers.' }),
       sourceInput.success
         ? diagnosticCheck(() => db.testPostgresConnection(sourceInput.data))
         : Promise.resolve({ status: 'not_configured', error: 'Source PostgreSQL connection is not configured.' }),
@@ -123,6 +138,7 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       checks: {
         api: { status: 'ready', details: { tool: 'semantic-qa' } },
         ollama: ollamaCheck,
+        summaryModel: summaryCheck,
         sourceDatabase: sourceCheck,
         indexDatabase: indexCheck,
       },
@@ -236,10 +252,12 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       threshold: z.coerce.number().min(-1).max(1).default(0.60),
       summary: z.object({
         enabled: z.boolean().default(false),
+        model: z.string().trim().min(1).default('gemma3:4b'),
         maxRecords: z.coerce.number().int().min(1).max(MAX_RECORDS).default(DEFAULT_MAX_RECORDS),
         maxLines: z.coerce.number().int().min(1).max(MAX_LINES).default(DEFAULT_MAX_LINES),
       }).optional().default({
         enabled: false,
+        model: 'gemma3:4b',
         maxRecords: DEFAULT_MAX_RECORDS,
         maxLines: DEFAULT_MAX_LINES,
       }),
@@ -296,20 +314,23 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         return res.status(409).json({ ok: false, error: 'Embedding dimension changed; run a full rebuild.' });
       }
       const rankedRecordLimit = data.summary.enabled
-        ? Math.max(data.topK, data.summary.maxRecords)
+        ? Math.max(data.topK, data.summary.maxRecords * 4)
         : data.topK;
       const candidateLimit = Math.max(60, rankedRecordLimit * 12);
-      const result = await db.searchIndex(
+      const result = await db.searchPassageIndex(
         data.indexConnection,
         vectors[0],
         buildLexicalQuery(data.question),
         candidateLimit,
       );
-      const rankedMatches = orderMatches(rerankMatches(result.rows, data.question, rankedRecordLimit));
+      const rankedMatches = orderMatches(
+        rerankPassageMatches(result.rows, data.question, rankedRecordLimit),
+        data.question,
+      );
       const visibleMatches = rankedMatches
         .slice(0, data.topK)
         .map(({ rankingSignals: _rankingSignals, ...match }) => match);
-      const response = buildSearchResponse(visibleMatches, data.threshold);
+      const response = buildSearchResponse(visibleMatches, data.threshold, data.question);
       let summaryResult = {};
       if (data.summary.enabled) {
         if (!response.strongMatch) {
@@ -325,15 +346,14 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         } else {
           try {
             summaryResult = await buildSemanticSummary({
-              queryVector: vectors[0],
+              question: data.question,
               matches: rankedMatches,
               threshold: data.threshold,
               maxRecords: data.summary.maxRecords,
               maxLines: data.summary.maxLines,
               baseUrl: data.ollamaBaseUrl,
-              model: status.corpus.embeddingModel,
-              formatVersion: status.corpus.embeddingFormatVersion,
-              embedTexts: embedding.embedTexts,
+              model: data.summary.model,
+              generateAnswer: embedding.generateGroundedAnswer,
             });
           } catch (summaryError) {
             summaryResult = {
@@ -344,7 +364,7 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
               summary: {
                 status: 'unavailable',
                 mode: SUMMARY_MODE,
-                reason: 'summary_embedding_failed',
+                reason: 'summary_generation_failed',
                 error: sanitizeError(summaryError),
                 evidence: [],
               },
@@ -352,9 +372,14 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           }
         }
       }
+      if (summaryResult.summary?.reason === 'no_answerable_evidence') {
+        response.strongMatch = false;
+        response.message = NO_MATCH_MESSAGE;
+        delete response.acceptedMatch;
+      }
       res.json({
         ok: true,
-        retrieval: result.hybrid ? 'hybrid' : 'dense',
+        retrieval: result.hybrid ? 'passage-hybrid' : 'passage-dense',
         ...response,
         ...summaryResult,
       });
@@ -365,4 +390,11 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
   return { router, syncManager };
 }
 
-module.exports = { registerSemanticQaRoutes, ConnectionSchema, MappingSchema, OllamaSchema, indexCompatibility };
+module.exports = {
+  registerSemanticQaRoutes,
+  ConnectionSchema,
+  MappingSchema,
+  OllamaSchema,
+  SummaryModelSchema,
+  indexCompatibility,
+};

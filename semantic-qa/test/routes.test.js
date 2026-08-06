@@ -7,6 +7,16 @@ const { EMBEDDINGGEMMA_FORMAT, RETRIEVAL_SCHEMA_VERSION } = require('../src/core
 
 const express = requireToolDep('express');
 
+function asPassage(row) {
+  return {
+    passageIndex: 0,
+    passageText: row.answer,
+    passageStart: 0,
+    passageEnd: row.answer.length,
+    ...row,
+  };
+}
+
 async function withServer(callback, overrides = {}) {
   const app = express();
   const database = {
@@ -19,7 +29,9 @@ async function withServer(callback, overrides = {}) {
   };
   const ollama = {
     testOllama: async () => ({ ok: true, model: 'embeddinggemma', dimension: 3 }),
+    testChatModel: async () => ({ ok: true, model: 'gemma3:4b' }),
     embedTexts: async () => [[0.1, 0.2, 0.3]],
+    generateGroundedAnswer: async ({ evidence }) => ({ answer: evidence[0].text, evidenceNumbers: [1] }),
     ...(overrides.ollama || {}),
   };
   const syncManager = { start: () => ({ id: 'job' }), get: () => null, cancel: () => null, subscribe: () => false, unsubscribe: () => {} };
@@ -44,7 +56,7 @@ test('health and source connection endpoints expose the expected contract', asyn
   assert.equal((await response.json()).connection.database, 'qa');
 }));
 
-test('search uses the corpus embedding format and hybrid reranks expanded candidates', async () => {
+test('search uses the corpus embedding format and ranks indexed answer passages', async () => {
   let embeddedText;
   let lexicalQuery;
   await withServer(async (baseUrl) => {
@@ -57,7 +69,7 @@ test('search uses the corpus embedding format and hybrid reranks expanded candid
     });
     const payload = await response.json();
     assert.equal(response.status, 200);
-    assert.equal(payload.retrieval, 'hybrid');
+    assert.equal(payload.retrieval, 'passage-hybrid');
     assert.equal(payload.matches[0].sourceId, 'who:001');
     assert.equal(payload.matches.length, 2);
   }, {
@@ -72,15 +84,15 @@ test('search uses the corpus embedding format and hybrid reranks expanded candid
           retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
         },
       }),
-      searchIndex: async (_connection, _vector, query) => {
+      searchPassageIndex: async (_connection, _vector, query) => {
         lexicalQuery = query;
         return {
           hybrid: true,
           rows: [
             { sourceId: 'where', question: 'Where can I meet Datta Swami?', answer: 'Call this phone number.', similarity: 0.71, lexicalScore: 0.2, sourceGroup: 'where', metadata: { chunk_index: 1, chunk_count: 1 } },
-            { sourceId: 'who:009', question: 'WHO IS SWAMI?', answer: 'A devotee founded the Mission.', similarity: 0.70, lexicalScore: 0.2, sourceGroup: 'who', metadata: { chunk_index: 9, chunk_count: 9 } },
-            { sourceId: 'who:001', question: 'WHO IS SWAMI?', answer: 'Datta Swami is a spiritual teacher.', similarity: 0.62, lexicalScore: 0.2, sourceGroup: 'who', metadata: { chunk_index: 1, chunk_count: 9 } },
-          ],
+            { sourceId: 'who:009', question: 'WHO IS SWAMI?', answer: 'A devotee founded the Mission.', similarity: 0.40, lexicalScore: 0.2, sourceGroup: 'who', metadata: { chunk_index: 9, chunk_count: 9 } },
+            { sourceId: 'who:001', question: 'WHO IS SWAMI?', answer: 'Datta Swami is a spiritual teacher.', similarity: 0.82, lexicalScore: 0.2, sourceGroup: 'who', metadata: { chunk_index: 1, chunk_count: 9 } },
+          ].map(asPassage),
         };
       },
     },
@@ -175,6 +187,7 @@ test('diagnostics reports each external dependency independently', async () => w
   assert.equal(payload.ok, true);
   assert.equal(payload.checks.api.status, 'ready');
   assert.equal(payload.checks.ollama.status, 'ready');
+  assert.equal(payload.checks.summaryModel.status, 'ready');
   assert.equal(payload.checks.sourceDatabase.details.database, 'qa');
   assert.equal(payload.checks.indexDatabase.details.database, 'index');
 }));
@@ -196,7 +209,7 @@ test('search validation rejects empty questions and empty indexes use exact no-m
   assert.deepEqual(payload.matches, []);
 }));
 
-test('grounded summary pools only independently relevant records and returns verbatim evidence', async () => {
+test('grounded summary synthesizes only from independently relevant answer passages', async () => {
   let searchLimit;
   const embeddedInputs = [];
   await withServer(async (baseUrl) => {
@@ -233,7 +246,7 @@ test('grounded summary pools only independently relevant records and returns ver
           retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
         },
       }),
-      searchIndex: async (_connection, _vector, _query, limit) => {
+      searchPassageIndex: async (_connection, _vector, _query, limit) => {
         searchLimit = limit;
         return {
           hybrid: true,
@@ -262,24 +275,25 @@ test('grounded summary pools only independently relevant records and returns ver
               lexicalScore: 0,
               metadata: {},
             },
-          ],
+          ].map(asPassage),
         };
       },
     },
     ollama: {
-      embedTexts: async ({ texts }) => {
-        embeddedInputs.push(...texts);
-        if (texts[0].startsWith('task:')) return [[1, 0, 0]];
-        return texts.map((text) => text.includes('Sincere service') ? [0.95, 0.05, 0] : [1, 0, 0]);
-      },
+      embedTexts: async ({ texts }) => { embeddedInputs.push(...texts); return [[1, 0, 0]]; },
+      generateGroundedAnswer: async ({ evidence }) => ({
+        answer: 'Serve usefully without seeking reward or recognition.',
+        evidenceNumbers: evidence.map((_, index) => index + 1),
+      }),
     },
   });
-  assert.equal(searchLimit, 180);
-  assert.ok(embeddedInputs.every((text) => !text.includes('below-threshold')));
+  assert.equal(searchLimit, 720);
+  assert.equal(embeddedInputs.length, 1);
 });
 
-test('summary embedding failure preserves the accepted stored answer', async () => {
+test('summary generation failure preserves the accepted stored answer', async () => {
   let embeddingCalls = 0;
+  let generationCalls = 0;
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/search`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -295,7 +309,7 @@ test('summary embedding failure preserves the accepted stored answer', async () 
     assert.equal(payload.strongMatch, true);
     assert.equal(payload.acceptedMatch.sourceId, 'accepted');
     assert.equal(payload.summary.status, 'unavailable');
-    assert.equal(payload.summary.reason, 'summary_embedding_failed');
+    assert.equal(payload.summary.reason, 'summary_generation_failed');
     assert.deepEqual(payload.summary.evidence, []);
   }, {
     database: {
@@ -310,7 +324,7 @@ test('summary embedding failure preserves the accepted stored answer', async () 
           retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
         },
       }),
-      searchIndex: async () => ({
+      searchPassageIndex: async () => ({
         hybrid: true,
         rows: [{
           sourceId: 'accepted',
@@ -319,22 +333,69 @@ test('summary embedding failure preserves the accepted stored answer', async () 
           similarity: 0.82,
           lexicalScore: 0.2,
           metadata: { source_type: 'qa' },
-        }],
+        }].map(asPassage),
       }),
     },
     ollama: {
       embedTexts: async () => {
         embeddingCalls += 1;
-        if (embeddingCalls === 1) return [[1, 0, 0]];
-        throw new Error('summary embedding unavailable');
+        return [[1, 0, 0]];
       },
+      generateGroundedAnswer: async () => { generationCalls += 1; throw new Error('summary model unavailable'); },
     },
   });
-  assert.equal(embeddingCalls, 2);
+  assert.equal(embeddingCalls, 1);
+  assert.equal(generationCalls, 1);
 });
 
-test('weak searches never perform summary embedding', async () => {
+test('grounded answerability rejects a topical neighbor with the wrong requested purpose', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' },
+        question: 'Can an oil lamp heat my house?', threshold: 0.49,
+        summary: { enabled: true },
+      }),
+    });
+    const payload = await response.json();
+    assert.equal(payload.strongMatch, false);
+    assert.equal(payload.message, 'I could not find a clear answer in the existing data.');
+    assert.equal(payload.acceptedMatch, undefined);
+    assert.equal(payload.matches.length, 1);
+    assert.deepEqual(payload.relevantMatches, []);
+    assert.equal(payload.summary.reason, 'no_answerable_evidence');
+  }, {
+    database: {
+      getIndexStatus: async () => ({
+        initialized: true,
+        recordCount: 1,
+        corpus: {
+          embeddingModel: 'embeddinggemma',
+          embeddingModelDigest: 'model-digest',
+          embeddingDimension: 3,
+          embeddingFormatVersion: EMBEDDINGGEMMA_FORMAT,
+          retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
+        },
+      }),
+      searchPassageIndex: async () => ({
+        hybrid: true,
+        rows: [asPassage({
+          sourceId: 'lamp', question: 'Oil lamps',
+          answer: 'Oil lamps provide light.', similarity: 0.70,
+        })],
+      }),
+    },
+    ollama: {
+      embedTexts: async () => [[1, 0, 0]],
+      generateGroundedAnswer: async () => ({ answerable: false, answer: '', evidenceNumbers: [] }),
+    },
+  });
+});
+
+test('weak searches never perform summary generation', async () => {
   let embeddingCalls = 0;
+  let generationCalls = 0;
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/search`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -363,7 +424,7 @@ test('weak searches never perform summary embedding', async () => {
           retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
         },
       }),
-      searchIndex: async () => ({
+      searchPassageIndex: async () => ({
         hybrid: true,
         rows: [{
           sourceId: 'weak',
@@ -372,7 +433,7 @@ test('weak searches never perform summary embedding', async () => {
           similarity: 0.10,
           lexicalScore: 0,
           metadata: {},
-        }],
+        }].map(asPassage),
       }),
     },
     ollama: {
@@ -380,7 +441,9 @@ test('weak searches never perform summary embedding', async () => {
         embeddingCalls += 1;
         return [[1, 0, 0]];
       },
+      generateGroundedAnswer: async () => { generationCalls += 1; return { answer: 'wrong', evidenceNumbers: [1] }; },
     },
   });
   assert.equal(embeddingCalls, 1);
+  assert.equal(generationCalls, 0);
 });
