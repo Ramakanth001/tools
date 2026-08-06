@@ -4,12 +4,12 @@ This guide explains the `semantic-qa` tool for developers who are new to Postgre
 
 ## 1. The Short Version
 
-The tool does not write an answer with AI. It retrieves answer text that already exists in the database.
+The tool retrieves evidence from answer text that already exists in the database. An optional second local model may then paraphrase and combine only the accepted evidence into a short answer.
 
 It works in two phases:
 
-1. **Offline indexing:** source text is cleaned, split into safe chunks, converted into numeric vectors by EmbeddingGemma through Ollama, and stored in PostgreSQL with pgvector.
-2. **Online search:** the new user question is converted into another vector, PostgreSQL combines semantic and full-text candidates, deterministic code reranks them, and the tool returns their stored text unchanged.
+1. **Offline indexing:** each stored answer is split into bounded two-to-three-sentence passages. Every answer passage is converted into a vector by EmbeddingGemma and stored in PostgreSQL with pgvector.
+2. **Online search:** the new user question becomes a vector, PostgreSQL searches answer passages, and deterministic code pools them back to source records. The optional Gemma 3 summary model receives only threshold-passing passages.
 
 The most important distinction is:
 
@@ -25,12 +25,14 @@ EmbeddingGemma is already trained. This application does not fine-tune it, updat
 | Standalone UI/API | `http://localhost:8790` |
 | Ollama | `http://127.0.0.1:11434` |
 | Embedding model | `embeddinggemma` |
+| Grounded summary model | `gemma3:4b` |
 | Model context limit | 2,048 tokens in the current Ollama installation |
 | Vector dimension | 768 floating-point values |
 | Source PostgreSQL | `127.0.0.1:5433/universal_qa_source` |
 | Index PostgreSQL | `127.0.0.1:5433/universal_qa_index` |
 | Vector extension | pgvector 0.8.5 |
-| Live vector records after the retrieval-v2 rebuild | 19,777 |
+| Source snapshot records | 19,777 |
+| Indexed answer passages | 186,982 |
 | Original active records | 419 Q&As and 5,591 discourses |
 | Languages in the imported corpus | English, Malayalam, and Telugu |
 | Universal-corpus match threshold | 0.49 |
@@ -106,7 +108,7 @@ The legacy dump is first imported into MySQL as `universal_vector_source`. The a
 | `qaId` | Original source identity |
 | `title` | Stored question |
 | `answerBySwami` | Stored answer |
-| `briefQuestion` or `questionBk` | Additional source context used by hybrid reranking |
+| `briefQuestion` or `questionBk` | Additional source context retained for inspection; not used in passage acceptance |
 | `masterLanguage` | Language metadata |
 | `masterId`, `recordDate` | Source metadata |
 
@@ -117,7 +119,7 @@ The legacy dump is first imported into MySQL as `universal_vector_source`. The a
 | `dcId` | Original source identity |
 | `title` | Stored question/title |
 | `textDC` | Stored answer/document text |
-| `summary` | Additional source context used by hybrid reranking |
+| `summary` | Additional source context retained for inspection; not used in passage acceptance |
 | `masterLanguage` | Language metadata |
 | `masterId`, `recordDate` | Source metadata |
 
@@ -211,13 +213,10 @@ The individual numbers do not have human-readable labels. Their usefulness comes
 - unrelated texts tend to point in different directions;
 - the same vector size is produced for a short question and a long chunk.
 
-During indexing with EmbeddingGemma, the tool embeds this exact structure:
+During indexing with EmbeddingGemma, the tool embeds each answer passage without the stored question/title:
 
 ```text
-title: <stored question or title> | text: <stored answer chunk>
-
-Source context:
-<optional detailed question or summary>
+title:  | text: <bounded answer passage>
 ```
 
 During search, it embeds:
@@ -293,10 +292,12 @@ Each searchable chunk stores:
 | `source_group` | Original Q&A/discourse group |
 | `source_order` | Chunk ordering value |
 | `content_hash` | SHA-256 change detector |
-| `embedding` | `vector(768)` semantic representation |
+| `embedding` | Valid placeholder vector; v4 never searches this record-level field |
 | `updated_at` | Index update time |
 
-The 768 raw float values alone require roughly 3 KiB per record if represented as 32-bit values. For 19,777 vectors, that is about 58 MiB before PostgreSQL row, text, metadata, GIN, and HNSW overhead. Actual database size is larger because exact answer text is also stored.
+### `semantic_qa.passages`
+
+Every bounded answer passage stores its parent `source_id`, stable passage index, exact text and answer offsets, a `vector(768)` embedding, and a generated full-text search vector. HNSW searches these passage embeddings directly; the stored question/title is not part of the vector or acceptance score.
 
 ### `semantic_qa.sync_runs`
 
@@ -306,7 +307,8 @@ This table preserves recent synchronization outcomes and counters. Live SSE job 
 
 Each synchronization run creates tool-owned unlogged tables:
 
-- a staging records table for changed vectors;
+- a staging records table for changed source snapshots;
+- a staging passage table for changed answer passages and vectors;
 - a “seen IDs” table containing the complete current source identity set.
 
 They are temporary working structures used to protect the live index.
@@ -348,7 +350,7 @@ ORDER BY embedding <=> $query_vector
 LIMIT $top_k
 ```
 
-The universal corpus uses a clear-match threshold of `0.49`. The smaller sample/default configuration uses `0.60`. Retrieval v3 applies this threshold only to the final combined relevance score, never to raw cosine similarity. It must be calibrated with representative questions after any model, chunking, or ranking change.
+The universal corpus uses a clear-match threshold of `0.49`. The smaller sample/default configuration uses `0.60`. Retrieval v4 applies it to passage relevance: answer-passage cosine plus only small specificity and independent-support bonuses. It must be calibrated with representative questions after any model, passage, or ranking change.
 
 If the best result is below the threshold, the application returns exactly:
 
@@ -502,14 +504,14 @@ sequenceDiagram
     API->>Ollama: Verify configured model digest
     API->>Ollama: Embed task-formatted user question
     Ollama-->>API: Query vector(768)
-    API->>PG: HNSW candidates + GIN full-text candidates
-    PG-->>API: Candidate chunks, siblings, metadata, scores
-    API->>API: Hybrid rerank and explicit chunk deduplication
+    API->>PG: Answer-passage HNSW + passage GIN candidates
+    PG-->>API: Candidate passages joined to stored records
+    API->>API: Pool passages and deduplicate explicit document chunks
     API->>API: Independently admit up to 15 relevant records
-    API->>Ollama: Embed bounded answer passages
-    Ollama-->>API: Passage vectors
-    API->>API: Select diverse verbatim evidence by semantic cosine
-    API-->>UI: Grounded evidence summary, one accepted answer, and inspection-only neighbors
+    API->>Ollama: Generate from accepted passages only
+    Ollama-->>API: Synthesized answer + evidence numbers
+    API->>API: Validate cited passages against accepted records
+    API-->>UI: Grounded synthesis, one stored answer, and inspection-only neighbors
 ```
 
 Step by step:
@@ -518,21 +520,20 @@ Step by step:
 2. It rejects stale formats or a configured Ollama model whose current digest differs from the indexed digest.
 3. Ollama embeds the new question using the query format recorded with that model and live corpus.
 4. The API rejects the query if the returned dimension differs from the indexed dimension.
-5. pgvector and PostgreSQL full-text search each oversample a bounded raw pool. HNSW breadth matches that pool, and broad OR lexical terms prevent a single token mismatch from eliminating a candidate.
-6. Each raw pool is diversified by original document only when metadata explicitly identifies multiple chunks. Ungrouped records and category labels remain independent.
-7. For the highest-priority chunked candidate documents, the API loads a bounded set of sibling chunks so it can select the passage that actually answers the question.
-8. Deterministic reranking combines cosine similarity, full-text rank, query coverage, exact detailed-question context, weak generic intent/position signals, and a small structured-Q&A prior.
-9. Explicit document chunks are deduplicated by source group; the genuinely highest-scoring passage retains its own score and represents that document.
-10. The top final relevance score is compared with the configured threshold. Raw cosine cannot override it.
-11. The API returns one accepted match when the threshold passes plus nearest records for diagnostics.
-12. If semantic summary mode is enabled, the same threshold is applied independently to an internal pool of up to 15 records, with an additional dense-similarity floor. Inspection-only neighbors cannot enter the pool.
-13. Only accepted answers are split into bounded Unicode-aware passages and embedded again. Passage admission and ordering use embedding cosine rather than word overlap.
-14. A diversity pass selects up to three exact source excerpts, checks every excerpt against its stored answer, and returns source IDs with each line.
-15. The UI presents the grounded summary first, retains the primary stored answer, and keeps all unused neighbors in the collapsed inspection-only panel.
+5. pgvector and PostgreSQL full-text search each oversample a bounded pool of answer passages. Broad OR lexical terms widen recall, but lexical rank cannot independently accept evidence.
+6. Passage hits are pooled by `source_id`. The best passage cosine is primary; only additional semantically supporting passages provide a small bonus.
+7. Stored questions, titles, detailed-question context, metadata, and structured-Q&A type have zero weight in passage acceptance.
+8. When the question contains a quotation, exact occurrences of that quotation are preferred over passages containing similar words in a different order or relationship.
+9. Explicit multi-chunk documents are deduplicated by source group; categories remain independent.
+10. The top passage relevance score is compared with the configured threshold.
+11. The API returns one accepted stored source when the threshold passes plus nearest records for diagnostics.
+12. If synthesis is enabled, the same threshold and dense floor independently admit an internal pool of up to 15 records. Inspection-only neighbors cannot enter it.
+13. The summary model receives only indexed passages from those accepted records. Corpus passages are explicitly treated as quoted data rather than instructions.
+14. The model may paraphrase and combine evidence, but it must return evidence numbers and explicitly compare the requested relationship or purpose with the relationship or purpose supported by the evidence. A mismatch withholds the synthesis and converts the public result to the normal no-match state.
+15. “How” questions receive a second, narrowly scoped adequacy check: describing the problem, its prevalence, or its difficulty does not count as supplying a method or guidance.
+16. The API validates every cited number and exact source passage before returning the synthesis. The UI presents it first, retains the primary stored answer, and keeps all unused neighbors in the collapsed inspection-only panel.
 
-There is no chat-model call after retrieval. The application pools and orders exact source passages, but it does not explain them, rewrite text, add transitions, resolve conflicts, or fill gaps.
-
-Each question is independent. The tool has no conversational memory, follow-up interpretation, generative query expansion, or generated answer step. Corpus text that looks like an instruction is inert because it is never executed as a prompt.
+Each question is independent. The tool has no conversational memory or generative query expansion. The summary model is forbidden from filling evidence gaps; generation failure never hides an accepted stored answer.
 
 ## 14. Multilingual Handling
 
@@ -562,12 +563,12 @@ If language-specific quality becomes insufficient, possible future approaches in
 These are four separate concepts:
 
 - **Similarity** is the numeric cosine score from pgvector.
-- **Lexical score** is PostgreSQL's full-text rank for the significant query terms.
-- **Relevance score** is the deterministic hybrid score used for both final ordering and clear-match thresholding. Cosine remains visible for diagnostics but cannot independently accept a result.
-- **Relevance rank** is the final position after hybrid reranking and explicit document-chunk deduplication.
-- **Passage meaning** is a second cosine score computed between the question vector and a short answer excerpt. It determines which lines are extracted after their parent records independently pass the relevance gate; lexical overlap does not admit lines.
+- **Lexical score** is PostgreSQL's full-text rank for answer-passage recall; it does not admit a result.
+- **Passage meaning** is cosine similarity between the question and one independently indexed answer passage.
+- **Relevance score** is passage meaning plus a small independent-semantic-support bonus. Lexical rank, word overlap, stored questions, and titles have zero acceptance weight.
+- **Relevance rank** is the final position after passage pooling and explicit document-chunk deduplication.
 
-For example, chunk 9 might make a discourse a semantic candidate because its text matches strongly. Retrieval then inspects bounded siblings and returns whichever chunk has the highest passage score. It never forces chunk 1 or copies a better sibling's score onto an inferior opening. A `source_group` is treated as one document only when explicit `chunk_count > 1` metadata confirms that relationship; categories remain separate records.
+For example, passage 4 of chunk 9 may directly answer the question even when the chunk's stored title describes another subject. That passage can win because title similarity has no acceptance weight. A `source_group` is treated as one document only when explicit `chunk_count > 1` metadata confirms that relationship; categories remain separate records.
 
 The threshold is a product decision, not a mathematical truth. It should be calibrated separately when the model, chunking strategy, corpus, or languages change.
 
@@ -594,22 +595,23 @@ The executable regression set in `eval/relevance-cases.json` records reviewed qu
 
 ### Retrieval grounding
 
-- Search returns only synchronized stored text.
-- There is no generative answer completion.
+- The primary stored answer always comes from the synchronized source snapshot.
 - A weak match produces the exact no-match message and closest source records.
-- Missing information is not invented.
 - Summary evidence is restricted to independently threshold-passing records.
-- Every summary line must be an exact substring of its cited stored answer.
-- Below-threshold neighbors remain inspection-only and are never embedded for summary selection.
+- The summary model receives only exact accepted passages and treats them as quoted data, not instructions.
+- Summary prose may paraphrase, but every returned citation is validated against an exact substring of its accepted stored answer.
+- A structured answerability check rejects evidence that is topically similar but answers a different relationship or purpose.
+- An additional adequacy check rejects fluent “how” summaries that never provide guidance.
+- Below-threshold neighbors remain inspection-only and are never sent to the summary model.
 
 ## 17. API and UI Responsibilities
 
 ### UI screens
 
 - **Setup:** diagnostics and local presets.
-- **Settings:** source/index connections, Ollama model, field mapping, result count, threshold, and semantic-summary limits.
+- **Settings:** source/index connections, embedding and summary models, field mapping, result count, threshold, and synthesis limits.
 - **Index:** initialization, status, full rebuild, incremental sync, progress, cancellation, and errors.
-- **Search:** independent semantic queries, grounded extractive summaries, and plain-text source cards.
+- **Search:** independent passage-semantic queries, grounded synthesized answers, and plain-text source cards.
 
 ### Main API operations
 
@@ -622,7 +624,7 @@ The executable regression set in `eval/relevance-cases.json` records reviewed qu
 | `/sync` | Start full or incremental synchronization |
 | `/sync/:jobId/events` | Stream progress using server-sent events |
 | `/sync/:jobId/cancel` | Request safe cancellation |
-| `/search` | Embed one question, retrieve stored matches, and optionally select grounded evidence excerpts |
+| `/search` | Embed one question, retrieve answer passages, pool records, and optionally synthesize from accepted evidence |
 
 Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-qa`.
 
@@ -632,10 +634,10 @@ Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-
 | --- | --- |
 | `src/server.js` | Standalone Express server and static UI hosting |
 | `src/registerRoutes.js` | Request schemas and public API routes |
-| `src/ollama.js` | Local Ollama URL validation, immutable model identity, and `/api/embed` calls |
-| `src/core.js` | Model-aware embedding formats, hashing, hybrid scoring, explicit chunk reranking, threshold response |
-| `src/semanticSummary.js` | Relevant-record admission, Unicode passage segmentation, dense evidence scoring, diversity, and exact-substring grounding |
-| `src/database.js` | PostgreSQL discovery, snapshots, staging, commits, HNSW/GIN hybrid candidate search |
+| `src/ollama.js` | Local model identity, passage embedding, structured chat generation, and grounded prompt validation |
+| `src/core.js` | Model-aware formats, hashing, passage pooling/scoring, document deduplication, threshold response |
+| `src/semanticSummary.js` | Unicode passage segmentation, relevant-record admission, evidence selection, and cited synthesis orchestration |
+| `src/database.js` | PostgreSQL snapshots, atomic record/passage staging, commits, and passage HNSW/GIN search |
 | `src/syncManager.js` | Job lifecycle, batching, cancellation, SSE, full/incremental orchestration |
 | `scripts/importUniversalQa.js` | MySQL Q&A/discourse cleanup, chunking, and PostgreSQL source projection |
 | `scripts/evaluateRetrieval.js` | Live retrieval, answer-record, confidence, and false-accept regression runner |

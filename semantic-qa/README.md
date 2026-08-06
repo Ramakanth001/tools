@@ -1,6 +1,6 @@
 # semantic-qa
 
-`semantic-qa` is a retrieval-first question-answer search tool. It embeds an existing PostgreSQL Q&A corpus with a local Ollama embedding model, stores the vectors and an exact text snapshot in a separate pgvector database, and can return either the best stored answer or a short semantic evidence summary made only from verbatim source excerpts.
+`semantic-qa` is a retrieval-first question-answer search tool. It divides every stored answer into bounded passages, embeds those passages with a local Ollama embedding model, and stores the vectors plus an exact text snapshot in a separate pgvector database. Search returns the best stored answer and can use a second local Ollama model to synthesize a short, cited answer from independently accepted passages.
 
 The tool includes a 20-record sample corpus and local-demo preset. It still requires running PostgreSQL and Ollama services. The **Setup** screen checks each dependency and shows what is missing.
 
@@ -12,17 +12,18 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 - Selectable ID, question, answer, metadata, group, and source-order columns
 - Local Ollama embeddings through `POST /api/embed`
 - pgvector storage with an HNSW cosine index
-- PostgreSQL full-text candidates with a GIN index and deterministic hybrid reranking
-- Question-intent checks, document-group deduplication, and sibling-chunk selection
+- Passage-level semantic retrieval across answer text, with PostgreSQL full-text used only to widen recall
+- Zero question/title weight in passage acceptance, plus document-group deduplication
+- Exact quoted-phrase identity checks, so nearby statements with reversed relationships do not outrank the requested quotation
 - Atomic full rebuilds and content-hash-based incremental synchronization
 - Deletion reconciliation after a successful source scan
 - Verbatim stored answers with source IDs and metadata
 - Meaning-based evidence pooling across as many as 15 independently relevant records
-- Grounded extractive summaries with up to three diverse, cited source passages
+- Grounded generative summaries that may paraphrase and pool cited evidence across relevant records
 - Configurable result count and clear-match threshold
 - Standalone and shared-workspace operation
 
-There is no chat-generation step. Ollama is used only to generate vectors. Summary text is never invented or rewritten; it is assembled from exact substrings of accepted source answers.
+The summary model never sees retrieval neighbors that failed the clear-match threshold. It receives only accepted answer passages, treats them as quoted data, and must return citations to those passages. If local summary generation fails, the accepted stored answer remains available.
 
 ## Prerequisites
 
@@ -269,13 +270,10 @@ Passwords and complete connection strings remain in browser memory only. They ar
 
 ## Retrieval Behavior
 
-With EmbeddingGemma, each source record is embedded using the model's asymmetric document format:
+With EmbeddingGemma, each bounded answer passage is embedded using the model's asymmetric document format without the stored question/title:
 
 ```text
-title: <stored question> | text: <stored answer>
-
-Source context:
-<optional detailed question or summary>
+title:  | text: <answer passage>
 ```
 
 The user question is embedded as:
@@ -284,13 +282,13 @@ The user question is embedded as:
 task: question answering | query: <user question>
 ```
 
-Retrieval v3 oversamples both HNSW cosine and PostgreSQL full-text candidates, raises HNSW search breadth to match, and diversifies candidates by real chunked document before reranking. Full-text terms use broad OR recall, so one spelling or tokenization mismatch cannot discard an otherwise exact detailed question. A deterministic reranker combines semantic similarity, lexical coverage, source context, weak generic intent signals, and a small structured-Q&A prior. It chooses the genuinely highest-scoring chunk from each explicitly chunked document; arbitrary categories are never collapsed. No answer-generation model is involved.
+Retrieval v4 searches the answer-passage HNSW index directly and unions it with bounded full-text passage candidates for recall. Acceptance is driven by answer-passage cosine meaning; lexical rank, word overlap, the stored question, and the title all have zero acceptance weight. Only additional semantically supporting passages can add a small bonus. Results are pooled back to their stored source records, and explicit multi-chunk documents are deduplicated.
 
-The default clear-match threshold is `0.60`; the universal preset uses `0.49`. Final ordering and clear-match status use only the combined relevance score. Raw cosine is diagnostic and can no longer override a weak reranked score. The API exposes at most one `acceptedMatch`; the UI presents only that record as the best answer.
+The default clear-match threshold is `0.60`; the universal preset uses `0.49`. Final ordering and clear-match status use the passage relevance score. The API exposes at most one `acceptedMatch`; the UI presents only that record as the best stored source.
 
-When **Semantic evidence summary** is enabled, search internally considers up to 15 ranked records independently. A record may enter `relevantMatches` only when it passes the same clear-match threshold and a dense-semantic floor. Only those accepted answers are split into bounded Unicode-aware passages. The passages are embedded again and ranked by cosine meaning similarity to the question; lexical scores cannot admit a summary line. A diversity pass selects up to three excerpts, preferring different source records and suppressing repeated text.
+When **Synthesized grounded answer** is enabled, search internally considers up to 15 passage-ranked records independently. A record may enter `relevantMatches` only when it passes the same clear-match threshold and a dense-semantic floor. Only indexed passages from those accepted records are sent to the local summary model; rejected neighbors, stored questions, titles, metadata, and source context are excluded.
 
-Every returned summary excerpt is checked as an exact substring of its cited stored answer. A weak neighbor, question, metadata value, or source context can never become summary prose. If no passage passes semantic admission, the normal accepted stored answer remains available without a summary.
+The model may paraphrase and combine the evidence, but every returned citation is validated against an exact passage from an accepted stored answer. It must also state whether the evidence answers the requested relationship or purpose; a related passage about a different use is rejected through the same “show relevant only” result. “How” answers receive an additional adequacy check so a description of the problem cannot masquerade as guidance. If no passage passes semantic admission—or generation fails—the accepted stored answer remains available without a summary.
 
 When no result meets the threshold, the response begins with:
 
@@ -298,7 +296,7 @@ When no result meets the threshold, the response begins with:
 I could not find a clear answer in the existing data.
 ```
 
-The closest records are still returned for diagnostics, but the UI keeps them in a collapsed, inspection-only section rather than presenting them as answers. Answer text is rendered as plain text with original whitespace; it is never evaluated as HTML or passed through a generative chat model.
+The closest records are still returned for diagnostics, but the UI keeps them in a collapsed, inspection-only section rather than presenting them as answers. Stored answer text is rendered as plain text with original whitespace and is never evaluated as HTML.
 
 The index stores the immutable Ollama model digest together with the embedding and retrieval format versions. Search is blocked with a full-rebuild instruction if the model tag now resolves to different weights or if application retrieval formats changed. This prevents queries from being compared against an incompatible vector space.
 
@@ -322,7 +320,7 @@ Shared-host base path: `/api/tools/semantic-qa`
 | `GET` | `/sync/:jobId` | Read an in-memory job status |
 | `GET` | `/sync/:jobId/events` | Stream job progress with SSE |
 | `POST` | `/sync/:jobId/cancel` | Request cancellation |
-| `POST` | `/search` | Embed a question, retrieve source records, and optionally build a grounded semantic evidence summary |
+| `POST` | `/search` | Embed a question, retrieve answer passages, pool source records, and optionally synthesize a grounded answer |
 
 All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection.
 
@@ -330,7 +328,7 @@ All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `Cannot reach Ollama` | Install/start Ollama, verify port `11434`, and run `ollama pull embeddinggemma`. |
+| `Cannot reach Ollama` | Install/start Ollama, verify port `11434`, then pull both configured models (defaults: `embeddinggemma` and `gemma3:4b`). |
 | `model ... not found` | Pull the exact model configured in Settings. |
 | PostgreSQL `connection refused` or `no response` | Start the database server or correct its host/port. Installing `psql` alone does not start PostgreSQL. |
 | `server does not support SSL` | Choose SSL mode `disable` for a local database. |
