@@ -19,6 +19,7 @@ function candidateBases() {
     path.join(rootDir, 'mysql-tool'),
     path.join(rootDir, 'mysql-pg-migrate'),
     path.join(rootDir, 'semantic-qa'),
+    path.join(rootDir, 'transcriber'),
   ]));
 }
 
