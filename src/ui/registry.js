@@ -3,6 +3,7 @@ import MysqlTool from '../../mysql-tool/src/ui/MysqlTool.jsx';
 import MysqlPgMigrateTool from '../../mysql-pg-migrate/src/ui/main.jsx';
 import SemanticQaTool from '../../semantic-qa/src/ui/SemanticQaTool.jsx';
 import TranscriberTool from '../../transcriber/src/ui/TranscriberTool.jsx';
+import SelfVoiceCloneTool from '../../self-voice-clone/src/ui/SelfVoiceCloneTool.tsx';
 
 export const TOOLS = [
   {
@@ -78,6 +79,20 @@ export const TOOLS = [
       homePath: '/tools/transcriber',
       logsPath: '/tools/transcriber/logs',
       storagePrefix: 'tools.transcriber',
+    },
+  },
+  {
+    id: 'self-voice-clone',
+    name: 'self-voice-clone',
+    description: 'Local personal voice enrollment, diagnostics, adaptation, and text-to-speech synthesis.',
+    path: '/tools/self-voice-clone',
+    component: SelfVoiceCloneTool,
+    runtime: {
+      toolId: 'self-voice-clone',
+      apiBasePath: '/api/tools/self-voice-clone/v1',
+      healthPath: '/api/tools/self-voice-clone/health',
+      homePath: '/tools/self-voice-clone',
+      storagePrefix: 'tools.self-voice-clone',
     },
   },
 ];
