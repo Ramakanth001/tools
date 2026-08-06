@@ -1,0 +1,30 @@
+{
+  "name": "transcriber-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node ../src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"node ../src/runPackageBin.js vite --config vite.config.js\"",
+    "start": "node src/server.js",
+    "setup:python": "node scripts/setupPython.js",
+    "test": "node --test test/*.test.js && python3 -m unittest discover -s test -p 'test_*.py'",
+    "test:node": "node --test test/*.test.js",
+    "test:python": "python3 -m unittest discover -s test -p 'test_*.py'",
+    "build": "node ../src/runPackageBin.js vite build --config vite.config.js",
+    "preview": "node ../src/runPackageBin.js vite preview --config vite.config.js --port 5177",
+    "health": "node -e \"fetch('http://localhost:8791/api/health').then(r=>r.text()).then(t=>console.log(t)).catch(e=>{console.error(e.message); process.exit(1);})\""
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "multer": "^2.0.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "vite": "^7.3.1"
+  }
+}
