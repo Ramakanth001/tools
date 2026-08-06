@@ -1,20 +1,16 @@
-const { buildDocumentEmbeddingText } = require('./core');
-
-const SUMMARY_MODE = 'semantic-extractive';
+const SUMMARY_MODE = 'grounded-generative';
 const DEFAULT_MAX_RECORDS = 15;
 const DEFAULT_MAX_LINES = 3;
 const MAX_RECORDS = 15;
 const MAX_LINES = 5;
-const MAX_PASSAGES_PER_RECORD = 10;
+const DEFAULT_PASSAGES_PER_RECORD = 10;
+const MAX_PASSAGES_PER_RECORD = 256;
 const MAX_TOTAL_PASSAGES = 150;
-const MAX_PASSAGE_CHARACTERS = 480;
+const MAX_PASSAGE_CHARACTERS = 720;
+const MAX_EVIDENCE_CONTEXT_CHARACTERS = 2200;
 const MIN_PASSAGE_CHARACTERS = 24;
-const EMBEDDING_BATCH_SIZE = 32;
 const MIN_RECORD_DENSE_SIMILARITY = 0.30;
-const MIN_PASSAGE_SEMANTIC_SIMILARITY = 0.35;
-const RELATIVE_PASSAGE_WINDOW = 0.18;
-const ANSWER_CUE_BONUS = 0.16;
-const ANSWER_CUE_RE = /^\s*(?:\[[^\]]*\]\s*)?(?:(?:answer|response)\s*|[^:\n]{1,80}\s+(?:replied|answered|responded)\s*)[:\-]/iu;
+const ANSWER_CUE_ANY_RE = /(?:(?:answer|response)\s*[:\-]|[\p{L}\p{M}][^.?!:\n]{0,79}\s+(?:replied|answered|responded)\s*[:\-])/iu;
 
 function clampInteger(value, minimum, maximum, fallback) {
   const number = Number(value);
@@ -24,6 +20,16 @@ function clampInteger(value, minimum, maximum, fallback) {
 
 function normalizeEvidenceText(value) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+}
+
+function extractQuotedPhrases(value) {
+  const phrases = [];
+  const expression = /"([^"\n]{3,})"|“([^”\n]{3,})”|'([^'\n]{3,})'|‘([^’\n]{3,})’/gu;
+  for (const match of String(value || '').matchAll(expression)) {
+    const phrase = normalizeEvidenceText(match.slice(1).find(Boolean));
+    if (phrase && !phrases.includes(phrase)) phrases.push(phrase);
+  }
+  return phrases;
 }
 
 function trimSpan(text, start, end) {
@@ -87,7 +93,7 @@ function sampleEvenly(values, limit) {
 
 function splitAnswerIntoPassages(answer, {
   maxCharacters = MAX_PASSAGE_CHARACTERS,
-  maxPassages = MAX_PASSAGES_PER_RECORD,
+  maxPassages = DEFAULT_PASSAGES_PER_RECORD,
 } = {}) {
   const text = String(answer || '');
   if (!text.trim()) return [];
@@ -101,7 +107,7 @@ function splitAnswerIntoPassages(answer, {
     if (!current) return;
     const span = trimSpan(text, current.start, current.end);
     const passageText = text.slice(span.start, span.end);
-    if (passageText.length >= MIN_PASSAGE_CHARACTERS || (!grouped.length && sentenceUnits.length === 1)) {
+    if (passageText.length) {
       grouped.push({ text: passageText, start: span.start, end: span.end });
     }
     current = null;
@@ -117,7 +123,7 @@ function splitAnswerIntoPassages(answer, {
     const combinedLength = unit.end - current.start;
     const gap = text.slice(current.end, unit.start);
     const paragraphBreak = /\n\s*\n/u.test(gap);
-    if (combinedLength > maxCharacters || sentenceCount >= 2 || paragraphBreak) {
+    if (combinedLength > maxCharacters || sentenceCount >= 3 || paragraphBreak) {
       pushCurrent();
       current = { ...unit };
       sentenceCount = 1;
@@ -128,63 +134,104 @@ function splitAnswerIntoPassages(answer, {
   }
   pushCurrent();
 
+  const compacted = [];
+  for (let index = 0; index < grouped.length; index += 1) {
+    const passage = grouped[index];
+    if (passage.text.length >= MIN_PASSAGE_CHARACTERS) {
+      compacted.push(passage);
+      continue;
+    }
+    const previous = compacted.at(-1);
+    if (previous && passage.end - previous.start <= maxCharacters) {
+      previous.end = passage.end;
+      previous.text = text.slice(previous.start, previous.end).trim();
+      continue;
+    }
+    const next = grouped[index + 1];
+    if (next && next.end - passage.start <= maxCharacters) {
+      grouped[index + 1] = {
+        start: passage.start,
+        end: next.end,
+        text: text.slice(passage.start, next.end).trim(),
+      };
+      continue;
+    }
+    compacted.push(passage);
+  }
+
   const deduplicated = [];
   const seen = new Set();
-  for (const passage of grouped) {
+  for (const passage of compacted) {
     const key = normalizeEvidenceText(passage.text);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     deduplicated.push(passage);
   }
-  return sampleEvenly(deduplicated, clampInteger(maxPassages, 1, MAX_PASSAGES_PER_RECORD, MAX_PASSAGES_PER_RECORD));
+  return sampleEvenly(deduplicated, clampInteger(maxPassages, 1, MAX_PASSAGES_PER_RECORD, DEFAULT_PASSAGES_PER_RECORD));
 }
 
-function cosineSimilarity(left, right) {
-  if (!Array.isArray(left) || !Array.isArray(right) || !left.length || left.length !== right.length) {
-    throw new Error('Summary embeddings have incompatible dimensions');
-  }
-  let dot = 0;
-  let leftMagnitude = 0;
-  let rightMagnitude = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    const a = Number(left[index]);
-    const b = Number(right[index]);
-    if (!Number.isFinite(a) || !Number.isFinite(b)) throw new Error('Summary embedding contains an invalid value');
-    dot += a * b;
-    leftMagnitude += a * a;
-    rightMagnitude += b * b;
-  }
-  if (!leftMagnitude || !rightMagnitude) return 0;
-  return dot / Math.sqrt(leftMagnitude * rightMagnitude);
+function splitAnswerForIndex(answer, options = {}) {
+  const text = String(answer || '');
+  const cueMatch = text.match(ANSWER_CUE_ANY_RE);
+  const candidateOffset = cueMatch?.index || 0;
+  const prefix = text.slice(0, candidateOffset);
+  const offset = candidateOffset <= 600 && (
+    /^\s*(?:\[[^\]]*\]\s*)+$/u.test(prefix) ||
+    /[?？]\s*$/u.test(prefix)
+  ) ? candidateOffset : 0;
+  return splitAnswerIntoPassages(text.slice(offset), options).map((passage) => ({
+    ...passage,
+    start: passage.start + offset,
+    end: passage.end + offset,
+  }));
 }
 
 function filterRelevantMatches(matches, threshold, {
   maxRecords = DEFAULT_MAX_RECORDS,
   minimumDenseSimilarity = MIN_RECORD_DENSE_SIMILARITY,
+  question = '',
 } = {}) {
   const limit = clampInteger(maxRecords, 1, MAX_RECORDS, DEFAULT_MAX_RECORDS);
-  return (Array.isArray(matches) ? matches : [])
+  const admitted = (Array.isArray(matches) ? matches : [])
     .filter((match) => (
       Number(match.relevanceScore ?? match.similarity) >= Number(threshold) &&
       Number(match.similarity) >= Number(minimumDenseSimilarity)
-    ))
-    .slice(0, limit);
+    ));
+  const quotedPhrases = extractQuotedPhrases(question);
+  if (quotedPhrases.length) {
+    const quoteMatched = admitted.filter((match) => (
+      (Array.isArray(match.matchedPassages) ? match.matchedPassages : [])
+        .some((passage) => {
+          const text = normalizeEvidenceText(passage.text);
+          return quotedPhrases.every((phrase) => text.includes(phrase));
+        })
+    ));
+    if (quoteMatched.length) return quoteMatched.slice(0, limit);
+  }
+  return admitted.slice(0, limit);
 }
 
 function buildEvidencePassages(matches) {
   const passages = [];
   const seen = new Set();
   for (const match of matches) {
-    const sourcePassages = splitAnswerIntoPassages(match.answer);
-    const answerStart = sourcePassages.findIndex((passage) => ANSWER_CUE_RE.test(passage.text));
-    const answerPassages = answerStart >= 0 ? sourcePassages.slice(answerStart) : sourcePassages;
+    const indexedPassages = Array.isArray(match.matchedPassages) && match.matchedPassages.length
+      ? match.matchedPassages.map((passage) => ({
+        text: passage.text,
+        start: passage.start,
+        end: passage.end,
+        semanticSimilarity: Number(passage.semanticSimilarity),
+        lexicalScore: Number(passage.lexicalScore) || 0,
+      }))
+      : null;
+    const sourcePassages = indexedPassages || splitAnswerForIndex(match.answer);
+    const answerPassages = sourcePassages;
     for (const passage of answerPassages) {
       const key = normalizeEvidenceText(passage.text);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       passages.push({
         ...passage,
-        answerCue: ANSWER_CUE_RE.test(passage.text),
         sourceId: match.sourceId,
         sourceGroup: match.sourceGroup ?? null,
         sourceOrder: match.sourceOrder ?? null,
@@ -193,6 +240,7 @@ function buildEvidencePassages(matches) {
         recordRelevance: Number(match.relevanceScore ?? match.similarity),
         recordSimilarity: Number(match.similarity),
         relevanceRank: match.relevanceRank ?? null,
+        semanticSimilarity: Number(passage.semanticSimilarity),
       });
       if (passages.length >= MAX_TOTAL_PASSAGES) return passages;
     }
@@ -200,62 +248,95 @@ function buildEvidencePassages(matches) {
   return passages;
 }
 
-async function embedInBatches(embedTexts, config, texts, batchSize = EMBEDDING_BATCH_SIZE) {
-  const vectors = [];
-  for (let index = 0; index < texts.length; index += batchSize) {
-    const batch = texts.slice(index, index + batchSize);
-    const embedded = await embedTexts({ ...config, texts: batch });
-    if (!Array.isArray(embedded) || embedded.length !== batch.length) {
-      throw new Error('Ollama returned an incomplete summary embedding batch');
-    }
-    vectors.push(...embedded);
-  }
-  return vectors;
-}
-
-function selectDiverseEvidence(candidates, maxLines) {
-  const limit = clampInteger(maxLines, 1, MAX_LINES, DEFAULT_MAX_LINES);
-  if (!candidates.length) return [];
-  const topSimilarity = Math.max(...candidates.map((candidate) => candidate.semanticSimilarity));
-  const admissionThreshold = Math.max(
-    MIN_PASSAGE_SEMANTIC_SIMILARITY,
-    topSimilarity - RELATIVE_PASSAGE_WINDOW,
-  );
-  const eligible = candidates
-    .filter((candidate) => candidate.semanticSimilarity >= admissionThreshold)
+function selectGroundedEvidence(passages, limit, question = '') {
+  const boundedLimit = clampInteger(limit, 1, 15, 9);
+  const candidates = passages
+    .filter((passage) => (
+      Number.isFinite(passage.semanticSimilarity) &&
+      passage.semanticSimilarity >= MIN_RECORD_DENSE_SIMILARITY
+    ))
     .sort((left, right) => (
-      (right.semanticSimilarity + (right.answerCue ? ANSWER_CUE_BONUS : 0)) -
-        (left.semanticSimilarity + (left.answerCue ? ANSWER_CUE_BONUS : 0)) ||
+      right.semanticSimilarity - left.semanticSimilarity ||
       right.recordRelevance - left.recordRelevance ||
+      Number(left.relevanceRank || Number.MAX_SAFE_INTEGER) - Number(right.relevanceRank || Number.MAX_SAFE_INTEGER) ||
       String(left.sourceId).localeCompare(String(right.sourceId))
     ));
-  const selected = [];
-  const usedText = new Set();
-
-  while (selected.length < limit && eligible.length) {
-    let bestIndex = -1;
-    let bestScore = -Infinity;
-    for (let index = 0; index < eligible.length; index += 1) {
-      const candidate = eligible[index];
-      const textKey = normalizeEvidenceText(candidate.text);
-      if (usedText.has(textKey)) continue;
-      const redundancy = selected.length
-        ? Math.max(...selected.map((chosen) => Math.max(0, cosineSimilarity(candidate.vector, chosen.vector))))
-        : 0;
-      const sameSource = selected.some((chosen) => String(chosen.sourceId) === String(candidate.sourceId));
-      const semanticPriority = candidate.semanticSimilarity + (candidate.answerCue ? ANSWER_CUE_BONUS : 0);
-      const score = 0.86 * semanticPriority - 0.14 * redundancy - (sameSource ? 0.08 : 0);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = index;
+  if (!candidates.length) return [];
+  const quotedPhrases = extractQuotedPhrases(question);
+  const quoteMatched = quotedPhrases.length
+    ? candidates.filter((passage) => {
+      const text = normalizeEvidenceText(passage.text);
+      return quotedPhrases.every((phrase) => text.includes(phrase));
+    })
+    : [];
+  // A quoted phrase is a semantic identity constraint: “I am the Light” and
+  // “The Light is in Me” express different relationships. Use this guard only
+  // after dense admission and only when accepted evidence contains the quote.
+  const directlyMapped = quoteMatched
+    .map((passage) => {
+      const text = normalizeEvidenceText(passage.text);
+      let directness = 0;
+      for (const phrase of quotedPhrases) {
+        const offset = text.indexOf(phrase);
+        if (offset < 0) continue;
+        const suffix = text.slice(offset + phrase.length, offset + phrase.length + 180);
+        const sameSentence = suffix.split(/[.!?。！？]/u, 1)[0];
+        if (/^[\s\p{P}]*(?:means?|refers?\s+to|indicates?|signifies?|represents?|corresponds?\s+to|is\s+that)\b/iu.test(sameSentence)) {
+          directness = Math.max(directness, 3);
+        } else if (/^[^\p{L}\p{N}]{0,8}\(/u.test(sameSentence)) {
+          directness = Math.max(directness, 3);
+        }
       }
-    }
-    if (bestIndex < 0) break;
-    const [chosen] = eligible.splice(bestIndex, 1);
-    usedText.add(normalizeEvidenceText(chosen.text));
-    selected.push(chosen);
+      return { passage, directness };
+    })
+    .filter((item) => item.directness > 0)
+    .sort((left, right) => (
+      right.directness - left.directness ||
+      right.passage.semanticSimilarity - left.passage.semanticSimilarity
+    ))
+    .map((item) => item.passage);
+  const eligible = directlyMapped.length
+    ? directlyMapped
+    : (quoteMatched.length ? quoteMatched : candidates);
+  const selected = [];
+  const usedSources = new Set();
+  for (const passage of eligible) {
+    if (usedSources.has(String(passage.sourceId))) continue;
+    selected.push(passage);
+    usedSources.add(String(passage.sourceId));
+    if (selected.length >= boundedLimit) return selected;
   }
   return selected;
+}
+
+function expandEvidenceContext(passage) {
+  const answer = String(passage.answer || '');
+  if (!answer || !String(passage.text || '').trim()) return passage;
+  const indexed = splitAnswerForIndex(answer, { maxPassages: MAX_PASSAGES_PER_RECORD });
+  const centerIndex = indexed.findIndex((candidate) => (
+    (Number.isFinite(Number(passage.start)) && Number.isFinite(Number(passage.end)) &&
+      candidate.start === Number(passage.start) && candidate.end === Number(passage.end)) ||
+    normalizeEvidenceText(candidate.text) === normalizeEvidenceText(passage.text)
+  ));
+  if (centerIndex < 0) return passage;
+
+  let left = centerIndex;
+  let right = centerIndex;
+  const canInclude = (nextLeft, nextRight) => (
+    indexed[nextRight].end - indexed[nextLeft].start <= MAX_EVIDENCE_CONTEXT_CHARACTERS
+  );
+  const crossesParagraph = (leftIndex, rightIndex) => (
+    /\n\s*\n/u.test(answer.slice(indexed[leftIndex].end, indexed[rightIndex].start))
+  );
+  if (left > 0 && !crossesParagraph(left - 1, left) && canInclude(left - 1, right)) left -= 1;
+  if (right + 1 < indexed.length && !crossesParagraph(right, right + 1) && canInclude(left, right + 1)) right += 1;
+  const span = trimSpan(answer, indexed[left].start, indexed[right].end);
+  return {
+    ...passage,
+    text: answer.slice(span.start, span.end),
+    start: span.start,
+    end: span.end,
+  };
 }
 
 function compactRelevantMatch(match) {
@@ -271,17 +352,16 @@ function compactRelevantMatch(match) {
 }
 
 async function buildSemanticSummary({
-  queryVector,
+  question,
   matches,
   threshold,
   maxRecords = DEFAULT_MAX_RECORDS,
   maxLines = DEFAULT_MAX_LINES,
   baseUrl,
   model,
-  formatVersion,
-  embedTexts,
+  generateAnswer,
 }) {
-  const relevant = filterRelevantMatches(matches, threshold, { maxRecords });
+  const relevant = filterRelevantMatches(matches, threshold, { maxRecords, question });
   const relevantMatches = relevant.map(compactRelevantMatch);
   if (!relevant.length) {
     return {
@@ -308,23 +388,18 @@ async function buildSemanticSummary({
     };
   }
 
-  const inputs = passages.map((passage) => buildDocumentEmbeddingText('', passage.text, {
-    model,
-    formatVersion,
-  }));
-  const vectors = await embedInBatches(embedTexts, { baseUrl, model }, inputs);
-  const candidates = passages.map((passage, index) => ({
-    ...passage,
-    vector: vectors[index],
-    semanticSimilarity: cosineSimilarity(queryVector, vectors[index]),
-  }));
-  const selected = selectDiverseEvidence(candidates, maxLines);
+  const selected = selectGroundedEvidence(
+    passages,
+    Math.min(15, Math.max(1, Number(maxRecords) || DEFAULT_MAX_RECORDS)),
+    question,
+  );
   const allowedSources = new Set(relevantMatches.map((match) => String(match.sourceId)));
-  const evidence = selected
+  const candidateEvidence = selected
     .filter((candidate) => (
       allowedSources.has(String(candidate.sourceId)) &&
       String(candidate.answer).includes(candidate.text)
     ))
+    .map(expandEvidenceContext)
     .map((candidate) => ({
       sourceId: candidate.sourceId,
       sourceGroup: candidate.sourceGroup,
@@ -336,21 +411,53 @@ async function buildSemanticSummary({
       relevanceRank: candidate.relevanceRank,
     }));
 
+  if (!candidateEvidence.length) {
+    return {
+      relevantMatches,
+      summary: {
+        status: 'not_available',
+        mode: SUMMARY_MODE,
+        reason: 'no_semantically_relevant_passages',
+        evidence: [],
+      },
+    };
+  }
+  if (typeof generateAnswer !== 'function') {
+    throw new Error('A local summary model is not available');
+  }
+  const generated = await generateAnswer({
+    baseUrl,
+    model,
+    question,
+    evidence: candidateEvidence,
+    maxSentences: maxLines,
+  });
+  if (generated.answerable === false) {
+    return {
+      relevantMatches: [],
+      summary: {
+        status: 'not_available',
+        mode: SUMMARY_MODE,
+        reason: 'no_answerable_evidence',
+        evidence: [],
+      },
+    };
+  }
+  const evidence = generated.evidenceNumbers.map((number) => ({
+    ...candidateEvidence[number - 1],
+    evidenceNumber: number,
+  }));
+
   return {
     relevantMatches,
-    summary: evidence.length ? {
+    summary: {
       status: 'ready',
       mode: SUMMARY_MODE,
-      text: evidence.map((item) => item.text).join('\n'),
+      text: generated.answer,
       evidence,
       sourceCount: new Set(evidence.map((item) => String(item.sourceId))).size,
       candidateRecordCount: relevant.length,
-      lineCount: evidence.length,
-    } : {
-      status: 'not_available',
-      mode: SUMMARY_MODE,
-      reason: 'no_semantically_relevant_passages',
-      evidence: [],
+      evidenceCount: evidence.length,
     },
   };
 }
@@ -362,10 +469,11 @@ module.exports = {
   MAX_RECORDS,
   MAX_LINES,
   normalizeEvidenceText,
+  extractQuotedPhrases,
   splitAnswerIntoPassages,
-  cosineSimilarity,
+  splitAnswerForIndex,
   filterRelevantMatches,
   buildEvidencePassages,
-  selectDiverseEvidence,
+  selectGroundedEvidence,
   buildSemanticSummary,
 };
