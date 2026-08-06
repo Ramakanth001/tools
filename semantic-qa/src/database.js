@@ -247,6 +247,11 @@ async function recordsTableExists(client) {
   return result.rows[0].exists;
 }
 
+async function passagesTableExists(client) {
+  const result = await client.query(`SELECT to_regclass('semantic_qa.passages') IS NOT NULL AS exists`);
+  return result.rows[0].exists;
+}
+
 async function createRecordsTable(client, tableName, dimension, { unlogged = false } = {}) {
   const name = assertIdentifier(tableName, 'Index table');
   const dim = ensureDimension(dimension);
@@ -270,10 +275,44 @@ async function createRecordsTable(client, tableName, dimension, { unlogged = fal
   `);
 }
 
+async function createPassagesTable(client, tableName, dimension, { unlogged = false } = {}) {
+  const name = assertIdentifier(tableName, 'Passage index table');
+  const dim = ensureDimension(dimension);
+  await client.query(`
+    CREATE ${unlogged ? 'UNLOGGED ' : ''}TABLE semantic_qa.${quoteIdentifier(name)} (
+      source_id text NOT NULL,
+      passage_index integer NOT NULL,
+      passage_text text NOT NULL,
+      start_offset integer NOT NULL,
+      end_offset integer NOT NULL,
+      embedding vector(${dim}) NOT NULL,
+      search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple'::regconfig, passage_text)
+      ) STORED,
+      PRIMARY KEY (source_id, passage_index)
+    )
+  `);
+}
+
 async function createHnswIndex(client) {
   await client.query(`
     CREATE INDEX IF NOT EXISTS semantic_qa_records_embedding_hnsw
       ON semantic_qa.records USING hnsw (embedding vector_cosine_ops)
+  `);
+}
+
+async function createPassageIndexes(client) {
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS semantic_qa_passages_embedding_hnsw
+      ON semantic_qa.passages USING hnsw (embedding vector_cosine_ops)
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS semantic_qa_passages_search_gin
+      ON semantic_qa.passages USING gin (search_vector)
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS semantic_qa_passages_source_id
+      ON semantic_qa.passages (source_id)
   `);
 }
 
@@ -320,8 +359,12 @@ async function initializeIndex(connection, { model, modelDigest = null, dimensio
       if (!exists) {
         await createRecordsTable(client, 'records', dimension);
       }
+      if (!(await passagesTableExists(client))) {
+        await createPassagesTable(client, 'passages', dimension);
+      }
       await createHnswIndex(client);
       await createSearchIndex(client);
+      await createPassageIndexes(client);
       if (!existingCorpus) {
         const formatVersion = embeddingFormatForModel(model);
         await client.query(`
@@ -362,8 +405,12 @@ async function getIndexStatus(connection) {
       if (!schema.rows[0].exists) return { initialized: false, corpus: null, recordCount: 0, recentRuns: [] };
       await ensureCoreSchema(client);
       const exists = await recordsTableExists(client);
+      const passagesExist = await passagesTableExists(client);
       const corpus = await getCorpus(client);
       const count = exists ? await client.query('SELECT COUNT(*)::bigint AS count FROM semantic_qa.records') : { rows: [{ count: 0 }] };
+      const passageCount = passagesExist
+        ? await client.query('SELECT COUNT(*)::bigint AS count FROM semantic_qa.passages')
+        : { rows: [{ count: 0 }] };
       const runs = await client.query(`
         SELECT id, mode, status, processed::bigint AS processed, changed::bigint AS changed,
                total::bigint AS total, error, started_at AS "startedAt", finished_at AS "finishedAt"
@@ -373,6 +420,7 @@ async function getIndexStatus(connection) {
         initialized: Boolean(corpus && exists),
         corpus,
         recordCount: Number(count.rows[0].count),
+        passageCount: Number(passageCount.rows[0].count),
         recentRuns: runs.rows.map((run) => ({
           ...run,
           processed: Number(run.processed),
@@ -388,14 +436,20 @@ async function getIndexStatus(connection) {
 
 function stageNames(jobId) {
   const suffix = assertIdentifier(String(jobId).replace(/[^A-Za-z0-9_]/g, '_'), 'Job ID');
-  return { stage: `records_stage_${suffix}`, seen: `records_seen_${suffix}` };
+  return {
+    stage: `records_stage_${suffix}`,
+    passages: `passages_stage_${suffix}`,
+    seen: `records_seen_${suffix}`,
+  };
 }
 
 async function createSyncStage(client, jobId, dimension) {
   const names = stageNames(jobId);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.stage)}`);
+  await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.passages)}`);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
   await createRecordsTable(client, names.stage, dimension, { unlogged: true });
+  await createPassagesTable(client, names.passages, dimension, { unlogged: true });
   await client.query(`CREATE UNLOGGED TABLE semantic_qa.${quoteIdentifier(names.seen)} (source_id text PRIMARY KEY)`);
   return names;
 }
@@ -403,6 +457,7 @@ async function createSyncStage(client, jobId, dimension) {
 async function dropSyncStage(client, names) {
   if (!names) return;
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.stage)}`);
+  await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.passages)}`);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
 }
 
@@ -452,6 +507,33 @@ async function insertStageRecords(client, tableName, rows) {
   `, params);
 }
 
+async function insertStagePassages(client, tableName, rows) {
+  if (!rows.length) return;
+  const params = [];
+  const tuples = rows.map((row) => {
+    const start = params.length;
+    params.push(
+      row.sourceId,
+      row.passageIndex,
+      row.text,
+      row.start,
+      row.end,
+      toVectorLiteral(row.embedding),
+    );
+    return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6}::vector)`;
+  });
+  await client.query(`
+    INSERT INTO semantic_qa.${quoteIdentifier(tableName)}
+      (source_id, passage_index, passage_text, start_offset, end_offset, embedding)
+    VALUES ${tuples.join(',')}
+    ON CONFLICT (source_id, passage_index) DO UPDATE SET
+      passage_text = EXCLUDED.passage_text,
+      start_offset = EXCLUDED.start_offset,
+      end_offset = EXCLUDED.end_offset,
+      embedding = EXCLUDED.embedding
+  `, params);
+}
+
 async function createSyncRun(client, job) {
   await client.query(`
     INSERT INTO semantic_qa.sync_runs (id, mode, status)
@@ -491,6 +573,17 @@ async function commitIncremental(client, {
       )
     `);
     await client.query(`
+      DELETE FROM semantic_qa.passages p
+      WHERE p.source_id IN (SELECT source_id FROM semantic_qa.${quoteIdentifier(names.stage)})
+         OR NOT EXISTS (SELECT 1 FROM semantic_qa.records r WHERE r.source_id = p.source_id)
+    `);
+    await client.query(`
+      INSERT INTO semantic_qa.passages
+        (source_id, passage_index, passage_text, start_offset, end_offset, embedding)
+      SELECT source_id, passage_index, passage_text, start_offset, end_offset, embedding
+      FROM semantic_qa.${quoteIdentifier(names.passages)}
+    `);
+    await client.query(`
       UPDATE semantic_qa.corpus SET source_mapping = $1::jsonb, embedding_model = $2,
         embedding_model_digest = $3, embedding_dimension = $4, embedding_format_version = $5,
         retrieval_schema_version = $6, ollama_base_url = $7, record_count = $8,
@@ -510,12 +603,17 @@ async function commitRebuild(client, {
   await client.query('BEGIN');
   try {
     await client.query('DROP TABLE IF EXISTS semantic_qa.records');
+    await client.query('DROP TABLE IF EXISTS semantic_qa.passages');
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.stage)} SET LOGGED`);
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.stage)} RENAME TO records`);
     await client.query(`ALTER TABLE semantic_qa.records RENAME CONSTRAINT ${quoteIdentifier(`${names.stage}_pkey`)} TO records_pkey`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.passages)} SET LOGGED`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.passages)} RENAME TO passages`);
+    await client.query(`ALTER TABLE semantic_qa.passages RENAME CONSTRAINT ${quoteIdentifier(`${names.passages}_pkey`)} TO passages_pkey`);
     await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
     await createHnswIndex(client);
     await createSearchIndex(client);
+    await createPassageIndexes(client);
     await client.query(`
       INSERT INTO semantic_qa.corpus
         (id, source_mapping, embedding_model, embedding_model_digest, embedding_dimension,
@@ -815,6 +913,94 @@ async function searchIndex(connection, vector, queryText, limit) {
   });
 }
 
+async function searchPassages(client, corpus, vector, queryText, limit) {
+  const vectorLiteral = toVectorLiteral(vector);
+  const limits = searchLimits(limit);
+  await client.query('BEGIN');
+  try {
+    await configureHnswSearch(client, limits.efSearch);
+    const result = await client.query(`
+      WITH query AS (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms),
+      dense_raw AS MATERIALIZED (
+        SELECT source_id, passage_index, embedding <=> $1::vector AS distance
+        FROM semantic_qa.passages
+        ORDER BY embedding <=> $1::vector
+        LIMIT $4
+      ),
+      dense_ranked AS MATERIALIZED (
+        SELECT source_id, passage_index, distance,
+               row_number() OVER (PARTITION BY source_id ORDER BY distance, passage_index) AS source_rank
+        FROM dense_raw
+      ),
+      dense AS MATERIALIZED (
+        SELECT source_id, passage_index, distance
+        FROM dense_ranked
+        WHERE source_rank <= 3
+        ORDER BY distance, source_id, passage_index
+        LIMIT $3
+      ),
+      lexical_raw AS MATERIALIZED (
+        SELECT p.source_id, p.passage_index,
+               ts_rank_cd(p.search_vector, q.terms) AS lexical_score
+        FROM semantic_qa.passages p CROSS JOIN query q
+        WHERE q.terms::text <> '' AND p.search_vector @@ q.terms
+        ORDER BY ts_rank_cd(p.search_vector, q.terms) DESC, p.source_id, p.passage_index
+        LIMIT $4
+      ),
+      lexical_ranked AS MATERIALIZED (
+        SELECT source_id, passage_index, lexical_score,
+               row_number() OVER (
+                 PARTITION BY source_id ORDER BY lexical_score DESC, passage_index
+               ) AS source_rank
+        FROM lexical_raw
+      ),
+      lexical AS MATERIALIZED (
+        SELECT source_id, passage_index, lexical_score
+        FROM lexical_ranked
+        WHERE source_rank <= 3
+        ORDER BY lexical_score DESC, source_id, passage_index
+        LIMIT $3
+      ),
+      candidates AS (
+        SELECT source_id, passage_index FROM dense
+        UNION
+        SELECT source_id, passage_index FROM lexical
+      )
+      SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+             r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+             p.passage_index AS "passageIndex", p.passage_text AS "passageText",
+             p.start_offset AS "passageStart", p.end_offset AS "passageEnd",
+             1 - (p.embedding <=> $1::vector) AS similarity,
+             ts_rank_cd(p.search_vector, q.terms) AS "lexicalScore"
+      FROM candidates c
+      JOIN semantic_qa.passages p USING (source_id, passage_index)
+      JOIN semantic_qa.records r USING (source_id)
+      CROSS JOIN query q
+    `, [vectorLiteral, queryText, limits.candidateLimit, limits.rawCandidateLimit]);
+    await client.query('COMMIT');
+    return { corpus, rows: result.rows, hybrid: true, unit: 'answer_passage' };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  }
+}
+
+async function searchPassageIndex(connection, vector, queryText, limit) {
+  return withPool(connection, async (pool) => {
+    const client = await pool.connect();
+    try {
+      await ensureCoreSchema(client);
+      const corpus = await getCorpus(client);
+      if (!corpus || !(await recordsTableExists(client)) || !(await passagesTableExists(client))) {
+        return { corpus, rows: [], hybrid: true, unit: 'answer_passage' };
+      }
+      return await searchPassages(client, corpus, vector, queryText, limit);
+    } finally {
+      client.release();
+    }
+  });
+}
+
 module.exports = {
   connectionToPoolConfig,
   createPool,
@@ -825,6 +1011,7 @@ module.exports = {
   openSourceSnapshot,
   ensureCoreSchema,
   recordsTableExists,
+  passagesTableExists,
   initializeIndex,
   testIndexConnection,
   getIndexStatus,
@@ -834,10 +1021,13 @@ module.exports = {
   insertSeen,
   getExistingHashes,
   insertStageRecords,
+  insertStagePassages,
   createSyncRun,
   updateSyncRun,
   commitIncremental,
   commitRebuild,
   searchRecords,
   searchIndex,
+  searchPassages,
+  searchPassageIndex,
 };

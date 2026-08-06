@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { commitIncremental, connectionToPoolConfig, searchRecords } = require('../src/database');
+const { commitIncremental, connectionToPoolConfig, searchPassages, searchRecords } = require('../src/database');
 
 function compactSql(sql) {
   return String(sql).replace(/\s+/g, ' ').trim();
@@ -20,7 +20,7 @@ test('incremental commit reconciles deleted source IDs inside one transaction', 
     },
   };
   await commitIncremental(client, {
-    names: { stage: 'stage_job', seen: 'seen_job' },
+    names: { stage: 'stage_job', passages: 'passages_job', seen: 'seen_job' },
     mapping: { schema: 'public', table: 'qa' },
     model: 'embeddinggemma', dimension: 768, formatVersion: 'embeddinggemma-asymmetric-v2', retrievalVersion: 'hybrid-v2',
     ollamaBaseUrl: 'http://127.0.0.1:11434', total: 10,
@@ -162,5 +162,29 @@ test('dense search bounds raw work and skips iterative scan on older pgvector', 
   assert.match(candidateCall.statement, /PARTITION BY document_group, CASE WHEN document_group IS NULL THEN source_id END/);
   assert.deepEqual(result.rows, []);
   assert.equal(result.hybrid, false);
+  assert.equal(calls.at(-1).statement, 'COMMIT');
+});
+
+test('passage search compares the query against answer passages and joins source records', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      const statement = compactSql(sql);
+      calls.push({ statement, params });
+      if (statement.includes('SELECT extversion FROM pg_extension')) return { rows: [{ extversion: '0.8.0' }] };
+      if (statement.includes('JOIN semantic_qa.passages p')) {
+        return { rows: [{ sourceId: 'answer:1', passageIndex: 2, passageText: 'Relevant answer.', similarity: 0.73 }] };
+      }
+      return { rows: [] };
+    },
+  };
+  const result = await searchPassages(client, { id: 'default' }, [0.2, 0.8], 'meaning OR light', 60);
+  const searchCall = calls.find((call) => call.statement.includes('JOIN semantic_qa.passages p'));
+  assert.match(searchCall.statement, /FROM semantic_qa\.passages/);
+  assert.match(searchCall.statement, /PARTITION BY source_id/);
+  assert.match(searchCall.statement, /JOIN semantic_qa\.records r/);
+  assert.deepEqual(searchCall.params, ['[0.2,0.8]', 'meaning OR light', 60, 240]);
+  assert.equal(result.unit, 'answer_passage');
+  assert.equal(result.rows[0].sourceId, 'answer:1');
   assert.equal(calls.at(-1).statement, 'COMMIT');
 });
