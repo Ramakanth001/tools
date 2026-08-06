@@ -90,8 +90,9 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
           indexConnection: settings.indexConnection,
           ollamaBaseUrl: settings.ollamaBaseUrl,
           model: settings.model,
+          summaryModel: settings.summaryModel,
         },
-        timeoutMs: 30000,
+        timeoutMs: 180000,
       }));
     } catch (diagnosticError) {
       setError(diagnosticError.message);
@@ -119,6 +120,7 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
         <div className="qa-diagnostics">
           <DiagnosticRow label="Tool API" check={report?.checks?.api} pendingText="Run diagnostics to verify" />
           <DiagnosticRow label="Ollama + embedding model" check={report?.checks?.ollama} pendingText="Requires a running Ollama service" />
+          <DiagnosticRow label="Ollama + summary model" check={report?.checks?.summaryModel} pendingText="Required for synthesized answers" />
           <DiagnosticRow label="Source PostgreSQL" check={report?.checks?.sourceDatabase} pendingText="Requires Q&A credentials, or load the local demo" />
           <DiagnosticRow label="Index PostgreSQL" check={report?.checks?.indexDatabase} pendingText="Requires a writable database, or load the local demo" />
           <div className="qa-diagnostic-row">
@@ -130,7 +132,7 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
       </div>
 
       <div className="qa-setup-grid">
-        <div className="card"><span className="qa-step-number">1</span><h3>Install and start Ollama</h3><pre className="qa-command">brew install ollama{`\n`}brew services start ollama{`\n`}ollama pull {settings.model}</pre><div className="hint">The server calls Ollama at {settings.ollamaBaseUrl}.</div></div>
+        <div className="card"><span className="qa-step-number">1</span><h3>Install and start Ollama</h3><pre className="qa-command">brew install ollama{`\n`}brew services start ollama{`\n`}ollama pull {settings.model}{`\n`}ollama pull {settings.summaryModel}</pre><div className="hint">The embedding model finds answer passages; the summary model writes a grounded synthesis from accepted passages only.</div></div>
         <div className="card"><span className="qa-step-number">2</span><h3>Connect both databases</h3><div className="hint">The source account is read-only. The index account must be able to create the vector extension, schema, tables, and index.</div><button className="btn" style={{ marginTop: 12 }} onClick={() => onNavigate('settings')}>Open Settings</button></div>
         <div className="card"><span className="qa-step-number">3</span><h3>Map the corpus</h3><div className="hint">Discover the source catalog and select a unique ID, question, answer, and optional metadata/order fields.</div><button className="btn" style={{ marginTop: 12 }} onClick={() => onNavigate('settings')}>Configure mapping</button></div>
         <div className="card"><span className="qa-step-number">4</span><h3>Build the index</h3><div className="hint">Initialize pgvector, then run Full rebuild once. Later source changes can use Incremental sync.</div><button className="btn" style={{ marginTop: 12 }} onClick={() => onNavigate('index')}>Open Index</button></div>
@@ -188,6 +190,14 @@ function MatchRecord({ match, label }) {
         <span className="mono">Record {match.sourceId}</span>
       </div>
       <div className="qa-stored-question">{match.question}</div>
+      {match.matchedPassages?.[0] ? (
+        <div className="qa-matched-passage">
+          <div className="section-title">Best matching answer passage</div>
+          <div className="qa-summary-text">{match.matchedPassages[0].text}</div>
+          <div className="hint">Passage meaning {Number(match.matchedPassages[0].semanticSimilarity).toFixed(3)} · stored title/question had zero ranking weight</div>
+        </div>
+      ) : null}
+      <div className="section-title">Complete stored answer</div>
       <div className="qa-verbatim">{match.answer}</div>
       {match.metadata && Object.keys(match.metadata).length ? (
         <dl className="qa-metadata">
@@ -209,20 +219,21 @@ function GroundedSummary({ summary, relevantMatches }) {
     <article className="card qa-grounded-summary">
       <div className="qa-answer-head">
         <div>
-          <span className="badge">Semantic evidence summary</span>
+          <span className="badge">Synthesized answer</span>
           <span className="badge">{evidence.length} excerpt{evidence.length === 1 ? '' : 's'}</span>
           <span className="badge">{new Set(evidence.map((item) => String(item.sourceId))).size} source{new Set(evidence.map((item) => String(item.sourceId))).size === 1 ? '' : 's'}</span>
         </div>
-        <span className="mono">meaning-based · extractive</span>
+        <span className="mono">meaning-based · grounded</span>
       </div>
-      <div className="hint qa-summary-note">
-        Every line is copied verbatim from an independently accepted record. Sentence embeddings select meaning and intent; no generative model rewrites the evidence.
-      </div>
+      <div className="qa-summary-text">{summary.text}</div>
+      <div className="hint qa-summary-note">This answer may paraphrase. It is generated only from passages that independently passed the same “show relevant only” threshold.</div>
+      <div className="section-title">Supporting passages</div>
       <ol className="qa-summary-lines">
         {evidence.map((item, index) => (
-          <li key={`${item.sourceId}:${index}`}>
+          <li key={`${item.sourceId}:${item.evidenceNumber ?? index}`} value={item.evidenceNumber ?? index + 1}>
             <div className="qa-summary-text">{item.text}</div>
             <div className="qa-summary-citation">
+              <span className="badge">Evidence {item.evidenceNumber ?? index + 1}</span>
               <span className="badge">Source {item.sourceId}</span>
               <span className="badge">Passage meaning {Number(item.semanticSimilarity).toFixed(3)}</span>
               <span className="badge">Record relevance {Number(item.recordRelevance).toFixed(3)}</span>
@@ -261,6 +272,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
           threshold: settings.threshold,
           summary: {
             enabled: settings.summaryEnabled,
+            model: settings.summaryModel,
             maxRecords: settings.summaryMaxRecords,
             maxLines: settings.summaryMaxLines,
           },
@@ -296,7 +308,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
       <form className="card qa-search-card" onSubmit={search}>
         <h3>Ask the indexed corpus</h3>
         <div className="hint">
-          Each question is handled independently. Semantic summary mode pools only threshold-passing records and returns short, verbatim evidence excerpts.
+          Retrieval compares your question with independently indexed answer passages. The summary may paraphrase, but it can use only passages that pass “show relevant only.”
         </div>
         <textarea className="qa-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Enter a question…" />
         <div className="toolbar">
@@ -309,7 +321,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
               checked={Boolean(settings.summaryEnabled)}
               onChange={(event) => setSettings((current) => ({ ...current, summaryEnabled: event.target.checked }))}
             />
-            Semantic evidence summary
+            Synthesized grounded answer
           </label>
           <span className="badge">Top {settings.topK}</span>
           <span className="badge">Threshold {Number(settings.threshold).toFixed(2)}</span>
@@ -448,6 +460,7 @@ function IndexScreen({ runtime, settings }) {
         <div className="qa-stat-grid">
           <div><span>State</span><strong>{status ? (status.requiresRebuild ? 'Rebuild required' : status.initialized ? 'Ready' : 'Not initialized') : 'Unknown'}</strong></div>
           <div><span>Records</span><strong>{status?.recordCount ?? '—'}</strong></div>
+          <div><span>Answer passages</span><strong>{status?.passageCount ?? '—'}</strong></div>
           <div><span>Model</span><strong>{status?.corpus?.embeddingModel || '—'}</strong></div>
           <div><span>Dimensions</span><strong>{status?.corpus?.embeddingDimension || '—'}</strong></div>
           <div><span>Last sync</span><strong>{status?.corpus?.lastSyncedAt ? new Date(status.corpus.lastSyncedAt).toLocaleString() : '—'}</strong></div>
@@ -462,7 +475,7 @@ function IndexScreen({ runtime, settings }) {
       {job ? <div className="card">
         <div className="qa-card-title"><h3>Sync {job.id}</h3><span className="badge">{job.status}</span></div>
         <div className="qa-progress"><span style={{ width: `${job.percent || 0}%` }} /></div>
-        <div className="hint">{job.processed} / {job.total} scanned · {job.changed} embeddings written · {job.percent || 0}%</div>
+        <div className="hint">{job.processed} / {job.total} scanned · {job.changed} records changed · {job.passages || 0} answer passages embedded · {job.percent || 0}%</div>
         {job.error ? <div className="alert warn" style={{ marginTop: 12 }}>{job.error}</div> : null}
         <pre className="qa-log">{(job.logs || []).join('\n')}</pre>
       </div> : null}
@@ -527,10 +540,11 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
         <div className="toolbar"><button className="btn" disabled={busy} onClick={() => call('/index/test', { connection: settings.indexConnection }, (response) => `Index database connected${response.connection.vectorVersion ? `; pgvector ${response.connection.vectorVersion}` : '; pgvector is not installed yet'}.`)}>Test index database</button></div>
       </div>
       <div className="card">
-        <h3>Ollama embedding service</h3>
+        <h3>Ollama models</h3>
         <div className="form-grid">
           <label className="field"><span className="field-label">Base URL</span><input value={settings.ollamaBaseUrl} onChange={(event) => setSettings((current) => ({ ...current, ollamaBaseUrl: event.target.value }))} /></label>
           <label className="field"><span className="field-label">Embedding model</span><input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} /></label>
+          <label className="field"><span className="field-label">Summary model</span><input value={settings.summaryModel} onChange={(event) => setSettings((current) => ({ ...current, summaryModel: event.target.value }))} /></label>
         </div>
         <button className="btn" style={{ marginTop: 12 }} disabled={busy} onClick={() => call('/ollama/test', { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.model }, (response) => `Ollama connected; ${response.model} returns ${response.dimension} dimensions.`)}>Test Ollama</button>
       </div>
@@ -562,7 +576,7 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Result count</span><input type="number" min="1" max="20" value={settings.topK} onChange={(event) => setSettings((current) => ({ ...current, topK: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Clear-match threshold</span><input type="number" min="-1" max="1" step="0.01" value={settings.threshold} onChange={(event) => setSettings((current) => ({ ...current, threshold: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Summary source pool</span><input type="number" min="1" max="15" value={settings.summaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxRecords: Number(event.target.value) }))} /></label>
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Summary excerpt count</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Maximum summary sentences</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Source page size</span><input type="number" min="25" max="1000" value={settings.fetchSize} onChange={(event) => setSettings((current) => ({ ...current, fetchSize: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Embedding batch size</span><input type="number" min="1" max="64" value={settings.embeddingBatchSize} onChange={(event) => setSettings((current) => ({ ...current, embeddingBatchSize: Number(event.target.value) }))} /></label>
         </div>
@@ -570,7 +584,7 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
           <input type="checkbox" checked={Boolean(settings.summaryEnabled)} onChange={(event) => setSettings((current) => ({ ...current, summaryEnabled: event.target.checked }))} />
           Enable grounded semantic summaries by default
         </label>
-        <div className="hint" style={{ marginTop: 10 }}>Summary evidence must independently pass the same clear-match threshold. Line selection uses dense passage embeddings and never rewrites source text.</div>
+        <div className="hint" style={{ marginTop: 10 }}>The summary model may paraphrase and combine evidence from several records. It receives only answer passages whose passage-level relevance independently passes the clear-match threshold.</div>
         <div className="hint" style={{ marginTop: 12 }}>Non-secret settings save automatically. Passwords and connection strings are never persisted.</div>
       </div>
     </div>

@@ -3,6 +3,7 @@ export const DEFAULT_SETTINGS = {
   indexConnection: { connectionString: '', host: '127.0.0.1', port: 5432, user: '', password: '', database: 'postgres', sslMode: 'disable' },
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   model: 'embeddinggemma',
+  summaryModel: 'gemma3:4b',
   mapping: { schema: '', table: '', idColumn: '', questionColumn: '', answerColumn: '', metadataColumns: [], groupColumn: '', orderColumn: '' },
   topK: 5,
   threshold: 0.60,
