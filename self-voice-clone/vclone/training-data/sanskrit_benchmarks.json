@@ -1,0 +1,30 @@
+{
+  "purpose": "Benchmark sentences for comparing zero-shot cloning against true adapted voice models.",
+  "items": [
+    {
+      "id": "english_identity_01",
+      "language": "en",
+      "text": "This is a test of my personal voice model speaking naturally and clearly."
+    },
+    {
+      "id": "sanskrit_roman_01",
+      "language": "sa-Latn",
+      "text": "sarve maanavaah svatantraah samutpannaah vartante api cha"
+    },
+    {
+      "id": "sanskrit_iast_01",
+      "language": "sa-Latn",
+      "text": "ātmā nityaḥ śuddhaḥ buddhaḥ muktaḥ svabhāvataḥ"
+    },
+    {
+      "id": "sanskrit_devanagari_01",
+      "language": "sa-Deva",
+      "text": "सर्वे भवन्तु सुखिनः सर्वे सन्तु निरामयाः"
+    },
+    {
+      "id": "mixed_english_sanskrit_01",
+      "language": "en-sa",
+      "text": "The meaning of dharma, karma, and moksha should be spoken with correct Sanskrit pronunciation."
+    }
+  ]
+}
