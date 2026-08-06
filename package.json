@@ -8,8 +8,8 @@
     "start": "npm run start:all",
     "build": "npm run build:all",
     "preview": "npm run preview:all",
-    "dev:all": "node src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"node src/runPackageBin.js vite\"",
-    "start:all": "node src/server.js",
+    "dev:all": "node src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"node src/runPackageBin.js vite\" \"npm --prefix ./self-voice-clone run dev:api\"",
+    "start:all": "node src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"npm --prefix ./self-voice-clone run start:api\"",
     "build:all": "node src/runPackageBin.js vite build",
     "preview:all": "node src/runPackageBin.js vite preview",
     "dev:pg-backup": "npm --prefix ./pg-backup run dev",
@@ -34,7 +34,11 @@
     "setup:transcriber": "npm --prefix ./transcriber run setup:python",
     "test:transcriber": "npm --prefix ./transcriber test",
     "build:transcriber": "npm --prefix ./transcriber run build",
-    "preview:transcriber": "npm --prefix ./transcriber run preview"
+    "preview:transcriber": "npm --prefix ./transcriber run preview",
+    "dev:self-voice-clone": "npm --prefix ./self-voice-clone run dev:api",
+    "start:self-voice-clone": "npm --prefix ./self-voice-clone run start:api",
+    "setup:self-voice-clone": "npm --prefix ./self-voice-clone run setup:python",
+    "test:self-voice-clone": "npm --prefix ./self-voice-clone test"
   },
   "dependencies": {
     "archiver": "^7.0.1",
