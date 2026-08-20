@@ -1,4 +1,5 @@
-# Runtime-only dependencies for local Whisper transcription.
+# Runtime-only dependencies for local Whisper and Qwen3-ASR transcription.
 # FFmpeg and FFprobe are system executables and are not installed by pip.
 openai-whisper>=20240930
 torch>=2.2
+qwen-asr
