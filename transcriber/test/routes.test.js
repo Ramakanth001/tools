@@ -63,6 +63,18 @@ function createFakeRunner({ delayMs = 5, blocking = false, tracker } = {}) {
         if (tracker && tracker.active > 0 && blocking) tracker.active -= 1;
       });
     },
+    async extractAudio({ outputDir, onEvent, onLog, onChild }) {
+      const child = new EventEmitter();
+      child.exitCode = null;
+      child.kill = () => false;
+      onChild(child);
+      onLog('fake audio extraction started');
+      onEvent({ type: 'progress', phase: 'extracting_audio', percent: 50, currentChunk: 1, totalChunks: 1 });
+      await fsp.mkdir(outputDir, { recursive: true });
+      await fsp.writeFile(path.join(outputDir, 'extracted.mp3'), 'fake mp3', 'utf8');
+      child.exitCode = 0;
+      return { durationSeconds: 61, artifacts: { audio: 'extracted.mp3' } };
+    },
   };
 }
 
@@ -90,10 +102,13 @@ async function createHarness(options = {}) {
   };
 }
 
-async function upload(baseUrl, { content = 'media', model = 'small', language = 'auto' } = {}) {
+async function upload(baseUrl, { content = 'media', operation = 'transcribe', engine = 'whisper', model = 'small', chunkSeconds = 600, language = 'auto' } = {}) {
   const body = new FormData();
   body.append('media', new Blob([content], { type: 'audio/wav' }), 'sample.wav');
+  body.append('operation', operation);
+  body.append('engine', engine);
   body.append('model', model);
+  body.append('chunkSeconds', chunkSeconds);
   body.append('language', language);
   return fetch(`${baseUrl}/jobs`, { method: 'POST', body });
 }
@@ -116,7 +131,9 @@ test('health reports the supported runtime and jobs require media', async (t) =>
   assert.equal(health.ready, true);
   assert.equal(health.defaultModel, 'small');
   assert.equal(health.maxUploadBytes, 1024 * 1024);
-  assert.deepEqual(health.models, ['tiny', 'base', 'small', 'medium', 'turbo']);
+  assert.deepEqual(health.chunkSeconds, { default: 600, min: 60, max: 3600 });
+  assert.deepEqual(health.models, ['tiny', 'base', 'small', 'medium', 'large', 'turbo', 'qwen3-asr-1.7b']);
+  assert.deepEqual(health.engines, ['whisper', 'qwen3-asr']);
 
   const missing = await fetch(`${harness.baseUrl}/jobs`, { method: 'POST', body: new FormData() });
   assert.equal(missing.status, 400);
@@ -131,6 +148,7 @@ test('uploaded jobs complete and expose isolated TXT/SRT artifacts', async (t) =
   const job = await waitForJob(harness.baseUrl, created.jobId, (candidate) => candidate.status === 'done');
   assert.equal(job.model, 'base');
   assert.equal(job.language, 'en');
+  assert.equal(job.chunkSeconds, 600);
   assert.equal(job.artifacts.txt, true);
   assert.equal(Object.hasOwn(job, 'inputPath'), false);
 
@@ -145,6 +163,20 @@ test('uploaded jobs complete and expose isolated TXT/SRT artifacts', async (t) =
   assert.equal((await fetch(`${harness.baseUrl}/jobs/${job.id}`)).status, 404);
 });
 
+test('video audio extraction produces an isolated MP3 artifact', async (t) => {
+  const harness = await createHarness();
+  t.after(() => harness.close());
+  const response = await upload(harness.baseUrl, { operation: 'extract_audio' });
+  assert.equal(response.status, 202);
+  const created = await response.json();
+  const job = await waitForJob(harness.baseUrl, created.jobId, (candidate) => candidate.status === 'done');
+  assert.equal(job.operation, 'extract_audio');
+  assert.equal(job.artifacts.audio, true);
+  const audio = await fetch(`${harness.baseUrl}/jobs/${job.id}/artifacts/audio`);
+  assert.equal(audio.status, 200);
+  assert.equal(await audio.text(), 'fake mp3');
+});
+
 test('upload limits and option validation fail cleanly', async (t) => {
   const harness = await createHarness({ maxUploadBytes: 4 });
   t.after(() => harness.close());
@@ -152,6 +184,10 @@ test('upload limits and option validation fail cleanly', async (t) => {
   assert.equal(tooLarge.status, 413);
   const invalid = await upload(harness.baseUrl, { content: '123', language: 'English' });
   assert.equal(invalid.status, 400);
+  const invalidEngineModel = await upload(harness.baseUrl, { content: '123', engine: 'qwen3-asr', model: 'large' });
+  assert.equal(invalidEngineModel.status, 400);
+  const invalidChunk = await upload(harness.baseUrl, { content: '123', chunkSeconds: 30 });
+  assert.equal(invalidChunk.status, 400);
 });
 
 test('running jobs can be cancelled', async (t) => {
