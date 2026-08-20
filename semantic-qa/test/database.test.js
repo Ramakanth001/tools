@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { commitIncremental, connectionToPoolConfig, searchPassages, searchRecords } = require('../src/database');
+const { buildTextPhraseQueries, commitIncremental, connectionToPoolConfig, searchAllPassages, searchPassages, searchRecords, searchTextRecords } = require('../src/database');
 
 function compactSql(sql) {
   return String(sql).replace(/\s+/g, ' ').trim();
@@ -9,6 +9,13 @@ function compactSql(sql) {
 test('prefer SSL does not force TLS for loopback PostgreSQL', () => {
   assert.equal(connectionToPoolConfig({ host: '127.0.0.1', user: 'postgres', database: 'postgres', sslMode: 'prefer' }).ssl, false);
   assert.deepEqual(connectionToPoolConfig({ host: 'db.example.com', user: 'postgres', database: 'postgres', sslMode: 'prefer' }).ssl, { rejectUnauthorized: false });
+});
+
+test('conventional search extracts quoted and saying phrases without inventing terms', () => {
+  const phrases = buildTextPhraseQueries('What is the meaning of Jesus saying "The light is in me"?');
+  assert.equal(phrases[0], 'The light is in me');
+  assert.ok(phrases.includes('Jesus saying "The light is in me'));
+  assert.equal(phrases.some((phrase) => /universal|qualified monism/iu.test(phrase)), false);
 });
 
 test('incremental commit reconciles deleted source IDs inside one transaction', async () => {
@@ -186,5 +193,47 @@ test('passage search compares the query against answer passages and joins source
   assert.deepEqual(searchCall.params, ['[0.2,0.8]', 'meaning OR light', 60, 240]);
   assert.equal(result.unit, 'answer_passage');
   assert.equal(result.rows[0].sourceId, 'answer:1');
+  assert.equal(calls.at(-1).statement, 'COMMIT');
+});
+
+test('deep semantic retrieval scores the complete passage corpus without a candidate limit', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      const statement = compactSql(sql);
+      calls.push({ statement, params });
+      return { rows: [{ sourceId: 'answer:1', passageText: 'Mula Maya is the original cause.', scannedPassages: 19777 }] };
+    },
+  };
+  const result = await searchAllPassages(client, { id: 'default' }, [0.2, 0.8], 'mula OR maya', 0.31);
+  const search = calls[0];
+  assert.match(search.statement, /all_scored AS MATERIALIZED/);
+  assert.match(search.statement, /FROM semantic_qa\.passages/);
+  assert.equal(/LIMIT \$|LIMIT \d/.test(search.statement), false);
+  assert.deepEqual(search.params, ['[0.2,0.8]', 'mula OR maya', 0.31]);
+  assert.equal(result.exhaustive, true);
+  assert.equal(result.scannedPassages, 19777);
+  assert.equal(result.rows[0].scannedPassages, undefined);
+});
+
+test('conventional text search fuses exact, full-text, and trigram passage channels', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      const statement = compactSql(sql);
+      calls.push({ statement, params });
+      if (statement.includes('ranked.rrf_score')) return { rows: [{ sourceId: 'answer:1', matchChannels: ['exact passage', 'full text'] }] };
+      return { rows: [] };
+    },
+  };
+  const result = await searchTextRecords(client, { id: 'default' }, 'light is in me', 20);
+  const search = calls.find((call) => call.statement.includes('ranked.rrf_score'));
+  assert.match(search.statement, /exact_passage/);
+  assert.match(search.statement, /full_text_passage/);
+  assert.match(search.statement, /fuzzy_passage/);
+  assert.match(search.statement, /word_similarity/);
+  assert.match(search.statement, /sum\(weight \/ \(60\.0 \+ rank\)\)/);
+  assert.deepEqual(search.params, ['light is in me', 20, 'light', ['light is in me']]);
+  assert.equal(result.unit, 'text_passage');
   assert.equal(calls.at(-1).statement, 'COMMIT');
 });
