@@ -1,0 +1,39 @@
+{
+  "toolId": "transcriber",
+  "setupCommand": "npm --prefix ./transcriber install && npm run setup:transcriber",
+  "checks": [
+    {
+      "id": "node-packages",
+      "type": "node-packages",
+      "label": "Node packages",
+      "packageFile": "package.json",
+      "fix": "Run: npm --prefix ./transcriber install"
+    },
+    {
+      "id": "python-environment",
+      "type": "python-environment",
+      "label": "Transcriber Python environment",
+      "path": ".venv/bin/python",
+      "windowsPath": ".venv/Scripts/python.exe",
+      "envVar": "TRANSCRIBER_PYTHON",
+      "modules": ["whisper", "torch", "qwen_asr"],
+      "fix": "Run: npm run setup:transcriber"
+    },
+    {
+      "id": "ffmpeg",
+      "type": "command",
+      "label": "FFmpeg",
+      "command": "ffmpeg",
+      "args": ["-version"],
+      "fix": "Install FFmpeg and make ffmpeg available on PATH."
+    },
+    {
+      "id": "ffprobe",
+      "type": "command",
+      "label": "FFprobe",
+      "command": "ffprobe",
+      "args": ["-version"],
+      "fix": "Install FFmpeg and make ffprobe available on PATH."
+    }
+  ]
+}
