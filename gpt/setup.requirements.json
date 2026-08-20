@@ -1,0 +1,21 @@
+{
+  "toolId": "gpt",
+  "setupCommand": "npm --prefix ./gpt install",
+  "checks": [
+    {
+      "id": "node-packages",
+      "type": "node-packages",
+      "label": "Node packages",
+      "packageFile": "package.json",
+      "fix": "Run: npm --prefix ./gpt install"
+    },
+    {
+      "id": "ollama",
+      "type": "command",
+      "label": "Ollama",
+      "command": "ollama",
+      "args": ["--version"],
+      "fix": "Install and start Ollama, then choose the models in GPT setup."
+    }
+  ]
+}
