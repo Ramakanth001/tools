@@ -3,6 +3,7 @@ const {
   quoteIdentifier,
   assertIdentifier,
   toVectorLiteral,
+  buildLexicalQuery,
   embeddingFormatForModel,
   RETRIEVAL_SCHEMA_VERSION,
 } = require('./core');
@@ -41,6 +42,24 @@ function connectionToPoolConfig(connection = {}) {
 
 function createPool(connection) {
   return new Pool(connectionToPoolConfig(connection));
+}
+
+function buildTextPhraseQueries(value) {
+  const raw = String(value || '').normalize('NFKC').replace(/\s+/gu, ' ').trim();
+  const phrases = [];
+  const add = (candidate) => {
+    const phrase = String(candidate || '').trim().replace(/^[\s"'‘’“”:,-]+|[\s"'‘’“”?.!,;:-]+$/gu, '');
+    const wordCount = phrase.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+    if (phrase.length >= 8 && phrase.length <= 180 && wordCount >= 2 && !phrases.some((item) => item.toLocaleLowerCase() === phrase.toLocaleLowerCase())) {
+      phrases.push(phrase);
+    }
+  };
+  for (const match of raw.matchAll(/["“]([^"”]{3,})["”]|'([^']{3,})'/gu)) add(match[1] || match[2]);
+  for (const match of raw.matchAll(/\b(?:saying|said|phrase|statement|words|meaning)\b(?:\s+of|\s+that)?\s+/giu)) {
+    add(raw.slice(Number(match.index) + match[0].length));
+  }
+  if ((raw.match(/[\p{L}\p{N}]+/gu)?.length || 0) <= 12) add(raw);
+  return phrases.slice(0, 5);
 }
 
 async function withPool(connection, callback) {
@@ -201,6 +220,7 @@ function ensureDimension(value) {
 
 async function ensureCoreSchema(client) {
   await client.query('CREATE EXTENSION IF NOT EXISTS vector');
+  await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
   await client.query('CREATE SCHEMA IF NOT EXISTS semantic_qa');
   await client.query(`
     CREATE TABLE IF NOT EXISTS semantic_qa.corpus (
@@ -314,6 +334,10 @@ async function createPassageIndexes(client) {
     CREATE INDEX IF NOT EXISTS semantic_qa_passages_source_id
       ON semantic_qa.passages (source_id)
   `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS semantic_qa_passages_text_trgm
+      ON semantic_qa.passages USING gin (passage_text gin_trgm_ops)
+  `);
 }
 
 async function searchVectorExists(client) {
@@ -332,6 +356,10 @@ async function createSearchIndex(client) {
   await client.query(`
     CREATE INDEX IF NOT EXISTS semantic_qa_records_search_gin
       ON semantic_qa.records USING gin (search_vector)
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS semantic_qa_records_question_trgm
+      ON semantic_qa.records USING gin (question gin_trgm_ops)
   `);
 }
 
@@ -1001,8 +1029,422 @@ async function searchPassageIndex(connection, vector, queryText, limit) {
   });
 }
 
+async function searchAllPassages(client, corpus, vector, queryText, minimumSimilarity = 0.25) {
+  const vectorLiteral = toVectorLiteral(vector);
+  const similarityFloor = Math.max(-1, Math.min(1, Number(minimumSimilarity) || 0.25));
+  const result = await client.query(`
+    WITH query AS MATERIALIZED (
+      SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms
+    ),
+    corpus_stats AS MATERIALIZED (
+      SELECT count(*)::integer AS passage_count FROM semantic_qa.passages
+    ),
+    all_scored AS MATERIALIZED (
+      SELECT p.source_id, p.passage_index, p.passage_text, p.start_offset, p.end_offset,
+             1 - (p.embedding <=> $1::vector) AS similarity,
+             ts_rank_cd(p.search_vector, q.terms) AS lexical_score
+      FROM semantic_qa.passages p CROSS JOIN query q
+    ),
+    eligible AS MATERIALIZED (
+      SELECT *, row_number() OVER (
+        PARTITION BY source_id
+        ORDER BY similarity DESC, lexical_score DESC, passage_index
+      ) AS source_rank
+      FROM all_scored
+      WHERE similarity >= $3 OR lexical_score > 0
+    )
+    SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+           r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+           e.passage_index AS "passageIndex", e.passage_text AS "passageText",
+           e.start_offset AS "passageStart", e.end_offset AS "passageEnd",
+           e.similarity, e.lexical_score AS "lexicalScore",
+           stats.passage_count AS "scannedPassages"
+    FROM eligible e
+    JOIN semantic_qa.records r USING (source_id)
+    CROSS JOIN corpus_stats stats
+    WHERE e.source_rank <= 3
+    ORDER BY e.similarity DESC, e.lexical_score DESC, r.source_id, e.passage_index
+  `, [vectorLiteral, queryText, similarityFloor]);
+  const scannedPassages = Number(result.rows[0]?.scannedPassages || 0);
+  return {
+    corpus,
+    rows: result.rows.map(({ scannedPassages: _scannedPassages, ...row }) => row),
+    hybrid: true,
+    exhaustive: true,
+    scannedPassages,
+    unit: 'answer_passage',
+  };
+}
+
+async function searchAllPassageIndex(connection, vector, queryText, minimumSimilarity) {
+  return withPool(connection, async (pool) => {
+    const client = await pool.connect();
+    try {
+      await ensureCoreSchema(client);
+      const corpus = await getCorpus(client);
+      if (!corpus || !(await recordsTableExists(client)) || !(await passagesTableExists(client))) {
+        return { corpus, rows: [], hybrid: true, exhaustive: true, scannedPassages: 0, unit: 'answer_passage' };
+      }
+      return await searchAllPassages(client, corpus, vector, queryText, minimumSimilarity);
+    } finally {
+      client.release();
+    }
+  });
+}
+
+async function searchTextRecords(client, corpus, queryText, limit) {
+  const query = String(queryText || '').trim();
+  if (!query) return { corpus, rows: [], hybrid: true, unit: 'text_passage' };
+  const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+  await client.query('BEGIN');
+  try {
+    await client.query(`SET LOCAL pg_trgm.word_similarity_threshold = 0.22`);
+    const result = await client.query(`
+      WITH input AS MATERIALIZED (
+        SELECT $1::text AS text, websearch_to_tsquery('simple'::regconfig, $3) AS terms, $4::text[] AS phrases
+      ),
+      exact_passage AS MATERIALIZED (
+        SELECT p.source_id, p.passage_index,
+               row_number() OVER (ORDER BY matched.phrase_length DESC, length(p.passage_text), p.source_id, p.passage_index) AS rank,
+               'exact passage'::text AS channel, 4.0::float8 AS weight
+        FROM semantic_qa.passages p CROSS JOIN input q
+        CROSS JOIN LATERAL (
+          SELECT max(length(phrase)) AS phrase_length
+          FROM unnest(q.phrases) AS phrase
+          WHERE position(lower(phrase) in lower(p.passage_text)) > 0
+        ) matched
+        WHERE matched.phrase_length IS NOT NULL
+        ORDER BY matched.phrase_length DESC, length(p.passage_text), p.source_id, p.passage_index
+        LIMIT $2 * 4
+      ),
+      full_text_passage AS MATERIALIZED (
+        SELECT p.source_id, p.passage_index,
+               row_number() OVER (ORDER BY ts_rank_cd(p.search_vector, q.terms) DESC, p.source_id, p.passage_index) AS rank,
+               'full text'::text AS channel, 2.2::float8 AS weight
+        FROM semantic_qa.passages p CROSS JOIN input q
+        WHERE q.terms::text <> '' AND p.search_vector @@ q.terms
+        ORDER BY ts_rank_cd(p.search_vector, q.terms) DESC, p.source_id, p.passage_index
+        LIMIT $2 * 6
+      ),
+      exact_title AS MATERIALIZED (
+        SELECT r.source_id, coalesce(min(p.passage_index), 0) AS passage_index,
+               row_number() OVER (ORDER BY max(matched.phrase_length) DESC, length(r.question), r.source_id) AS rank,
+               'exact title'::text AS channel, 3.2::float8 AS weight
+        FROM semantic_qa.records r
+        CROSS JOIN input q
+        CROSS JOIN LATERAL (
+          SELECT max(length(phrase)) AS phrase_length
+          FROM unnest(q.phrases) AS phrase
+          WHERE position(lower(phrase) in lower(r.question)) > 0
+        ) matched
+        LEFT JOIN semantic_qa.passages p USING (source_id)
+        WHERE matched.phrase_length IS NOT NULL
+        GROUP BY r.source_id, r.question
+        ORDER BY max(matched.phrase_length) DESC, length(r.question), r.source_id
+        LIMIT $2 * 4
+      ),
+      full_text_title AS MATERIALIZED (
+        SELECT r.source_id, coalesce(min(p.passage_index), 0) AS passage_index,
+               row_number() OVER (ORDER BY ts_rank_cd(to_tsvector('simple'::regconfig, r.question), q.terms) DESC, r.source_id) AS rank,
+               'title full text'::text AS channel, 1.8::float8 AS weight
+        FROM semantic_qa.records r
+        CROSS JOIN input q
+        LEFT JOIN semantic_qa.passages p USING (source_id)
+        WHERE q.terms::text <> '' AND to_tsvector('simple'::regconfig, r.question) @@ q.terms
+        GROUP BY r.source_id, r.question, q.terms
+        ORDER BY ts_rank_cd(to_tsvector('simple'::regconfig, r.question), q.terms) DESC, r.source_id
+        LIMIT $2 * 5
+      ),
+      primary_candidates AS MATERIALIZED (
+        SELECT * FROM exact_passage UNION ALL SELECT * FROM full_text_passage
+        UNION ALL SELECT * FROM exact_title UNION ALL SELECT * FROM full_text_title
+      ),
+      primary_source_count AS MATERIALIZED (
+        SELECT count(DISTINCT source_id) AS count FROM primary_candidates
+      ),
+      fuzzy_passage AS MATERIALIZED (
+        SELECT p.source_id, p.passage_index,
+               row_number() OVER (ORDER BY word_similarity(q.text, p.passage_text) DESC, p.source_id, p.passage_index) AS rank,
+               'fuzzy passage'::text AS channel, 1.2::float8 AS weight
+        FROM semantic_qa.passages p CROSS JOIN input q CROSS JOIN primary_source_count c
+        WHERE c.count < $2 AND q.text <% p.passage_text
+        ORDER BY word_similarity(q.text, p.passage_text) DESC, p.source_id, p.passage_index
+        LIMIT $2 * 4
+      ),
+      fuzzy_title AS MATERIALIZED (
+        SELECT r.source_id, coalesce(min(p.passage_index), 0) AS passage_index,
+               row_number() OVER (ORDER BY word_similarity(q.text, r.question) DESC, r.source_id) AS rank,
+               'fuzzy title'::text AS channel, 1.0::float8 AS weight
+        FROM semantic_qa.records r
+        CROSS JOIN input q CROSS JOIN primary_source_count c
+        LEFT JOIN semantic_qa.passages p USING (source_id)
+        WHERE c.count < $2 AND q.text <% r.question
+        GROUP BY r.source_id, r.question, q.text
+        ORDER BY word_similarity(q.text, r.question) DESC, r.source_id
+        LIMIT $2 * 4
+      ),
+      candidates AS MATERIALIZED (
+        SELECT * FROM primary_candidates UNION ALL SELECT * FROM fuzzy_passage
+        UNION ALL SELECT * FROM fuzzy_title
+      ),
+      fused AS MATERIALIZED (
+        SELECT source_id, passage_index,
+               sum(weight / (60.0 + rank)) AS rrf_score,
+               array_agg(DISTINCT channel) AS channels
+        FROM candidates
+        GROUP BY source_id, passage_index
+      ),
+      ranked AS MATERIALIZED (
+        SELECT *, row_number() OVER (PARTITION BY source_id ORDER BY rrf_score DESC, passage_index) AS source_rank
+        FROM fused
+      )
+      SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+             r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+             p.passage_index AS "passageIndex", p.passage_text AS "passageText",
+             p.start_offset AS "passageStart", p.end_offset AS "passageEnd",
+             least(1, ranked.rrf_score / 0.10) AS "searchScore",
+             ranked.channels AS "matchChannels",
+             ts_rank_cd(p.search_vector, q.terms) AS "lexicalScore",
+             word_similarity(q.text, p.passage_text) AS "trigramSimilarity"
+      FROM ranked
+      JOIN semantic_qa.records r USING (source_id)
+      JOIN semantic_qa.passages p USING (source_id, passage_index)
+      CROSS JOIN input q
+      WHERE ranked.source_rank <= 3
+      ORDER BY ranked.rrf_score DESC, r.source_id, p.passage_index
+      LIMIT $2 * 3
+    `, [query, boundedLimit, buildLexicalQuery(query), buildTextPhraseQueries(query)]);
+    await client.query('COMMIT');
+    return { corpus, rows: result.rows, hybrid: true, unit: 'text_passage' };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  }
+}
+
+async function searchTextIndex(connection, queryText, limit) {
+  return withPool(connection, async (pool) => {
+    const client = await pool.connect();
+    try {
+      await ensureCoreSchema(client);
+      const corpus = await getCorpus(client);
+      if (!corpus || !(await recordsTableExists(client)) || !(await passagesTableExists(client))) {
+        return { corpus, rows: [], hybrid: true, unit: 'text_passage' };
+      }
+      return await searchTextRecords(client, corpus, queryText, limit);
+    } finally {
+      client.release();
+    }
+  });
+}
+
+async function listDocuments(connection, { query = '', page = 1, pageSize = 50 } = {}) {
+  return withPool(connection, async (pool) => {
+    await ensureCoreSchema(pool);
+    const normalizedQuery = String(query || '').normalize('NFKC').replace(/\s+/gu, ' ').trim();
+    const boundedPage = Math.max(1, Number(page) || 1);
+    const boundedSize = Math.max(10, Math.min(100, Number(pageSize) || 50));
+    const offset = (boundedPage - 1) * boundedSize;
+    const browseSql = `
+      WITH ranked_records AS MATERIALIZED (
+        SELECT coalesce(r.source_group, r.source_id) AS source_group,
+               r.source_id, r.question, r.answer, r.metadata,
+               row_number() OVER (
+                 PARTITION BY coalesce(r.source_group, r.source_id)
+                 ORDER BY r.source_id
+               ) AS source_rank,
+               count(*) OVER (
+                 PARTITION BY coalesce(r.source_group, r.source_id)
+               )::integer AS chunk_count
+        FROM semantic_qa.records r
+        WHERE r.metadata->>'source_type' = 'discourse'
+      )
+      SELECT rr.source_group AS "sourceGroup", rr.question AS title,
+             rr.metadata->>'language' AS language,
+             rr.metadata->>'record_date' AS "recordDate",
+             rr.chunk_count AS "chunkCount", rr.source_id AS "firstSourceId",
+             rr.source_id AS "previewSourceId", 'Discourse'::text AS "matchKind",
+             btrim(regexp_replace(left(rr.answer, 720), '[[:space:]]+', ' ', 'g')) AS "answerPreview",
+             count(*) OVER ()::integer AS total
+      FROM ranked_records rr
+      WHERE rr.source_rank = 1
+      ORDER BY rr.metadata->>'record_date' DESC NULLS LAST, rr.question, rr.source_group
+      LIMIT $1 OFFSET $2
+    `;
+    const searchSql = `
+      WITH input AS MATERIALIZED (
+        SELECT $1::text AS text, websearch_to_tsquery('simple'::regconfig, $4) AS terms,
+               set_config('pg_trgm.word_similarity_threshold', '0.22', true) AS fuzzy_threshold
+      ),
+      discourses AS MATERIALIZED (
+        SELECT r.*, coalesce(r.source_group, r.source_id) AS document_group
+        FROM semantic_qa.records r
+        WHERE r.metadata->>'source_type' = 'discourse'
+      ),
+      documents AS MATERIALIZED (
+        SELECT d.document_group, (array_agg(d.question ORDER BY d.source_id))[1] AS title,
+               min(d.metadata->>'language') AS language,
+               min(d.metadata->>'record_date') AS record_date,
+               count(*)::integer AS chunk_count, min(d.source_id) AS first_source_id
+        FROM discourses d GROUP BY d.document_group
+      ),
+      exact_answers AS MATERIALIZED (
+        SELECT d.document_group, d.source_id, p.passage_index,
+               120::float8 AS match_score, 'Exact answer match'::text AS match_kind
+        FROM semantic_qa.passages p
+        JOIN discourses d USING (source_id)
+        CROSS JOIN input q
+        WHERE p.passage_text ILIKE '%' || q.text || '%'
+      ),
+      full_text_answers AS MATERIALIZED (
+        SELECT d.document_group, d.source_id, p.passage_index,
+               (55 + ts_rank_cd(p.search_vector, q.terms) * 30)::float8 AS match_score,
+               'Answer content match'::text AS match_kind
+        FROM semantic_qa.passages p
+        JOIN discourses d USING (source_id)
+        CROSS JOIN input q
+        WHERE p.search_vector @@ q.terms
+      ),
+      exact_questions AS MATERIALIZED (
+        SELECT DISTINCT ON (d.document_group)
+               d.document_group, d.source_id, p.passage_index,
+               100::float8 AS match_score, 'Exact question match'::text AS match_kind
+        FROM discourses d
+        JOIN LATERAL (
+          SELECT passage_index FROM semantic_qa.passages
+          WHERE source_id = d.source_id ORDER BY passage_index LIMIT 1
+        ) p ON true
+        CROSS JOIN input q
+        WHERE d.question ILIKE '%' || q.text || '%'
+        ORDER BY d.document_group, d.source_id, p.passage_index
+      ),
+      full_text_questions AS MATERIALIZED (
+        SELECT DISTINCT ON (d.document_group)
+               d.document_group, d.source_id, p.passage_index,
+               (45 + ts_rank_cd(to_tsvector('simple'::regconfig, d.question), q.terms) * 35)::float8 AS match_score,
+               'Question match'::text AS match_kind
+        FROM discourses d
+        JOIN LATERAL (
+          SELECT passage_index FROM semantic_qa.passages
+          WHERE source_id = d.source_id ORDER BY passage_index LIMIT 1
+        ) p ON true
+        CROSS JOIN input q
+        WHERE to_tsvector('simple'::regconfig, d.question) @@ q.terms
+        ORDER BY d.document_group, d.source_id, p.passage_index
+      ),
+      primary_candidates AS MATERIALIZED (
+        SELECT * FROM exact_answers UNION ALL SELECT * FROM full_text_answers
+        UNION ALL SELECT * FROM exact_questions UNION ALL SELECT * FROM full_text_questions
+      ),
+      primary_document_count AS MATERIALIZED (
+        SELECT count(DISTINCT document_group) AS count FROM primary_candidates
+      ),
+      fuzzy_answers AS MATERIALIZED (
+        SELECT d.document_group, d.source_id, p.passage_index,
+               (20 + word_similarity(q.text, p.passage_text) * 8)::float8 AS match_score,
+               'Closest answer text'::text AS match_kind
+        FROM semantic_qa.passages p
+        JOIN discourses d USING (source_id)
+        CROSS JOIN input q CROSS JOIN primary_document_count c
+        WHERE c.count < $2 AND q.text <% p.passage_text
+      ),
+      fuzzy_questions AS MATERIALIZED (
+        SELECT DISTINCT ON (d.document_group)
+               d.document_group, d.source_id, p.passage_index,
+               (15 + word_similarity(q.text, d.question) * 10)::float8 AS match_score,
+               'Closest question text'::text AS match_kind
+        FROM discourses d
+        JOIN LATERAL (
+          SELECT passage_index FROM semantic_qa.passages
+          WHERE source_id = d.source_id ORDER BY passage_index LIMIT 1
+        ) p ON true
+        CROSS JOIN input q CROSS JOIN primary_document_count c
+        WHERE c.count < $2 AND q.text <% d.question
+        ORDER BY d.document_group, match_score DESC, d.source_id, p.passage_index
+      ),
+      all_candidates AS MATERIALIZED (
+        SELECT * FROM primary_candidates UNION ALL SELECT * FROM fuzzy_answers
+        UNION ALL SELECT * FROM fuzzy_questions
+      ),
+      deduplicated_candidates AS MATERIALIZED (
+        SELECT DISTINCT ON (document_group, source_id, passage_index)
+               document_group, source_id, passage_index, match_score, match_kind
+        FROM all_candidates
+        ORDER BY document_group, source_id, passage_index, match_score DESC
+      ),
+      ranked_matches AS MATERIALIZED (
+        SELECT c.*,
+               row_number() OVER (
+                 PARTITION BY c.document_group
+                 ORDER BY c.match_score DESC, c.source_id, c.passage_index
+               ) AS match_rank
+        FROM deduplicated_candidates c
+      )
+      SELECT d.document_group AS "sourceGroup", d.title, d.language, d.record_date AS "recordDate",
+             d.chunk_count AS "chunkCount", d.first_source_id AS "firstSourceId",
+             rm.source_id AS "previewSourceId", rm.match_kind AS "matchKind",
+             rm.match_score AS "matchScore",
+             btrim(regexp_replace(
+               CASE
+                 WHEN p.search_vector @@ q.terms
+                   THEN replace(replace(ts_headline(
+                     'simple'::regconfig,
+                     p.passage_text,
+                     q.terms,
+                     'MaxWords=72, MinWords=28, ShortWord=2, HighlightAll=false, MaxFragments=2'
+                   ), '<b>', ''), '</b>', '')
+                 ELSE left(p.passage_text, 720)
+               END,
+               '[[:space:]]+', ' ', 'g'
+             )) AS "answerPreview",
+             CASE WHEN position(lower(q.text) in lower(p.passage_text)) > 0
+                  THEN p.start_offset + position(lower(q.text) in lower(p.passage_text)) - 1 END AS "highlightStart",
+             CASE WHEN position(lower(q.text) in lower(p.passage_text)) > 0
+                  THEN p.start_offset + position(lower(q.text) in lower(p.passage_text)) - 1 + length(q.text) END AS "highlightEnd",
+             count(*) OVER ()::integer AS total
+      FROM documents d
+      JOIN ranked_matches rm ON rm.document_group = d.document_group AND rm.match_rank = 1
+      JOIN semantic_qa.passages p USING (source_id, passage_index)
+      CROSS JOIN input q
+      ORDER BY rm.match_score DESC, d.title, d.document_group
+      LIMIT $2 OFFSET $3
+    `;
+    const result = normalizedQuery
+      ? await pool.query(searchSql, [normalizedQuery, boundedSize, offset, buildLexicalQuery(normalizedQuery)])
+      : await pool.query(browseSql, [boundedSize, offset]);
+    return {
+      page: boundedPage,
+      pageSize: boundedSize,
+      total: Number(result.rows[0]?.total || 0),
+      documents: result.rows.map(({ total: _total, ...row }) => row),
+    };
+  });
+}
+
+async function getDocumentRecords(connection, reference) {
+  return withPool(connection, async (pool) => {
+    const result = await pool.query(`
+      WITH selected AS (
+        SELECT coalesce(source_group, source_id) AS source_group
+        FROM semantic_qa.records
+        WHERE source_id = $1 OR source_group = $1
+        ORDER BY CASE WHEN source_id = $1 THEN 0 ELSE 1 END
+        LIMIT 1
+      )
+      SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+             r.source_group AS "sourceGroup", r.source_order AS "sourceOrder"
+      FROM semantic_qa.records r JOIN selected s ON coalesce(r.source_group, r.source_id) = s.source_group
+      ORDER BY CASE WHEN coalesce(r.metadata->>'chunk_index', '') ~ '^[0-9]+$'
+                    THEN (r.metadata->>'chunk_index')::integer ELSE 2147483647 END,
+               r.source_id
+    `, [String(reference || '')]);
+    return result.rows;
+  });
+}
+
 module.exports = {
   connectionToPoolConfig,
+  buildTextPhraseQueries,
   createPool,
   withPool,
   testPostgresConnection,
@@ -1030,4 +1472,10 @@ module.exports = {
   searchIndex,
   searchPassages,
   searchPassageIndex,
+  searchAllPassages,
+  searchAllPassageIndex,
+  searchTextRecords,
+  searchTextIndex,
+  listDocuments,
+  getDocumentRecords,
 };
