@@ -1,6 +1,6 @@
 module.exports = {
   id: 'semantic-qa',
-  name: 'semantic-qa',
-  description: 'Grounded semantic retrieval across an existing PostgreSQL Q&A corpus.',
+  name: 'Search Engine',
+  description: 'Semantic and conventional search with grounded summaries and complete source documents.',
   apiBasePath: '/api/tools/semantic-qa',
 };
