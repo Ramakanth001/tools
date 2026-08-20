@@ -28,6 +28,71 @@ function createLineReader(callback) {
   };
 }
 
+// tqdm (used by Whisper while downloading a model) redraws one status line with
+// carriage returns instead of newlines. Treat those redraws as log entries, but
+// coalesce them so a fast download does not create thousands of job writes/SSE
+// messages per second.
+function createProgressReader(callback, { intervalMs = 500 } = {}) {
+  let pending = '';
+  let latest = '';
+  let timer = null;
+  let lastEmittedAt = 0;
+
+  function emitLatest() {
+    if (!latest) return;
+    const line = latest;
+    latest = '';
+    lastEmittedAt = Date.now();
+    callback(line);
+  }
+
+  function scheduleLatest() {
+    if (timer || !latest) return;
+    const delay = Math.max(0, intervalMs - (Date.now() - lastEmittedAt));
+    timer = setTimeout(() => {
+      timer = null;
+      emitLatest();
+    }, delay);
+    timer.unref?.();
+  }
+
+  function reportCarriageReturn(line) {
+    latest = line;
+    if (!lastEmittedAt || Date.now() - lastEmittedAt >= intervalMs) emitLatest();
+    else scheduleLatest();
+  }
+
+  function reportNewline(line) {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    emitLatest();
+    callback(line);
+  }
+
+  return {
+    push(chunk) {
+      pending += chunk.toString();
+      let separator;
+      while ((separator = pending.search(/[\r\n]/)) !== -1) {
+        const line = pending.slice(0, separator).trim();
+        const isCarriageReturn = pending[separator] === '\r';
+        pending = pending.slice(separator + 1);
+        if (pending[0] === '\n' && isCarriageReturn) pending = pending.slice(1);
+        if (!line) continue;
+        if (isCarriageReturn) reportCarriageReturn(line);
+        else reportNewline(line);
+      }
+    },
+    flush() {
+      if (pending.trim()) reportNewline(pending.trim());
+      pending = '';
+      if (timer) clearTimeout(timer);
+      timer = null;
+      emitLatest();
+    },
+  };
+}
+
 async function pythonExists(pythonPath) {
   try {
     await fsp.access(pythonPath);
@@ -37,12 +102,17 @@ async function pythonExists(pythonPath) {
   }
 }
 
-function runProcess(args, { onEvent = () => {}, onLog = () => {}, onChild = () => {} } = {}) {
+function runProcess(args, { onEvent = () => {}, onLog = () => {}, onChild = () => {}, cacheDir } = {}) {
   const pythonPath = defaultPythonPath();
   return new Promise((resolve, reject) => {
     const child = spawn(pythonPath, [WORKER_PATH, ...args], {
       cwd: TOOL_DIR,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        // Qwen3-ASR uses Hugging Face's cache; keep it beside Whisper's ignored cache.
+        ...(cacheDir ? { HF_HOME: path.join(cacheDir, 'huggingface') } : {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     onChild(child);
@@ -60,7 +130,7 @@ function runProcess(args, { onEvent = () => {}, onLog = () => {}, onChild = () =
         onLog(line);
       }
     });
-    const stderr = createLineReader(onLog);
+    const stderr = createProgressReader(onLog);
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
     child.on('error', reject);
@@ -124,22 +194,35 @@ function createTranscriberRunner({ cacheDir } = {}) {
     });
   }
 
-  function runTranscription({ inputPath, outputDir, workDir, model, language, onEvent, onLog, onChild }) {
+  function runTranscription({ inputPath, outputDir, workDir, engine, model, language, chunkSeconds = 600, onEvent, onLog, onChild }) {
     return runProcess(
       [
         '--input', inputPath,
         '--output-dir', outputDir,
         '--work-dir', workDir,
         '--cache-dir', resolvedCacheDir,
+        '--engine', engine,
         '--model', model,
         '--language', language,
-        '--chunk-seconds', '600',
+        '--chunk-seconds', String(chunkSeconds),
       ],
-      { onEvent, onLog, onChild }
+      { onEvent, onLog, onChild, cacheDir: resolvedCacheDir }
     );
   }
 
-  return { diagnostics, runTranscription, pythonPath: defaultPythonPath(), cacheDir: resolvedCacheDir };
+  function extractAudio({ inputPath, outputDir, onEvent, onLog, onChild }) {
+    return runProcess(
+      [
+        '--input', inputPath,
+        '--output-dir', outputDir,
+        '--cache-dir', resolvedCacheDir,
+        '--extract-audio',
+      ],
+      { onEvent, onLog, onChild, cacheDir: resolvedCacheDir }
+    );
+  }
+
+  return { diagnostics, extractAudio, runTranscription, pythonPath: defaultPythonPath(), cacheDir: resolvedCacheDir };
 }
 
-module.exports = { createTranscriberRunner, defaultPythonPath };
+module.exports = { createLineReader, createProgressReader, createTranscriberRunner, defaultPythonPath };
