@@ -15,8 +15,29 @@ import sys
 from typing import Any, Callable, Iterable
 
 
-SUPPORTED_MODELS = ("tiny", "base", "small", "medium", "turbo")
+WHISPER_MODELS = ("tiny", "base", "small", "medium", "large", "turbo")
+QWEN_MODEL = "qwen3-asr-1.7b"
+SUPPORTED_MODELS = (*WHISPER_MODELS, QWEN_MODEL)
+SUPPORTED_ENGINES = ("whisper", "qwen3-asr")
+QWEN_ASR_CHECKPOINT = "Qwen/Qwen3-ASR-1.7B"
+QWEN_ALIGNER_CHECKPOINT = "Qwen/Qwen3-ForcedAligner-0.6B"
+QWEN_LANGUAGE_NAMES = {
+    "en": "English",
+    "hi": "Hindi",
+    "te": "Telugu",
+    "ta": "Tamil",
+    "kn": "Kannada",
+    "ml": "Malayalam",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+}
 DEFAULT_CHUNK_SECONDS = 600
+MIN_CHUNK_SECONDS = 60
+MAX_CHUNK_SECONDS = 3600
 _CANCELLED = False
 
 
@@ -81,7 +102,65 @@ def render_transcript(segments: Iterable[dict[str, Any]]) -> str:
 
 
 def choose_device(torch_module: Any) -> str:
-    return "cuda" if bool(torch_module.cuda.is_available()) else "cpu"
+    """Choose the CUDA GPU with the most currently free memory, or CPU."""
+    requested = os.environ.get("TRANSCRIBER_DEVICE", "auto").strip().lower()
+    if requested and requested != "auto":
+        return requested
+
+    cuda = getattr(torch_module, "cuda", None)
+    if not cuda or not bool(cuda.is_available()):
+        return "cpu"
+
+    try:
+        count = max(1, int(cuda.device_count()))
+    except Exception:
+        count = 1
+    candidates: list[tuple[int, int, int]] = []
+    for index in range(count):
+        free = total = 0
+        try:
+            free, total = (int(value) for value in cuda.mem_get_info(index))
+        except Exception:
+            try:
+                total = int(cuda.get_device_properties(index).total_memory)
+                free = total
+            except Exception:
+                pass
+        candidates.append((free, total, index))
+    return f"cuda:{max(candidates, key=lambda candidate: (candidate[0], candidate[1]))[2]}"
+
+
+def gpu_diagnostics(torch_module: Any, selected_device: str) -> dict[str, Any]:
+    cuda = getattr(torch_module, "cuda", None)
+    if not cuda or not bool(cuda.is_available()):
+        return {"ok": True, "name": "CPU fallback", "device": "cpu"}
+    if not selected_device.startswith("cuda"):
+        return {"ok": True, "name": f"Manual device override: {selected_device}", "device": selected_device}
+    devices = []
+    try:
+        count = int(cuda.device_count())
+    except Exception:
+        count = 1
+    for index in range(max(1, count)):
+        try:
+            properties = cuda.get_device_properties(index)
+            name = str(properties.name)
+            total = int(properties.total_memory)
+        except Exception:
+            name = f"CUDA GPU {index}"
+            total = 0
+        try:
+            free = int(cuda.mem_get_info(index)[0])
+        except Exception:
+            free = total
+        devices.append({"index": index, "name": name, "freeBytes": free, "totalBytes": total})
+    selected = next((gpu for gpu in devices if selected_device == f"cuda:{gpu['index']}"), devices[0])
+    return {
+        "ok": True,
+        "name": f"{selected['name']} selected ({selected_device})",
+        "device": selected_device,
+        "devices": devices,
+    }
 
 
 def probe_duration(input_path: Path, ffprobe: str = "ffprobe") -> float:
@@ -139,6 +218,78 @@ def extract_chunk(
     )
 
 
+def extract_audio_media(
+    input_path: Path,
+    output_dir: Path,
+    duration_probe: Callable[[Path], float] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Extract the first audio stream as a portable MP3 with FFmpeg progress."""
+    input_path = input_path.resolve()
+    output_dir = output_dir.resolve()
+    if not input_path.is_file():
+        raise FileNotFoundError(f"Input media not found: {input_path}")
+
+    raise_if_cancelled()
+    duration = float((duration_probe or probe_duration)(input_path))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "extracted.mp3"
+    progress_callback = progress_callback or (lambda _progress: None)
+    progress_callback({"phase": "extracting_audio", "percent": 1, "currentChunk": 0, "totalChunks": 1})
+    process = subprocess.Popen(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(input_path),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
+            "-progress",
+            "pipe:2",
+            "-nostats",
+            "-y",
+            str(output_path),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stderr is not None
+        for raw_line in process.stderr:
+            raise_if_cancelled()
+            line = raw_line.strip()
+            if line.startswith("out_time_ms="):
+                try:
+                    elapsed = float(line.partition("=")[2]) / 1_000_000
+                    percent = min(99, max(1, round((elapsed / duration) * 100, 1)))
+                    progress_callback({"phase": "extracting_audio", "percent": percent, "currentChunk": 1, "totalChunks": 1})
+                except ValueError:
+                    pass
+        if process.wait() != 0:
+            raise RuntimeError("FFmpeg could not extract audio from this media file")
+        raise_if_cancelled()
+    except Exception:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        output_path.unlink(missing_ok=True)
+        raise
+
+    progress_callback({"phase": "done", "percent": 100, "currentChunk": 1, "totalChunks": 1})
+    return {"durationSeconds": duration, "device": None, "segments": 0, "artifacts": {"audio": output_path.name}}
+
+
 def write_atomic(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -153,19 +304,25 @@ def transcribe_media(
     model_name: str,
     language: str,
     cache_dir: Path,
+    engine: str = "whisper",
     chunk_seconds: int = DEFAULT_CHUNK_SECONDS,
     model_loader: Callable[[str, str, Path], Any] | None = None,
     duration_probe: Callable[[Path], float] | None = None,
     chunk_extractor: Callable[[Path, Path, float, float], None] | None = None,
     torch_module: Any | None = None,
+    qwen_model_loader: Callable[[str, Path], Any] | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    if model_name not in SUPPORTED_MODELS:
+    if engine not in SUPPORTED_ENGINES:
+        raise ValueError(f"Unsupported transcription engine: {engine}")
+    if engine == "whisper" and model_name not in WHISPER_MODELS:
         raise ValueError(f"Unsupported model: {model_name}")
+    if engine == "qwen3-asr" and model_name != QWEN_MODEL:
+        raise ValueError(f"Unsupported Qwen3-ASR model: {model_name}")
     if language != "auto" and not (2 <= len(language) <= 3 and language.isalpha() and language.islower()):
         raise ValueError("Language must be 'auto' or a lowercase ISO language code")
-    if chunk_seconds <= 0:
-        raise ValueError("Chunk duration must be positive")
+    if not MIN_CHUNK_SECONDS <= chunk_seconds <= MAX_CHUNK_SECONDS:
+        raise ValueError(f"Chunk duration must be between {MIN_CHUNK_SECONDS // 60} and {MAX_CHUNK_SECONDS // 60} minutes")
 
     input_path = input_path.resolve()
     output_dir = output_dir.resolve()
@@ -177,11 +334,30 @@ def transcribe_media(
     raise_if_cancelled()
     if torch_module is None:
         import torch as torch_module  # type: ignore[no-redef]
-    if model_loader is None:
+    if model_loader is None and engine == "whisper":
         import whisper
 
         def model_loader(name: str, device: str, download_root: Path) -> Any:
             return whisper.load_model(name, device=device, download_root=str(download_root))
+
+    if qwen_model_loader is None and engine == "qwen3-asr":
+        try:
+            from qwen_asr import Qwen3ASRModel
+        except Exception as error:
+            raise RuntimeError("Qwen3-ASR is unavailable. Run `npm run setup:transcriber` to install its local runtime.") from error
+
+        def qwen_model_loader(device: str, _download_root: Path) -> Any:
+            dtype = torch_module.bfloat16 if device.startswith("cuda") else torch_module.float32
+            device_map = device if device.startswith("cuda") else "cpu"
+            return Qwen3ASRModel.from_pretrained(
+                QWEN_ASR_CHECKPOINT,
+                dtype=dtype,
+                device_map=device_map,
+                forced_aligner=QWEN_ALIGNER_CHECKPOINT,
+                forced_aligner_kwargs={"dtype": dtype, "device_map": device_map},
+                max_inference_batch_size=1,
+                max_new_tokens=1024,
+            )
 
     duration_probe = duration_probe or probe_duration
     chunk_extractor = chunk_extractor or extract_chunk
@@ -195,7 +371,7 @@ def transcribe_media(
     work_dir.mkdir(parents=True, exist_ok=True)
 
     progress_callback({"phase": "loading_model", "percent": 5, "currentChunk": 0, "totalChunks": total_chunks})
-    model = model_loader(model_name, device, cache_dir)
+    model = model_loader(model_name, device, cache_dir) if engine == "whisper" else qwen_model_loader(device, cache_dir)
     raise_if_cancelled()
 
     all_segments: list[dict[str, Any]] = []
@@ -215,22 +391,40 @@ def transcribe_media(
         try:
             chunk_extractor(input_path, chunk_path, offset, chunk_duration)
             raise_if_cancelled()
-            result = model.transcribe(
-                str(chunk_path),
-                language=None if language == "auto" else language,
-                fp16=device == "cuda",
-                condition_on_previous_text=False,
-                temperature=0,
-                verbose=False,
-            )
-            for segment in result.get("segments", []):
-                all_segments.append(
-                    {
-                        "start": float(segment.get("start", 0)) + offset,
-                        "end": float(segment.get("end", 0)) + offset,
-                        "text": str(segment.get("text", "")),
-                    }
+            if engine == "whisper":
+                result = model.transcribe(
+                    str(chunk_path),
+                    language=None if language == "auto" else language,
+                    fp16=device.startswith("cuda"),
+                    condition_on_previous_text=False,
+                    temperature=0,
+                    verbose=False,
                 )
+                for segment in result.get("segments", []):
+                    all_segments.append(
+                        {
+                            "start": float(segment.get("start", 0)) + offset,
+                            "end": float(segment.get("end", 0)) + offset,
+                            "text": str(segment.get("text", "")),
+                        }
+                    )
+            else:
+                qwen_result = model.transcribe(
+                    audio=str(chunk_path),
+                    language=None if language == "auto" else QWEN_LANGUAGE_NAMES.get(language),
+                    return_time_stamps=True,
+                )[0]
+                timestamps = getattr(qwen_result, "time_stamps", None)
+                for timestamp in getattr(timestamps, "items", []) or []:
+                    all_segments.append(
+                        {
+                            "start": float(getattr(timestamp, "start_time", 0)) + offset,
+                            "end": float(getattr(timestamp, "end_time", 0)) + offset,
+                            "text": str(getattr(timestamp, "text", "")),
+                        }
+                    )
+                if not timestamps and str(getattr(qwen_result, "text", "")).strip():
+                    all_segments.append({"start": offset, "end": offset + chunk_duration, "text": str(qwen_result.text)})
         finally:
             chunk_path.unlink(missing_ok=True)
 
@@ -275,6 +469,7 @@ def diagnostics(cache_dir: Path) -> dict[str, Any]:
 
         device = choose_device(torch)
         checks["torch"] = {"ok": True, "version": getattr(torch, "__version__", "unknown")}
+        checks["gpu"] = gpu_diagnostics(torch, device)
     except Exception as error:  # pragma: no cover - depends on local environment
         checks["torch"] = {"ok": False, "error": str(error)}
     try:
@@ -283,8 +478,14 @@ def diagnostics(cache_dir: Path) -> dict[str, Any]:
         checks["whisper"] = {"ok": True, "version": getattr(whisper, "__version__", "unknown")}
     except Exception as error:  # pragma: no cover - depends on local environment
         checks["whisper"] = {"ok": False, "error": str(error)}
+    try:
+        import qwen_asr
 
-    ready = all(check.get("ok") for check in checks.values())
+        checks["qwen3Asr"] = {"ok": True, "version": getattr(qwen_asr, "__version__", "installed"), "optional": True}
+    except Exception as error:  # pragma: no cover - depends on local environment
+        checks["qwen3Asr"] = {"ok": False, "error": f"Optional quality engine unavailable: {error}", "optional": True}
+
+    ready = all(check.get("ok") for check in checks.values() if not check.get("optional"))
     return {"ok": True, "ready": ready, "checks": checks, "device": device, "cacheDir": str(cache_dir.resolve())}
 
 
@@ -296,8 +497,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-dir")
     parser.add_argument("--cache-dir", required=True)
     parser.add_argument("--model", choices=SUPPORTED_MODELS, default="small")
+    parser.add_argument("--engine", choices=SUPPORTED_ENGINES, default="whisper")
     parser.add_argument("--language", default="auto")
     parser.add_argument("--chunk-seconds", type=int, default=DEFAULT_CHUNK_SECONDS)
+    parser.add_argument("--extract-audio", action="store_true")
     return parser
 
 
@@ -309,21 +512,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.diagnostics:
         print(json.dumps(diagnostics(cache_dir), ensure_ascii=False), flush=True)
         return 0
-    if not args.input or not args.output_dir or not args.work_dir:
-        raise ValueError("--input, --output-dir, and --work-dir are required")
+    if not args.input or not args.output_dir or (not args.extract_audio and not args.work_dir):
+        raise ValueError("--input and --output-dir are required; transcription also requires --work-dir")
 
-    emit("log", message="Starting local Whisper transcription")
+    emit("log", message="Starting local audio extraction" if args.extract_audio else f"Starting local {args.engine} transcription")
     try:
-        result = transcribe_media(
-            input_path=Path(args.input),
-            output_dir=Path(args.output_dir),
-            work_dir=Path(args.work_dir),
-            model_name=args.model,
-            language=args.language,
-            cache_dir=cache_dir,
-            chunk_seconds=args.chunk_seconds,
-            progress_callback=lambda progress: emit("progress", **progress),
-        )
+        if args.extract_audio:
+            result = extract_audio_media(
+                input_path=Path(args.input),
+                output_dir=Path(args.output_dir),
+                progress_callback=lambda progress: emit("progress", **progress),
+            )
+        else:
+            result = transcribe_media(
+                input_path=Path(args.input),
+                output_dir=Path(args.output_dir),
+                work_dir=Path(args.work_dir),
+                model_name=args.model,
+                language=args.language,
+                cache_dir=cache_dir,
+                engine=args.engine,
+                chunk_seconds=args.chunk_seconds,
+                progress_callback=lambda progress: emit("progress", **progress),
+            )
         emit("result", **result)
         return 0
     except CancelledError as error:
