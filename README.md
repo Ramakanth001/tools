@@ -1,6 +1,6 @@
 # Tools Workspace
 
-This repository is a local web workspace for developer utilities. It has a shared React/Express host plus six tools:
+This repository is a local web workspace for developer utilities. It has a shared React/Express host plus seven tools:
 
 | Tool | Purpose | Standalone UI | Standalone API | Shared-host route |
 | --- | --- | --- | --- | --- |
@@ -8,6 +8,7 @@ This repository is a local web workspace for developer utilities. It has a share
 | `mysql-tool` | MySQL backup runner, history, settings | `http://localhost:5174` | `http://localhost:8788/api` | `/tools/mysql-tool` |
 | `mysql-pg-migrate` | MySQL-to-PostgreSQL migration workbench | `http://localhost:5175` | `http://localhost:8789/api` | `/tools/mysql-pg-migrate` |
 | `semantic-qa` | Verbatim semantic retrieval over a PostgreSQL Q&A corpus | `http://localhost:5176` | `http://localhost:8790/api` | `/tools/semantic-qa` |
+| `gpt` | Private conversational research over the local spiritual corpus | `http://localhost:5178` | `http://localhost:8793/api` | `/tools/gpt` |
 | `transcriber` | Local Whisper audio/video transcription with TXT/SRT exports | `http://localhost:5177` | `http://localhost:8791/api` | `/tools/transcriber` |
 | `self-voice-clone` | Personal voice enrollment, diagnostics, adaptation, and local synthesis | Shared UI | `http://localhost:8792/v1` | `/tools/self-voice-clone` |
 
@@ -164,6 +165,24 @@ If you want `mysql-tool` to have local dependencies too, run:
 
 ```bash
 npm --prefix ./mysql-tool install
+```
+
+### Per-tool setup checks
+
+Every tool owns a `setup.requirements.json` file in its directory. The file declares its npm packages, local Python environment, and required command-line programs, along with the command or hint used to fix each failed check. Python-based tools also use their own conventional `requirements.txt` file.
+
+Start the shared host, open the **Available tools** page, and select **Check setup** on any tool card. The check is read-only: it reports what is ready and shows the exact setup command when something is missing. It does not install packages or start services from the browser.
+
+The same check is available from the local API:
+
+```text
+GET /api/tools/:toolId/setup-check
+```
+
+Run the focused checker tests with:
+
+```bash
+npm run test:setup
 ```
 
 ## Running The Shared Host
@@ -333,7 +352,7 @@ npm run build:transcriber
 npm run start:transcriber
 ```
 
-The first job for a model downloads its weights into the ignored local cache. Uploaded audio/video and intermediate chunks are deleted after the job finishes; TXT/SRT artifacts remain in ignored job storage until deletion. See [`transcriber/README.md`](./transcriber/README.md) for endpoints, configuration, and troubleshooting.
+The first job for a model downloads its weights into the ignored local cache. Whisper `large` is the large-v3 quality model; Qwen3-ASR 1.7B is the quality-first local alternative, and both require substantial memory. Transcriptions default to ten-minute chunks, with a one-to-sixty-minute UI control; the worker selects the CUDA GPU with the most free memory automatically. Uploaded audio/video and intermediate chunks are deleted after the job finishes; TXT/SRT and extracted MP3 artifacts remain in ignored job storage until deletion. See [`transcriber/README.md`](./transcriber/README.md) for endpoints, configuration, and troubleshooting.
 
 ### Self Voice Clone
 
@@ -799,7 +818,7 @@ ffmpeg -version
 ffprobe -version
 ```
 
-Run diagnostics again in the UI. The first use of each Whisper model also needs network access to download model weights; later jobs use the local cache.
+Run diagnostics again in the UI. The first use of each Transcriber model also needs network access to download model weights; later jobs use the local cache.
 
 ### Migration says source password is required
 
