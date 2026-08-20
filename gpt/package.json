@@ -1,0 +1,28 @@
+{
+  "name": "local-corpus-gpt",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node ../src/runPackageBin.js concurrently --kill-others=false \"node src/server.js\" \"node ../src/runPackageBin.js vite --config vite.config.js\"",
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "build": "node ../src/runPackageBin.js vite build --config vite.config.js",
+    "preview": "node ../src/runPackageBin.js vite preview --config vite.config.js --port 5178",
+    "benchmark": "node scripts/benchmarkModels.js",
+    "health": "node -e \"fetch('http://localhost:8793/api/health').then(r=>r.text()).then(console.log).catch(e=>{console.error(e.message);process.exit(1)})\""
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.16.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
+    "vite": "^7.3.1"
+  }
+}
