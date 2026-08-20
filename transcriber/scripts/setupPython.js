@@ -3,7 +3,7 @@ const { spawnSync } = require('node:child_process');
 
 const toolDir = path.resolve(__dirname, '..');
 const venvDir = path.join(toolDir, '.venv');
-const requirements = path.join(toolDir, 'requirements-runtime.txt');
+const requirements = path.join(toolDir, 'requirements.txt');
 
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: toolDir, stdio: 'inherit' });
