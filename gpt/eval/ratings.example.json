@@ -1,0 +1,7 @@
+{
+  "qwen3:14b-q8_0|11|Who is Datta Swami?": {
+    "groundedCorrectness": 1,
+    "citationSupport": 1,
+    "unsupportedClaimRate": 0
+  }
+}
