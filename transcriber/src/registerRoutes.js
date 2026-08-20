@@ -12,7 +12,14 @@ const { z } = requireToolDep('zod');
 
 const TOOL_DIR = path.resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = path.join(TOOL_DIR, 'data');
-const MODELS = ['tiny', 'base', 'small', 'medium', 'turbo'];
+const WHISPER_MODELS = ['tiny', 'base', 'small', 'medium', 'large', 'turbo'];
+const QWEN_MODEL = 'qwen3-asr-1.7b';
+const MODELS = [...WHISPER_MODELS, QWEN_MODEL];
+const ENGINES = ['whisper', 'qwen3-asr'];
+const OPERATIONS = ['transcribe', 'extract_audio'];
+const DEFAULT_CHUNK_SECONDS = 600;
+const MIN_CHUNK_SECONDS = 60;
+const MAX_CHUNK_SECONDS = 3600;
 const TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled', 'interrupted']);
 
 function configuredUploadBytes() {
@@ -21,11 +28,22 @@ function configuredUploadBytes() {
 }
 
 const JobOptions = z.object({
+  operation: z.enum(OPERATIONS).default('transcribe'),
+  engine: z.enum(ENGINES).default('whisper'),
   model: z.enum(MODELS).default('small'),
+  chunkSeconds: z.coerce.number().int().min(MIN_CHUNK_SECONDS, 'Chunk length must be at least 1 minute').max(MAX_CHUNK_SECONDS, 'Chunk length must be at most 60 minutes').default(DEFAULT_CHUNK_SECONDS),
   language: z.string().trim().toLowerCase().default('auto').refine(
     (value) => value === 'auto' || /^[a-z]{2,3}$/.test(value),
     'Language must be auto or a two/three-letter lowercase code'
   ),
+}).superRefine((value, context) => {
+  if (value.operation === 'extract_audio') return;
+  if (value.engine === 'whisper' && !WHISPER_MODELS.includes(value.model)) {
+    context.addIssue({ code: 'custom', path: ['model'], message: 'Choose a Whisper model for the Whisper engine' });
+  }
+  if (value.engine === 'qwen3-asr' && value.model !== QWEN_MODEL) {
+    context.addIssue({ code: 'custom', path: ['model'], message: 'Qwen3-ASR uses its quality-first 1.7B model' });
+  }
 });
 
 function nowLog(message) {
@@ -44,13 +62,16 @@ function publicJob(job, { includeLogs = false } = {}) {
     status: job.status,
     originalName: job.originalName,
     mediaBytes: job.mediaBytes,
+    operation: job.operation || 'transcribe',
+    engine: job.engine || 'whisper',
     model: job.model,
+    chunkSeconds: Number(job.chunkSeconds) || DEFAULT_CHUNK_SECONDS,
     language: job.language,
     durationSeconds: job.durationSeconds ?? null,
     device: job.device || null,
     segments: job.segments ?? null,
     progress: job.progress || null,
-    artifacts: job.artifacts || { txt: false, srt: false },
+    artifacts: job.artifacts || { txt: false, srt: false, audio: false },
     error: job.error || null,
     code: job.code || null,
     cancelRequested: Boolean(job.cancelRequested),
@@ -124,17 +145,14 @@ function createTranscriberService({ dataDir = DEFAULT_DATA_DIR, runner } = {}) {
     job.error = null;
     job.code = null;
     job.progress = { phase: 'starting', percent: 1, currentChunk: 0, totalChunks: null };
-    await log(job, `Starting ${job.model} transcription (${job.language === 'auto' ? 'automatic language detection' : job.language}).`);
+    await log(job, job.operation === 'extract_audio'
+      ? 'Starting MP3 audio extraction.'
+      : `Starting ${job.engine === 'qwen3-asr' ? 'Qwen3-ASR 1.7B quality' : `Whisper ${job.model}`} transcription (${job.language === 'auto' ? 'automatic language detection' : job.language}, ${Math.round(job.chunkSeconds / 60)}-minute chunks).`);
 
     try {
       await fsp.mkdir(outputDir, { recursive: true });
       await fsp.mkdir(workDir, { recursive: true });
-      const result = await actualRunner.runTranscription({
-        inputPath,
-        outputDir,
-        workDir,
-        model: job.model,
-        language: job.language,
+      const callbacks = {
         onChild: (child) => { job.child = child; },
         onLog: (message) => { void log(job, message).catch(() => undefined); },
         onEvent: (event) => {
@@ -147,7 +165,19 @@ function createTranscriberService({ dataDir = DEFAULT_DATA_DIR, runner } = {}) {
           };
           void persist(job).catch(() => undefined);
         },
-      });
+      };
+      const result = job.operation === 'extract_audio'
+        ? await actualRunner.extractAudio({ inputPath, outputDir, ...callbacks })
+        : await actualRunner.runTranscription({
+          inputPath,
+          outputDir,
+          workDir,
+          engine: job.engine,
+          model: job.model,
+          language: job.language,
+          chunkSeconds: job.chunkSeconds,
+          ...callbacks,
+        });
 
       if (job.cancelRequested) {
         job.status = 'cancelled';
@@ -158,9 +188,13 @@ function createTranscriberService({ dataDir = DEFAULT_DATA_DIR, runner } = {}) {
         job.durationSeconds = Number(result.durationSeconds) || null;
         job.device = result.device || null;
         job.segments = Number(result.segments) || 0;
-        job.artifacts = { txt: true, srt: true };
+        job.artifacts = job.operation === 'extract_audio'
+          ? { txt: false, srt: false, audio: true }
+          : { txt: true, srt: true, audio: false };
         job.progress = { ...(job.progress || {}), phase: 'done', percent: 100 };
-        await log(job, `Transcription completed with ${job.segments} segments.`);
+        await log(job, job.operation === 'extract_audio'
+          ? 'Audio extraction completed.'
+          : `Transcription completed with ${job.segments} segments.`);
       }
     } catch (error) {
       if (job.cancelRequested || error?.code === 'JOB_CANCELLED' || error?.exitCode === 130) {
@@ -219,14 +253,17 @@ function createTranscriberService({ dataDir = DEFAULT_DATA_DIR, runner } = {}) {
       status: 'queued',
       originalName: safeOriginalName(file.originalname),
       mediaBytes: Number(file.size) || 0,
+      operation: options.operation,
+      engine: options.engine,
       model: options.model,
+      chunkSeconds: options.chunkSeconds,
       language: options.language,
       durationSeconds: null,
       device: null,
       segments: null,
       progress: { phase: 'queued', percent: 0, currentChunk: 0, totalChunks: null },
-      artifacts: { txt: false, srt: false },
-      logs: [nowLog('Upload accepted; transcription queued.')],
+      artifacts: { txt: false, srt: false, audio: false },
+      logs: [nowLog(options.operation === 'extract_audio' ? 'Upload accepted; audio extraction queued.' : 'Upload accepted; transcription queued.')],
       error: null,
       code: null,
       cancelRequested: false,
@@ -294,7 +331,10 @@ function createTranscriberService({ dataDir = DEFAULT_DATA_DIR, runner } = {}) {
     shutdown,
     get(id) { return jobs.get(id); },
     list() { return Array.from(jobs.values()).sort((a, b) => b.createdAt - a.createdAt); },
-    artifactPath(id, kind) { return path.join(jobStore.jobDir(id), 'artifacts', `transcript.${kind}`); },
+    artifactPath(id, kind) {
+      const name = kind === 'audio' ? 'extracted.mp3' : `transcript.${kind}`;
+      return path.join(jobStore.jobDir(id), 'artifacts', name);
+    },
   };
 }
 
@@ -322,7 +362,16 @@ function registerTranscriberRoutes(app, {
     await service.ready;
     try {
       const report = await service.runner.diagnostics();
-      res.json({ ...report, tool: 'transcriber', models: MODELS, defaultModel: 'small', maxUploadBytes });
+      res.json({
+        ...report,
+        tool: 'transcriber',
+        models: MODELS,
+        engines: ENGINES,
+        operations: OPERATIONS,
+        defaultModel: 'small',
+        chunkSeconds: { default: DEFAULT_CHUNK_SECONDS, min: MIN_CHUNK_SECONDS, max: MAX_CHUNK_SECONDS },
+        maxUploadBytes,
+      });
     } catch (error) {
       res.status(500).json({ ok: false, ready: false, tool: 'transcriber', error: error?.message || String(error) });
     }
@@ -330,7 +379,13 @@ function registerTranscriberRoutes(app, {
 
   router.post('/jobs', upload.single('media'), async (req, res, next) => {
     try {
-      const parsed = JobOptions.safeParse({ model: req.body?.model || 'small', language: req.body?.language || 'auto' });
+      const parsed = JobOptions.safeParse({
+        operation: req.body?.operation || 'transcribe',
+        engine: req.body?.engine || 'whisper',
+        model: req.body?.model || 'small',
+        chunkSeconds: req.body?.chunkSeconds || DEFAULT_CHUNK_SECONDS,
+        language: req.body?.language || 'auto',
+      });
       if (!req.file) return res.status(400).json({ ok: false, error: 'A media file is required in the `media` field.' });
       if (!parsed.success) {
         await fsp.rm(req.file.path, { force: true });
@@ -409,7 +464,7 @@ function registerTranscriberRoutes(app, {
   router.get('/jobs/:id/artifacts/:kind', async (req, res) => {
     await service.ready;
     const kind = String(req.params.kind || '').toLowerCase();
-    if (!['txt', 'srt'].includes(kind)) return res.status(400).json({ ok: false, error: 'Artifact kind must be txt or srt' });
+    if (!['txt', 'srt', 'audio'].includes(kind)) return res.status(400).json({ ok: false, error: 'Artifact kind must be txt, srt, or audio' });
     const job = service.get(req.params.id);
     if (!job) return res.status(404).json({ ok: false, error: 'Job not found' });
     if (job.status !== 'done' || !job.artifacts?.[kind]) return res.status(409).json({ ok: false, error: 'Artifact is not ready' });
@@ -417,7 +472,8 @@ function registerTranscriberRoutes(app, {
     try {
       await fsp.access(artifactPath);
       const stem = path.parse(job.originalName || 'transcript').name.replace(/[^A-Za-z0-9._-]+/g, '_') || 'transcript';
-      return res.download(artifactPath, `${stem}_${job.model}.${kind}`);
+      const extension = kind === 'audio' ? 'mp3' : kind;
+      return res.download(artifactPath, `${stem}_${job.operation === 'extract_audio' ? 'audio' : job.model}.${extension}`);
     } catch {
       return res.status(404).json({ ok: false, error: 'Artifact file is missing' });
     }
@@ -437,7 +493,12 @@ function registerTranscriberRoutes(app, {
 }
 
 module.exports = {
+  ENGINES,
+  DEFAULT_CHUNK_SECONDS,
+  MAX_CHUNK_SECONDS,
+  MIN_CHUNK_SECONDS,
   MODELS,
+  OPERATIONS,
   TERMINAL_STATUSES,
   createTranscriberService,
   publicJob,
