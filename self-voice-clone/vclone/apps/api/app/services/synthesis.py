@@ -305,25 +305,104 @@ def _synthesis_engine_worker(payload: dict, result_queue) -> None:
 
 
 def _synthesis_single_chunk_worker(payload: dict, result_queue) -> None:
+    from app.core.config import get_settings
+    from app.services.asr_backcheck import ASRBackcheckService
+    from app.services.candidate_gating import CandidateGateService
     from app.services.engine_registry import EngineRegistry
+    from app.services.similarity_calibration import SimilarityCalibrationService
+    from app.services.speaker_verification import SpeakerVerificationService
 
     try:
+        settings = get_settings()
         registry = EngineRegistry()
         engine = registry.get_engine_by_name(str(payload["engine_name"]))
         candidate = dict(payload.get("candidate") or {})
         output_path = Path(str(payload["output_path"]))
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        synthesis = engine.synthesize(
-            str(payload["text"]),
-            str(payload["voice_profile_id"]),
-            str(payload["mode"]),
-            str(output_path),
-            speaker_wav=str(candidate.get("speaker_wav") or payload["speaker_wav"]),
-            language=payload.get("language"),
-            prompt_text=str(candidate.get("prompt_text") or payload.get("prompt_text") or ""),
-            voice_profile_report=payload.get("voice_profile_report") or {},
-            clone_mode=str(candidate.get("clone_mode") or "reference_only"),
+        reference_path = str(candidate.get("speaker_wav") or payload["speaker_wav"])
+        prompt_text = str(candidate.get("prompt_text") or payload.get("prompt_text") or "")
+        target_text = str(payload["text"])
+        attempt_limit = max(1, min(3, int(payload.get("attempt_count") or settings.synthesis_candidate_attempts)))
+        asr_backcheck = ASRBackcheckService()
+        candidate_gating = CandidateGateService()
+        speaker_verification = SpeakerVerificationService(threshold=float(settings.synthesis_min_speaker_similarity))
+        similarity_calibration = SimilarityCalibrationService().calibrate(golden_ref_path=reference_path)
+        attempts: list[dict] = []
+
+        for attempt_index in range(1, attempt_limit + 1):
+            attempt_path = output_path.with_name(f"{output_path.stem}.attempt-{attempt_index:02d}{output_path.suffix}")
+            synthesis = engine.synthesize(
+                target_text,
+                str(payload["voice_profile_id"]),
+                str(payload["mode"]),
+                str(attempt_path),
+                speaker_wav=reference_path,
+                language=payload.get("language"),
+                prompt_text=prompt_text,
+                voice_profile_report=payload.get("voice_profile_report") or {},
+                clone_mode=str(candidate.get("clone_mode") or "reference_only"),
+            )
+            backcheck = asr_backcheck.evaluate(expected_text=target_text, chunks=[target_text], audio_path=str(attempt_path))
+            similarity = speaker_verification.verify(reference_audio_path=reference_path, candidate_audio_path=str(attempt_path))
+            gate_result = candidate_gating.evaluate(
+                mode=str(payload["mode"]),
+                target_text=target_text,
+                observed_text=str(backcheck.get("observed_text") or ""),
+                prompt_text=prompt_text,
+                audio_path=str(attempt_path),
+                backcheck=backcheck,
+                similarity=similarity.to_dict(),
+                similarity_trusted=similarity_calibration.trusted,
+            )
+            attempts.append(
+                {
+                    "attempt": attempt_index,
+                    "path": str(attempt_path),
+                    "synthesis": synthesis,
+                    "backcheck": backcheck,
+                    "similarity": similarity.to_dict(),
+                    "gate_result": gate_result.to_dict(),
+                }
+            )
+            if gate_result.passed and (
+                not similarity_calibration.trusted
+                or similarity.similarity_score >= float(settings.synthesis_identity_early_stop)
+            ):
+                break
+
+        verified_attempts = [item for item in attempts if bool((item.get("gate_result") or {}).get("passed"))]
+        if not verified_attempts:
+            summary = [
+                {
+                    "attempt": item.get("attempt"),
+                    "speaker_similarity": (item.get("similarity") or {}).get("similarity_score"),
+                    "wer": (item.get("backcheck") or {}).get("estimated_wer"),
+                    "reasons": (item.get("gate_result") or {}).get("hard_reasons", []),
+                }
+                for item in attempts
+            ]
+            raise RuntimeError(f"failed_voice_identity_gate: no generated take matched the enrolled speaker: {summary}")
+
+        best = max(
+            verified_attempts,
+            key=lambda item: (
+                float((item.get("similarity") or {}).get("similarity_score") or -1.0),
+                float((item.get("gate_result") or {}).get("quality_score") or 0.0),
+            ),
         )
+        if Path(str(best["path"])).resolve() != output_path.resolve():
+            shutil.copyfile(str(best["path"]), output_path)
+        synthesis = dict(best.get("synthesis") or {})
+        synthesis["clone_verification"] = {
+            "status": "verified",
+            "selected_attempt": best.get("attempt"),
+            "attempt_count": len(attempts),
+            "backcheck": best.get("backcheck"),
+            "similarity": best.get("similarity"),
+            "gate_result": best.get("gate_result"),
+            "similarity_calibration": similarity_calibration.to_dict(),
+            "attempts": attempts,
+        }
         result_queue.put({"type": "done", "output_path": str(output_path), "synthesis": synthesis})
     except BaseException as exc:  # noqa: BLE001 - worker must report all failures to parent when possible.
         result_queue.put({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
@@ -976,6 +1055,22 @@ class SynthesisService:
         plan: list[dict] = []
 
         if engine_name == "voxcpm2":
+            first = selected_candidates[0] if selected_candidates else None
+            ultimate_enabled = bool(getattr(self.settings, "voxcpm_enable_ultimate", True))
+            if ultimate_enabled and first and first.get("text") and not bool(first.get("hifi_leak_failed")):
+                plan.append(
+                    {
+                        "engine_name": "voxcpm2",
+                        "label": "ultimate-prompt-1",
+                        "speaker_wav": self._preferred_candidate_audio_path(first, reference_path),
+                        "prompt_text": first.get("text") or prompt_text,
+                        "clone_mode": "ultimate",
+                        "safe_for_prompt": bool(first.get("safe_for_prompt", True)),
+                        "expected_duration_sec": first.get("expected_duration_sec") or first.get("duration_seconds"),
+                        "asr_wer": first.get("asr_wer"),
+                        "asr_confidence": first.get("asr_confidence"),
+                    }
+                )
             for candidate in selected_candidates:
                 plan.append(
                     {
@@ -992,20 +1087,6 @@ class SynthesisService:
                         "frames": candidate.get("frames"),
                         "non_silent_duration_sec": candidate.get("non_silent_duration_sec"),
                         "manifest_path": candidate.get("manifest_path"),
-                    }
-                )
-            first = selected_candidates[0] if selected_candidates else None
-            ultimate_enabled = bool(getattr(self.settings, "voxcpm_enable_ultimate", False))
-            if ultimate_enabled and first and first.get("text") and not bool(first.get("hifi_leak_failed")):
-                plan.append(
-                    {
-                        "engine_name": "voxcpm2",
-                        "label": "ultimate-prompt-1",
-                        "speaker_wav": self._preferred_candidate_audio_path(first, reference_path),
-                        "prompt_text": first.get("text") or prompt_text,
-                        "clone_mode": "ultimate",
-                        "safe_for_prompt": bool(first.get("safe_for_prompt", True)),
-                        "expected_duration_sec": first.get("expected_duration_sec") or first.get("duration_seconds"),
                     }
                 )
             chatterbox_engine = self.engine_registry.get_engine_by_name("chatterbox")
@@ -1248,6 +1329,7 @@ class SynthesisService:
                 "prompt_text": prompt_text,
                 "voice_profile_report": voice_profile_report,
                 "candidate": locked_candidate,
+                "attempt_count": int(self.settings.synthesis_candidate_attempts),
             }
             process = ctx.Process(target=_synthesis_single_chunk_worker, args=(payload, result_queue))
             process.start()
@@ -1299,12 +1381,19 @@ class SynthesisService:
             if event and event.get("type") == "done" and valid_existing_chunk(final_chunk_path):
                 process.join(timeout=1)
                 synthesis_payload = dict(event.get("synthesis") or {})
+                verification = dict(synthesis_payload.get("clone_verification") or {})
                 selection = {
                     "engine_name": locked_candidate.get("engine_name") or engine_name,
                     "label": locked_candidate.get("label"),
                     "clone_mode": locked_candidate.get("clone_mode"),
-                    "selected_reason": "locked_reference_candidate_for_resumable_long_form",
+                    "selected_reason": "highest speaker-verified take after ASR, prompt-leak, and identity gates",
                     "global_prompt_locked": True,
+                    "identity_verified": verification.get("status") == "verified",
+                    "selected_attempt": verification.get("selected_attempt"),
+                    "attempt_count": verification.get("attempt_count"),
+                    "similarity": verification.get("similarity"),
+                    "backcheck": verification.get("backcheck"),
+                    "gate_result": verification.get("gate_result"),
                 }
                 synthesis_payload["candidate_selection"] = selection
                 chunk_paths.append(str(final_chunk_path))
