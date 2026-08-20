@@ -1,0 +1,2 @@
+# Install the local API and every runtime used by the Voice Clone tool.
+-e ./vclone/apps/api[dev,quality,asr,speaker,voxcpm,chatterbox]
