@@ -262,34 +262,35 @@ class VoxCPM2Engine(BaseTTSEngine):
     def _reference_stream_info(self, reference: Path) -> tuple[int | None, int | None]:
         return _audio_stream_info(reference)
 
-    def _normalized_reference_cache_path(self, reference: Path) -> Path:
+    def _normalized_reference_cache_path(self, reference: Path, *, trim_edges: bool = False) -> Path:
         stat = reference.stat()
         cache_key = hashlib.sha256(
             f"{reference.resolve()}:{stat.st_mtime_ns}:{stat.st_size}".encode("utf-8")
         ).hexdigest()[:16]
         cache_dir = Path(tempfile.gettempdir()) / "vclone-voxcpm2-reference-cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / f"{reference.stem}-{cache_key}-16k-mono.wav"
+        suffix = "-trimmed" if trim_edges else ""
+        return cache_dir / f"{reference.stem}-{cache_key}{suffix}-16k-mono.wav"
 
-    def _normalize_reference_audio(self, reference: Path, normalized: Path) -> None:
+    def _normalize_reference_audio(self, reference: Path, normalized: Path, *, trim_edges: bool = False) -> None:
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
             raise CloneEngineInferenceError(
                 "VoxCPM2 reference prompt audio must be 16 kHz mono, and ffmpeg is required to normalize it automatically."
             )
         normalized.parent.mkdir(parents=True, exist_ok=True)
+        command = [ffmpeg, "-y", "-i", str(reference)]
+        if trim_edges:
+            command.extend(
+                [
+                    "-af",
+                    "silenceremove=start_periods=1:start_duration=0.08:start_threshold=-45dB,"
+                    "areverse,silenceremove=start_periods=1:start_duration=0.12:start_threshold=-45dB,areverse",
+                ]
+            )
+        command.extend(["-ar", "16000", "-ac", "1", str(normalized)])
         result = subprocess.run(
-            [
-                ffmpeg,
-                "-y",
-                "-i",
-                str(reference),
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-                str(normalized),
-            ],
+            command,
             capture_output=True,
             text=True,
             check=False,
@@ -298,21 +299,21 @@ class VoxCPM2Engine(BaseTTSEngine):
             detail = (result.stderr or result.stdout or "").strip() or "ffmpeg conversion failed"
             raise CloneEngineInferenceError(f"Failed to normalize VoxCPM2 reference audio to 16 kHz mono: {detail}")
 
-    def _prepare_reference_audio(self, reference: Path) -> Path:
+    def _prepare_reference_audio(self, reference: Path, *, trim_edges: bool = False) -> Path:
         validation = validate_voxcpm_reference_audio(reference, artifact_type="model_candidate")
         if not validation.valid:
             raise CloneEngineInferenceError(validation.message)
 
         sample_rate, channels = self._reference_stream_info(reference)
-        if sample_rate == 16000 and channels == 1:
+        if sample_rate == 16000 and channels == 1 and not trim_edges:
             return reference
 
-        normalized = self._normalized_reference_cache_path(reference)
+        normalized = self._normalized_reference_cache_path(reference, trim_edges=trim_edges)
         normalized_sample_rate, normalized_channels = self._reference_stream_info(normalized)
         if normalized.exists() and normalized_sample_rate == 16000 and normalized_channels == 1:
             return normalized
 
-        self._normalize_reference_audio(reference, normalized)
+        self._normalize_reference_audio(reference, normalized, trim_edges=trim_edges)
         normalized_sample_rate, normalized_channels = self._reference_stream_info(normalized)
         if normalized_sample_rate != 16000 or normalized_channels != 1:
             raise CloneEngineInferenceError(
@@ -348,9 +349,9 @@ class VoxCPM2Engine(BaseTTSEngine):
         except Exception as exc:
             raise CloneEngineInferenceError("soundfile is required to write VoxCPM2 output audio") from exc
 
-        reference = self._prepare_reference_audio(original_reference)
-        model = self._load_model()
         selected_clone_mode = (clone_mode or "reference_only").strip().lower()
+        reference = self._prepare_reference_audio(original_reference, trim_edges=selected_clone_mode == "ultimate")
+        model = self._load_model()
         normalized_target = _normalize_assertion_text(text)
         normalized_prompt = _normalize_assertion_text(prompt_text or "")
         if selected_clone_mode == "ultimate" and normalized_prompt and normalized_target == normalized_prompt:
@@ -359,6 +360,9 @@ class VoxCPM2Engine(BaseTTSEngine):
             "text": text,
             "cfg_value": self.settings.voxcpm_cfg_value,
             "inference_timesteps": self.settings.voxcpm_inference_timesteps,
+            "normalize": True,
+            "denoise": False,
+            "retry_badcase": True,
         }
         if selected_clone_mode == "ultimate" and prompt_text and prompt_text.strip():
             kwargs.update(
@@ -455,8 +459,17 @@ class ChatterboxEngine(BaseTTSEngine):
         multilingual_available = _module_available("chatterbox.mtl_tts")
         turbo_available = _module_available("chatterbox.tts_turbo")
         torchaudio_available = _module_available("torchaudio")
+        perth_watermarker_available = False
+        try:
+            import perth
+
+            perth_watermarker_available = callable(getattr(perth, "PerthImplicitWatermarker", None))
+        except Exception:
+            perth_watermarker_available = False
         variant = (self.settings.chatterbox_variant or "original").strip().lower()
-        if variant == "turbo" and not turbo_available:
+        if not perth_watermarker_available:
+            reason = "Chatterbox is installed, but its Perth watermarker cannot load. Install setuptools<81 and reinstall resemble-perth."
+        elif variant == "turbo" and not turbo_available:
             reason = "Chatterbox Turbo API is not present in the installed package. Install a Turbo-capable Chatterbox build or use CHATTERBOX_VARIANT=original."
         elif variant == "multilingual" and not multilingual_available:
             reason = "Chatterbox multilingual API is not present in the installed package. Use CHATTERBOX_VARIANT=original."
@@ -472,7 +485,7 @@ class ChatterboxEngine(BaseTTSEngine):
             or (variant == "original" and original_available)
         )
         return {
-            "available": chatterbox_available and torchaudio_available and variant_available,
+            "available": chatterbox_available and torchaudio_available and variant_available and perth_watermarker_available,
             "reason": reason,
             "dependencies": [
                 {"name": "chatterbox", "available": chatterbox_available},
@@ -480,6 +493,7 @@ class ChatterboxEngine(BaseTTSEngine):
                 {"name": "chatterbox.mtl_tts", "available": multilingual_available},
                 {"name": "chatterbox.tts_turbo", "available": turbo_available},
                 {"name": "torchaudio", "available": torchaudio_available},
+                {"name": "perth_watermarker", "available": perth_watermarker_available},
                 {"name": "ffmpeg", "available": shutil.which("ffmpeg") is not None},
             ],
             "variant": variant,
