@@ -59,6 +59,33 @@ class CandidatePlanTests(unittest.TestCase):
         self.assertEqual(len(plan), 1)
         self.assertEqual(plan[0]["speaker_wav"], "native.wav")
 
+    def test_ultimate_clone_is_first_when_exact_prompt_mode_is_enabled(self):
+        service = self._service()
+        service.settings.voxcpm_enable_ultimate = True
+        report = {
+            "clone_dataset": {
+                "prompt": {
+                    "candidate_prompts": [
+                        {
+                            "rank": 1,
+                            "audio_path": "native.wav",
+                            "audio_path_16k": "asr.wav",
+                            "text": "The exact spoken prompt.",
+                            "safe_for_prompt": True,
+                            "asr_wer": 0.0,
+                            "asr_confidence": 0.98,
+                        }
+                    ]
+                }
+            }
+        }
+
+        plan = service._build_candidate_plan("voxcpm2", report, "fallback.wav", "Fallback text", "preview")
+
+        self.assertEqual(plan[0]["clone_mode"], "ultimate")
+        self.assertEqual(plan[0]["prompt_text"], "The exact spoken prompt.")
+        self.assertEqual(plan[1]["clone_mode"], "reference_only")
+
 
 if __name__ == "__main__":
     unittest.main()
