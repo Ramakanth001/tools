@@ -39,7 +39,7 @@ class VoxCPM2ReferenceAudioTests(unittest.TestCase):
             with patch("app.services.clone_engines._duration_seconds", return_value=4.0):
                 with patch.object(engine, "_reference_stream_info", side_effect=[(48000, 2), (None, None), (16000, 1)]):
                     with patch.object(engine, "_normalized_reference_cache_path", return_value=normalized):
-                        with patch.object(engine, "_normalize_reference_audio", side_effect=lambda _src, dst: dst.write_bytes(b"normalized")):
+                        with patch.object(engine, "_normalize_reference_audio", side_effect=lambda _src, dst, **_kwargs: dst.write_bytes(b"normalized")):
                             prepared = engine._prepare_reference_audio(reference)
 
         self.assertEqual(prepared, normalized)
@@ -57,6 +57,21 @@ class VoxCPM2ReferenceAudioTests(unittest.TestCase):
                     engine._prepare_reference_audio(reference)
 
         self.assertIn("reference_audio_too_short", str(exc.exception))
+
+    def test_ultimate_reference_is_normalized_even_when_already_16k(self):
+        engine = VoxCPM2Engine()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reference = Path(tmpdir) / "reference.wav"
+            normalized = Path(tmpdir) / "reference-trimmed.wav"
+            self._write_valid_wav(reference)
+
+            with patch.object(engine, "_reference_stream_info", side_effect=[(16000, 1), (None, None), (16000, 1)]):
+                with patch.object(engine, "_normalized_reference_cache_path", return_value=normalized):
+                    with patch.object(engine, "_normalize_reference_audio", side_effect=lambda _src, dst, **_kwargs: dst.write_bytes(b"normalized")) as normalize:
+                        prepared = engine._prepare_reference_audio(reference, trim_edges=True)
+
+        self.assertEqual(prepared, normalized)
+        self.assertTrue(normalize.call_args.kwargs["trim_edges"])
 
 
 if __name__ == "__main__":
