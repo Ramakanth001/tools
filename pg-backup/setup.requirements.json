@@ -1,0 +1,40 @@
+{
+  "toolId": "pg-backup",
+  "setupCommand": "npm --prefix ./pg-backup install",
+  "checks": [
+    {
+      "id": "node-packages",
+      "type": "node-packages",
+      "label": "Node packages",
+      "packageFile": "package.json",
+      "fix": "Run: npm --prefix ./pg-backup install"
+    },
+    {
+      "id": "pg-dump",
+      "type": "command",
+      "label": "pg_dump",
+      "command": "pg_dump",
+      "envVar": "PG_DUMP_PATH",
+      "args": ["--version"],
+      "fix": "Install PostgreSQL client tools, or set PG_DUMP_PATH."
+    },
+    {
+      "id": "psql",
+      "type": "command",
+      "label": "psql",
+      "command": "psql",
+      "envVar": "PSQL_PATH",
+      "args": ["--version"],
+      "fix": "Install PostgreSQL client tools, or set PSQL_PATH."
+    },
+    {
+      "id": "pg-dumpall",
+      "type": "command",
+      "label": "pg_dumpall",
+      "command": "pg_dumpall",
+      "envVar": "PG_DUMPALL_PATH",
+      "args": ["--version"],
+      "fix": "Install PostgreSQL client tools, or set PG_DUMPALL_PATH."
+    }
+  ]
+}
