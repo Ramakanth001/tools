@@ -8,7 +8,10 @@ const SERIALIZED_FIELDS = [
   'status',
   'originalName',
   'mediaBytes',
+  'operation',
+  'engine',
   'model',
+  'chunkSeconds',
   'language',
   'durationSeconds',
   'device',
@@ -25,7 +28,10 @@ function serializeJob(job) {
   const serialized = {};
   for (const field of SERIALIZED_FIELDS) serialized[field] = job[field] ?? null;
   serialized.logs = Array.isArray(job.logs) ? job.logs.slice(-2000) : [];
-  serialized.artifacts = job.artifacts || { txt: false, srt: false };
+  serialized.operation = job.operation || 'transcribe';
+  serialized.engine = job.engine || 'whisper';
+  serialized.chunkSeconds = Number(job.chunkSeconds) || 600;
+  serialized.artifacts = job.artifacts || { txt: false, srt: false, audio: false };
   serialized.cancelRequested = Boolean(job.cancelRequested);
   return serialized;
 }
@@ -63,7 +69,10 @@ function createTranscriberJobStore({ jobsDir }) {
       const job = {
         ...raw,
         logs: Array.isArray(raw.logs) ? raw.logs : [],
-        artifacts: raw.artifacts || { txt: false, srt: false },
+        operation: raw.operation || 'transcribe',
+        engine: raw.engine || 'whisper',
+        chunkSeconds: Number(raw.chunkSeconds) || 600,
+        artifacts: raw.artifacts || { txt: false, srt: false, audio: false },
         child: null,
         cancelRequested: false,
       };
