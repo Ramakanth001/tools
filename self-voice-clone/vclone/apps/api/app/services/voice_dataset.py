@@ -27,6 +27,7 @@ class DatasetRecord:
     asr_provider: str = "unknown"
     asr_confidence: float = 0.0
     asr_wer: float | None = None
+    asr_observed_text: str = ""
     source_start_sec: float | None = None
     source_end_sec: float | None = None
     expected_duration_sec: float | None = None
@@ -287,6 +288,7 @@ class VoiceDatasetBuilder:
                     asr_provider=str(asr_validation.get("provider") or "unknown"),
                     asr_confidence=float(asr_validation.get("confidence") or 0.0),
                     asr_wer=float(asr_validation["wer"]) if asr_validation.get("wer") is not None else None,
+                    asr_observed_text=str(asr_validation.get("observed_text") or ""),
                     source_start_sec=float(source_start_sec) if source_start_sec is not None else None,
                     source_end_sec=float(source_end_sec) if source_end_sec is not None else None,
                     expected_duration_sec=expected_duration,
@@ -639,6 +641,7 @@ class VoiceDatasetBuilder:
                 "asr_provider": record.asr_provider,
                 "asr_confidence": record.asr_confidence,
                 "asr_wer": record.asr_wer,
+                "asr_observed_text": record.asr_observed_text,
                 "audio_sha256": self._sha256(candidate_wav),
                 "audio_16k_sha256": self._sha256(candidate_wav_16k),
                 "text_sha256": self._sha256_text(record.text),
