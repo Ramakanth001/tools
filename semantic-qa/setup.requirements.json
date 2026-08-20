@@ -1,0 +1,21 @@
+{
+  "toolId": "semantic-qa",
+  "setupCommand": "npm --prefix ./semantic-qa install",
+  "checks": [
+    {
+      "id": "node-packages",
+      "type": "node-packages",
+      "label": "Node packages",
+      "packageFile": "package.json",
+      "fix": "Run: npm --prefix ./semantic-qa install"
+    },
+    {
+      "id": "ollama",
+      "type": "command",
+      "label": "Ollama",
+      "command": "ollama",
+      "args": ["--version"],
+      "fix": "Install Ollama, start it, and pull the models configured in Search Engine."
+    }
+  ]
+}
