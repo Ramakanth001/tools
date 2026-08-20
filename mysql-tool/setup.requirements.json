@@ -1,0 +1,31 @@
+{
+  "toolId": "mysql-tool",
+  "setupCommand": "npm --prefix ./mysql-tool install",
+  "checks": [
+    {
+      "id": "node-packages",
+      "type": "node-packages",
+      "label": "Node packages",
+      "packageFile": "package.json",
+      "fix": "Run: npm --prefix ./mysql-tool install"
+    },
+    {
+      "id": "mysql",
+      "type": "command",
+      "label": "mysql client",
+      "command": "mysql",
+      "envVar": "MYSQL_PATH",
+      "args": ["--version"],
+      "fix": "Install mysql-client, or set MYSQL_PATH."
+    },
+    {
+      "id": "mysqldump",
+      "type": "command",
+      "label": "mysqldump",
+      "command": "mysqldump",
+      "envVar": "MYSQLDUMP_PATH",
+      "args": ["--version"],
+      "fix": "Install mysql-client, or set MYSQLDUMP_PATH."
+    }
+  ]
+}
