@@ -29,6 +29,12 @@
     "test:semantic-qa": "npm --prefix ./semantic-qa test",
     "build:semantic-qa": "npm --prefix ./semantic-qa run build",
     "preview:semantic-qa": "npm --prefix ./semantic-qa run preview",
+    "dev:gpt": "npm --prefix ./gpt run dev",
+    "start:gpt": "npm --prefix ./gpt run start",
+    "test:gpt": "npm --prefix ./gpt test",
+    "build:gpt": "npm --prefix ./gpt run build",
+    "preview:gpt": "npm --prefix ./gpt run preview",
+    "benchmark:gpt": "npm --prefix ./gpt run benchmark",
     "dev:transcriber": "npm --prefix ./transcriber run dev",
     "start:transcriber": "npm --prefix ./transcriber run start",
     "setup:transcriber": "npm --prefix ./transcriber run setup:python",
@@ -38,6 +44,7 @@
     "dev:self-voice-clone": "npm --prefix ./self-voice-clone run dev:api",
     "start:self-voice-clone": "npm --prefix ./self-voice-clone run start:api",
     "setup:self-voice-clone": "npm --prefix ./self-voice-clone run setup:python",
+    "test:setup": "node --test test/setupChecks.test.js",
     "test:self-voice-clone": "npm --prefix ./self-voice-clone test"
   },
   "dependencies": {
