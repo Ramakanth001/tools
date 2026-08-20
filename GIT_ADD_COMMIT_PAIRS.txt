@@ -1,0 +1,415 @@
+# Git add and commit command pairs
+
+Generated for the current tools workspace changes.
+
+Important:
+- Run these commands from the repository root: /Users/ramakanth/pers/website/tools
+- Review each diff before committing: git diff -- <path>
+- Run pairs selectively and in order. If a path has already been committed or has no changes, skip that pair.
+- This list intentionally excludes LOCAL_DATABASE_CREDENTIALS.md and "What is the best way to reach God.md".
+- Each commit uses a concise conventional subject plus a detailed explanatory body.
+
+# Pair 001
+git add -- README.md
+git commit -m "docs(workspace): document the expanded seven-tool workspace and setup checks" -m "Update the workspace guide with the GPT tool, per-tool dependency diagnostics, and clearer runtime guidance for transcription and voice-cloning workflows."
+
+# Pair 002
+git add -- package.json
+git commit -m "build(workspace): add lifecycle scripts for GPT and setup-check testing" -m "Expose consistent development, build, test, preview, benchmark, and setup-check commands from the workspace package so contributors can run the new capabilities centrally."
+
+# Pair 003
+git add -- src/setupChecks.js
+git commit -m "feat(setup): add a reusable per-tool dependency readiness checker" -m "Read each tool's requirement manifest and report npm, Python, and command-line dependency readiness without installing packages or mutating the developer environment."
+
+# Pair 004
+git add -- test/setupChecks.test.js
+git commit -m "test(setup): cover dependency manifests and setup-check result reporting" -m "Verify successful checks, actionable failure details, manifest validation, and safe handling of missing requirements for the shared workspace diagnostics."
+
+# Pair 005
+git add -- src/server.js
+git commit -m "feat(server): expose tool-specific setup checks through the shared API" -m "Connect the dependency readiness checker to the shared Express host and return scoped diagnostic results for registered tools while preserving existing route behavior."
+
+# Pair 006
+git add -- src/ui/App.jsx
+git commit -m "feat(workspace-ui): show dependency readiness controls on tool cards" -m "Add setup-check actions and clear status feedback to the workspace home screen so users can identify missing prerequisites before launching a local tool."
+
+# Pair 007
+git add -- src/ui/registry.js
+git commit -m "feat(registry): register GPT and requirement metadata for workspace tools" -m "Expand the shared tool registry with the private GPT application and setup requirement locations used by the readiness-check interface."
+
+# Pair 008
+git add -- pg-backup/src/ui/styles/global.css
+git commit -m "style(pg-backup): refine the backup interface layout and visual feedback" -m "Improve spacing, responsive behavior, status presentation, and control styling so the PostgreSQL backup workflow remains clear across common screen sizes."
+
+# Pair 009
+git add -- pg-backup/setup.requirements.json
+git commit -m "build(pg-backup): declare local dependencies for setup diagnostics" -m "Describe the PostgreSQL backup tool's package and command-line prerequisites so the shared checker can provide precise readiness and remediation guidance."
+
+# Pair 010
+git add -- mysql-tool/setup.requirements.json
+git commit -m "build(mysql-tool): declare MySQL backup prerequisites for setup checks" -m "Define the packages and local programs required by the MySQL backup utility so missing dependencies are reported consistently from the workspace interface."
+
+# Pair 011
+git add -- mysql-pg-migrate/setup.requirements.json
+git commit -m "build(migration): declare database migration setup requirements" -m "Record the MySQL-to-PostgreSQL workbench dependencies and actionable setup hints for use by the shared read-only readiness checker."
+
+# Pair 012
+git add -- semantic-qa/setup.requirements.json
+git commit -m "build(search): declare semantic search service prerequisites" -m "Describe the Search Engine's Node, database, Ollama, and local runtime requirements so setup failures can be diagnosed before the application starts."
+
+# Pair 013
+git add -- transcriber/setup.requirements.json
+git commit -m "build(transcriber): declare transcription runtime requirements" -m "Publish the Transcriber package, Python environment, and media-program prerequisites for consistent setup validation in the shared host."
+
+# Pair 014
+git add -- self-voice-clone/setup.requirements.json
+git commit -m "build(voice-clone): declare API and audio setup requirements" -m "Capture the voice-cloning service's Python and media dependencies so the workspace can report missing components with targeted installation guidance."
+
+# Pair 015
+git add -- public/assets/index-8REPA-GN.css public/assets/index-CCghQRRp.js public/assets/index.es-CTqTjl4L.js public/assets/index-Cq1LR09f.css public/assets/index-CrsON-JZ.js public/assets/index.es-RG0IzJvM.js public/index.html
+git commit -m "build(workspace): refresh generated frontend assets for the updated host UI" -m "Replace stale hashed bundles and update the production entry page so the built workspace includes setup checks, refreshed styles, and the current tool registry."
+
+# Pair 016
+git add -- self-voice-clone/README.md
+git commit -m "docs(voice-clone): explain identity-gated synthesis and engine behavior" -m "Document candidate evaluation, speaker-similarity thresholds, exact-transcript prompting, runtime compatibility, and the distinction between profile readiness and verified clone quality."
+
+# Pair 017
+git add -- self-voice-clone/requirements.txt
+git commit -m "build(voice-clone): add a conventional Python dependency entry point" -m "Provide a standard requirements file for installing the API, model integrations, audio analysis, verification, and test dependencies used by the voice-cloning tool."
+
+# Pair 018
+git add -- self-voice-clone/scripts/setupPython.js
+git commit -m "build(voice-clone): install Python dependencies from the requirements file" -m "Align the setup helper with the conventional dependency manifest while retaining the isolated environment and compatible package installation workflow."
+
+# Pair 019
+git add -- self-voice-clone/vclone/apps/api/pyproject.toml
+git commit -m "build(voice-clone-api): align Python package constraints with runtime needs" -m "Update API dependency metadata to support speaker verification and cloning engines while preserving compatibility with packages that still depend on legacy resources."
+
+# Pair 020
+git add -- self-voice-clone/vclone/apps/api/app/core/config.py
+git commit -m "feat(voice-clone-config): add candidate identity-gating controls" -m "Expose configurable speaker-similarity thresholds, candidate-attempt limits, early-stop behavior, and ultimate VoxCPM prompting through validated API settings."
+
+# Pair 021
+git add -- self-voice-clone/vclone/apps/api/app/services/audio_segmenter.py
+git commit -m "fix(audio-segmentation): retain stronger reference segments for cloning" -m "Adjust segment curation and metadata handling so enrollment preserves suitable reference audio for accurate prompt construction and downstream speaker comparison."
+
+# Pair 022
+git add -- self-voice-clone/vclone/apps/api/app/services/clone_engines.py
+git commit -m "feat(clone-engines): support transcript-aware VoxCPM candidate generation" -m "Enhance engine invocation with exact reference transcripts, controlled sampling attempts, compatible fallbacks, and richer diagnostics for identity-verified synthesis."
+
+# Pair 023
+git add -- self-voice-clone/vclone/apps/api/app/services/engine_registry.py
+git commit -m "feat(engine-registry): report cloning engine capabilities accurately" -m "Extend engine registration and health metadata so the API can distinguish transcript-aware cloning, fallback availability, and runtime dependency failures."
+
+# Pair 024
+git add -- self-voice-clone/vclone/apps/api/app/services/speaker_verification.py
+git commit -m "feat(speaker-verification): strengthen embedding-based identity scoring" -m "Improve reference preparation and similarity reporting around SpeechBrain ECAPA embeddings so candidate gating uses stable, explainable speaker measurements."
+
+# Pair 025
+git add -- self-voice-clone/vclone/apps/api/app/services/synthesis.py
+git commit -m "feat(synthesis): select the best verified take across generated candidates" -m "Generate multiple stochastic takes, run transcription and speaker checks, stop on strong identity matches, and refuse to publish output when every candidate fails the configured gate."
+
+# Pair 026
+git add -- self-voice-clone/vclone/apps/api/app/services/voice_dataset.py
+git commit -m "fix(voice-dataset): preserve transcript metadata for clone references" -m "Carry normalized enrollment transcripts into dataset artifacts so synthesis engines can pair reference audio with the exact spoken text when supported."
+
+# Pair 027
+git add -- self-voice-clone/src/ui/SynthesisPage.tsx
+git commit -m "feat(voice-clone-ui): display identity scores and candidate outcomes" -m "Surface measured speaker similarity, evaluated take counts, verification failures, and engine diagnostics so users can understand why a synthesis passed or failed."
+
+# Pair 028
+git add -- self-voice-clone/src/ui/VoicesPage.tsx
+git commit -m "fix(voice-profiles-ui): clarify enrollment readiness messaging" -m "Refine profile status language so stored artifacts are not presented as proof that a generated result has passed speaker-identity verification."
+
+# Pair 029
+git add -- self-voice-clone/vclone/apps/api/tests/test_candidate_gating.py
+git commit -m "test(synthesis): verify candidate rejection and identity-gate behavior" -m "Exercise low-similarity rejection, successful candidate selection, and failure reporting to prevent generic speech from being returned as an accepted voice clone."
+
+# Pair 030
+git add -- self-voice-clone/vclone/apps/api/tests/test_candidate_plan.py
+git commit -m "test(synthesis): cover multi-take planning and early-stop selection" -m "Validate attempt limits, candidate ordering, strong-match early stopping, and best-take selection across the configurable synthesis planning workflow."
+
+# Pair 031
+git add -- self-voice-clone/vclone/apps/api/tests/test_voxcpm_reference_audio.py
+git commit -m "test(voxcpm): cover transcript-aware reference audio generation" -m "Verify that VoxCPM receives valid prompt audio and the matching transcript, with deterministic fallback behavior when the ultimate prompting path is unavailable."
+
+# Pair 032
+git add -- self-voice-clone/vclone/apps/api/tests/test_speaker_verification.py
+git commit -m "test(speaker-verification): validate reference and candidate scoring" -m "Add focused coverage for audio normalization, embedding comparison, threshold results, and diagnostic output from the speaker-verification service."
+
+# Pair 033
+git add -- semantic-qa/ARCHITECTURE.md
+git commit -m "docs(search): describe deep summaries and complete-document retrieval" -m "Update the architecture guide with conventional search, corpus-wide evidence processing, reconstructed discourse viewing, and asynchronous deep-summary orchestration."
+
+# Pair 034
+git add -- semantic-qa/README.md
+git commit -m "docs(search): document retrieval modes and verified deep summaries" -m "Explain semantic and conventional search behavior, PostgreSQL trigram support, source reconstruction, evidence validation, exports, and the new deep-summary endpoints."
+
+# Pair 035
+git add -- semantic-qa/index.html
+git commit -m "style(search): rename the standalone page for the Search Engine" -m "Update the development entry document to use the user-facing Search Engine identity while retaining internal semantic-qa routing compatibility."
+
+# Pair 036
+git add -- semantic-qa/public/index.html
+git commit -m "build(search): refresh the standalone production entry document" -m "Point the production shell at the current Search Engine assets and metadata so standalone deployment loads the latest interface correctly."
+
+# Pair 037
+git add -- semantic-qa/tool.manifest.js
+git commit -m "feat(search-manifest): expose the expanded Search Engine capabilities" -m "Revise tool metadata, labels, and shared-host registration details to reflect conventional retrieval, deep summaries, and discourse browsing."
+
+# Pair 038
+git add -- semantic-qa/src/core.js
+git commit -m "feat(search-core): add conventional text ranking and exhaustive scoring" -m "Implement exact-phrase, full-text, and trigram-aware reranking helpers while preserving semantic acceptance rules and deterministic response construction."
+
+# Pair 039
+git add -- semantic-qa/src/database.js
+git commit -m "feat(search-database): add text retrieval and discourse query support" -m "Extend the index schema and database access layer with trigram search, corpus-wide passage scoring, paginated discourse listings, and ordered source reconstruction."
+
+# Pair 040
+git add -- semantic-qa/src/ollama.js
+git commit -m "feat(search-ollama): add validated claim extraction and deep synthesis" -m "Introduce evidence verification, grounded claim extraction, hierarchical consolidation, final prose generation, hardware reporting, and resilient structured-model parsing."
+
+# Pair 041
+git add -- semantic-qa/src/registerRoutes.js
+git commit -m "feat(search-api): expose retrieval modes and deep-summary endpoints" -m "Add conventional search selection, document browsing, source reconstruction, asynchronous report status, event streaming, cancellation, and validated request handling."
+
+# Pair 042
+git add -- semantic-qa/src/semanticSummary.js
+git commit -m "feat(search-summary): preserve evidence mappings in grounded answers" -m "Strengthen citation normalization and answer validation so generated summaries remain resolvable to accepted stored passages without losing source attribution."
+
+# Pair 043
+git add -- semantic-qa/src/deepSummaryManager.js
+git commit -m "feat(search): orchestrate cancellable evidence-rich deep summaries" -m "Add phased candidate validation, claim extraction, consolidation, synthesis, progress reporting, concurrency limits, cancellation, and stable public job snapshots."
+
+# Pair 044
+git add -- semantic-qa/src/documentService.js
+git commit -m "feat(search-documents): reconstruct complete discourses with highlights" -m "Join ordered source chunks, remove boundary overlap, and translate passage-relative evidence offsets into accurate highlights within the reconstructed document."
+
+# Pair 045
+git add -- semantic-qa/src/ui/main.jsx
+git commit -m "feat(search-ui): bootstrap the renamed Search Engine application" -m "Update the standalone entry point and runtime wiring so the expanded interface mounts consistently in direct and shared-host modes."
+
+# Pair 046
+git add -- semantic-qa/src/ui/settings.mjs
+git commit -m "feat(search-settings): persist retrieval and deep-summary preferences" -m "Extend browser settings with search-mode and report controls while retaining safe defaults and compatibility with previously stored semantic-search configuration."
+
+# Pair 047
+git add -- semantic-qa/src/ui/SemanticQaTool.jsx
+git commit -m "feat(search-ui): add text search, discourses, and deep reports" -m "Build retrieval-mode controls, source-document browsing, asynchronous progress, evidence citations, Markdown export, printing, cancellation, and complete report presentation."
+
+# Pair 048
+git add -- semantic-qa/src/ui/semantic-qa.css
+git commit -m "style(search-ui): support report, discourse, and progress layouts" -m "Add responsive styles for the expanded navigation, evidence appendix, document viewer, progress states, search controls, and printable deep-summary output."
+
+# Pair 049
+git add -- semantic-qa/test/core.test.js
+git commit -m "test(search-core): cover exact phrase and fused text ranking" -m "Verify conventional retrieval ordering, phrase handling, semantic acceptance isolation, exhaustive scoring behavior, and deterministic response construction."
+
+# Pair 050
+git add -- semantic-qa/test/database.test.js
+git commit -m "test(search-database): cover trigram queries and discourse reconstruction" -m "Exercise schema initialization, ranked text-search access, corpus-wide passage reads, document pagination, ordered chunks, and safe connection handling."
+
+# Pair 051
+git add -- semantic-qa/test/ollama.test.js
+git commit -m "test(search-ollama): validate evidence processing model contracts" -m "Cover structured verification, claim extraction, consolidation, final synthesis, malformed responses, hardware preferences, timeouts, and grounded citation rules."
+
+# Pair 052
+git add -- semantic-qa/test/routes.test.js
+git commit -m "test(search-api): cover document and deep-summary route behavior" -m "Verify request validation, retrieval-mode routing, report lifecycle endpoints, progress streaming, cancellation, reconstructed sources, and safe error responses."
+
+# Pair 053
+git add -- semantic-qa/test/semanticSummary.test.js
+git commit -m "test(search-summary): preserve valid citations through generation" -m "Add cases for normalized evidence references, paraphrased grounded answers, rejected unsupported claims, and fallback behavior when model output is unusable."
+
+# Pair 054
+git add -- semantic-qa/test/deepSummaryManager.test.js
+git commit -m "test(search): cover deep-summary phases, progress, and cancellation" -m "Exercise evidence admission, bounded parallel work, claim consolidation, successful reports, phase failures, cancellation, and stable public status snapshots."
+
+# Pair 055
+git add -- semantic-qa/test/documentService.test.js
+git commit -m "test(search-documents): verify overlap removal and highlight mapping" -m "Confirm ordered chunks reconstruct without duplicated boundaries and that cited passage offsets resolve to the correct ranges in complete source documents."
+
+# Pair 056
+git add -- semantic-qa/test/settings.test.js
+git commit -m "test(search-settings): cover persisted retrieval mode preferences" -m "Verify new settings defaults, stored-value normalization, compatibility with legacy state, and safe recovery from malformed browser configuration."
+
+# Pair 057
+git add -- transcriber/README.md
+git commit -m "docs(transcriber): explain quality models, chunking, and audio exports" -m "Document Qwen3-ASR support, large-v3 behavior, configurable chunk duration, automatic GPU choice, retained MP3 artifacts, and updated setup instructions."
+
+# Pair 058
+git add -- transcriber/requirements.txt
+git commit -m "build(transcriber): add a complete conventional Python requirements file" -m "Provide one standard dependency entry point for Whisper, Qwen3-ASR, media processing, acceleration, and the worker's supported local runtime."
+
+# Pair 059
+git add -- transcriber/requirements-runtime.txt
+git commit -m "build(transcriber): expand optional quality-first ASR dependencies" -m "Add the runtime packages needed for the alternative Qwen transcription engine while keeping the focused dependency set suitable for isolated installation."
+
+# Pair 060
+git add -- transcriber/scripts/setupPython.js
+git commit -m "build(transcriber): align environment setup with requirements files" -m "Update the setup helper to install the declared Python manifests consistently and retain clear diagnostics for missing interpreters or failed package installation."
+
+# Pair 061
+git add -- transcriber/python/transcriber_worker.py
+git commit -m "feat(transcriber-worker): add Qwen ASR and adaptive GPU execution" -m "Support quality-first Qwen transcription, configurable ten-minute chunking, free-memory GPU selection, MP3 extraction, detailed progress events, and robust artifact cleanup."
+
+# Pair 062
+git add -- transcriber/src/jobStore.js
+git commit -m "feat(transcriber-store): persist engine and extracted-audio metadata" -m "Extend serialized job records with model-engine details, chunk configuration, retained audio artifacts, and fields required to resume accurate UI status after restart."
+
+# Pair 063
+git add -- transcriber/src/runner.js
+git commit -m "feat(transcriber-runner): parse progress and manage richer worker output" -m "Handle structured worker progress, selected compute devices, extracted media artifacts, cancellation, and failure diagnostics without losing existing process safeguards."
+
+# Pair 064
+git add -- transcriber/src/registerRoutes.js
+git commit -m "feat(transcriber-api): expose engine options and retained MP3 downloads" -m "Validate expanded job settings, report model capabilities, stream granular progress, serve extracted audio safely, and preserve authentication across artifact routes."
+
+# Pair 065
+git add -- transcriber/src/ui/TranscriberTool.jsx
+git commit -m "feat(transcriber-ui): add model, chunk, and extracted-audio controls" -m "Let users choose Whisper or Qwen, configure chunk duration, inspect the selected device and progress, and download the retained MP3 alongside text and subtitle output."
+
+# Pair 066
+git add -- transcriber/src/ui/transcriber.css
+git commit -m "style(transcriber-ui): refine expanded controls and artifact actions" -m "Adjust responsive layouts, status details, model selectors, progress presentation, and download controls for the larger transcription workflow."
+
+# Pair 067
+git add -- transcriber/test/routes.test.js
+git commit -m "test(transcriber-api): cover expanded settings and audio artifacts" -m "Verify model validation, chunk-duration bounds, progress responses, authenticated MP3 downloads, job cleanup, and backward-compatible route behavior."
+
+# Pair 068
+git add -- transcriber/test/test_worker.py
+git commit -m "test(transcriber-worker): cover Qwen, chunking, and device selection" -m "Add worker tests for alternative engine loading, GPU choice, media extraction, chunk progress, timestamp assembly, and cleanup across successful and failed jobs."
+
+# Pair 069
+git add -- transcriber/test/runner.test.js
+git commit -m "test(transcriber-runner): validate structured progress event parsing" -m "Exercise buffered worker output, throttled progress updates, device metadata, artifact events, cancellation, and malformed-line resilience in the Node runner."
+
+# Pair 070
+git add -- gpt/README.md
+git commit -m "docs(gpt): describe private corpus research setup and safeguards" -m "Provide installation, database provisioning, Ollama model, shared-host, API, evaluation, and troubleshooting guidance for the local conversational research tool."
+
+# Pair 071
+git add -- gpt/package.json
+git commit -m "build(gpt): define standalone scripts and application dependencies" -m "Add development, API, build, preview, test, and benchmark commands with the packages required by the private local research interface."
+
+# Pair 072
+git add -- gpt/setup.requirements.json
+git commit -m "build(gpt): declare database and model service prerequisites" -m "Describe Node packages, PostgreSQL access, Ollama availability, and actionable setup commands for use by the workspace readiness checker."
+
+# Pair 073
+git add -- gpt/tool.manifest.js
+git commit -m "feat(gpt-manifest): register private conversational research tooling" -m "Define the GPT tool's routes, ports, UI entry, API registration, descriptive metadata, and setup integration for the shared workspace."
+
+# Pair 074
+git add -- gpt/requireToolDep.js
+git commit -m "build(gpt): resolve dependencies from local or workspace installs" -m "Add a focused module loader that supports standalone installation and shared workspace execution while producing actionable missing-package errors."
+
+# Pair 075
+git add -- gpt/vite.config.js
+git commit -m "build(gpt-ui): configure standalone and shared-host frontend builds" -m "Set React bundling, development proxying, base paths, and output behavior so the GPT interface works both independently and inside the tools workspace."
+
+# Pair 076
+git add -- gpt/index.html
+git commit -m "feat(gpt-ui): add the standalone development page shell" -m "Create the local development entry document with application metadata and the mount target required by the React research interface."
+
+# Pair 077
+git add -- gpt/public/index.html
+git commit -m "build(gpt-ui): add a production fallback entry document" -m "Provide the static application shell used by the standalone API server when serving a built GPT interface and handling client-side navigation."
+
+# Pair 078
+git add -- gpt/setup/postgres.sql
+git commit -m "feat(gpt-database): add least-privilege PostgreSQL provisioning" -m "Define isolated application roles, database objects, schema permissions, and read-only corpus access needed for secure local conversation storage."
+
+# Pair 079
+git add -- gpt/src/config.js
+git commit -m "feat(gpt-config): normalize runtime, database, and model settings" -m "Centralize environment defaults, input validation, safe public configuration, connection parsing, and model preferences for the API and user interface."
+
+# Pair 080
+git add -- gpt/src/postgres.js
+git commit -m "feat(gpt-database): add configurable connection pool management" -m "Implement connection fingerprints, lazy pool replacement, read-only session settings, health checks, and predictable cleanup for corpus and chat databases."
+
+# Pair 081
+git add -- gpt/src/setup.js
+git commit -m "feat(gpt-setup): provision isolated roles and verify dependencies" -m "Create database roles and schemas safely, inspect corpus prerequisites, test model availability, and return actionable readiness details without exposing secrets."
+
+# Pair 082
+git add -- gpt/src/corpus.js
+git commit -m "feat(gpt-corpus): retrieve grounded passages from the local index" -m "Search the existing spiritual corpus with scoped database access, normalize evidence records, preserve source metadata, and provide deterministic context for research turns."
+
+# Pair 083
+git add -- gpt/src/ollama.js
+git commit -m "feat(gpt-ollama): manage queued local generation and model pulls" -m "Add abortable requests, serialized generation, resilient model downloads, identity checks, retry guidance, and progress reporting for the local Ollama service."
+
+# Pair 084
+git add -- gpt/src/store.js
+git commit -m "feat(gpt-store): persist conversations, turns, and research state" -m "Implement isolated chat storage with transactional writes, ordered history, conversation metadata, citations, deletion handling, and safe public record shaping."
+
+# Pair 085
+git add -- gpt/src/research.js
+git commit -m "feat(gpt-research): orchestrate grounded multi-step corpus answers" -m "Coordinate retrieval, iterative local-model reasoning, citation validation, event progress, cancellation, and final responses that remain tied to stored evidence."
+
+# Pair 086
+git add -- gpt/src/registerRoutes.js
+git commit -m "feat(gpt-api): expose conversations, research, setup, and models" -m "Register validated endpoints for chat history, grounded generation, event streaming, cancellation, configuration, database setup, model inspection, and model downloads."
+
+# Pair 087
+git add -- gpt/src/server.js
+git commit -m "feat(gpt-server): add a secure standalone application host" -m "Start the loopback Express API, serve built assets and client-side routes, apply shared authentication, and shut down model and database resources cleanly."
+
+# Pair 088
+git add -- gpt/src/sharedTypes.d.ts
+git commit -m "types(gpt): document API records and research event contracts" -m "Define shared structures for settings, conversations, citations, model status, progress events, and generated answers to keep server and interface expectations aligned."
+
+# Pair 089
+git add -- gpt/src/ui/api.js
+git commit -m "feat(gpt-ui): add an authenticated streaming API client" -m "Centralize base-path handling, token forwarding, JSON errors, event-stream parsing, cancellation requests, and endpoint helpers for standalone and embedded modes."
+
+# Pair 090
+git add -- gpt/src/ui/export.mjs
+git commit -m "feat(gpt-export): render conversations as portable Markdown" -m "Format questions, grounded answers, citations, timestamps, and source metadata into a readable export that preserves the research trail outside the application."
+
+# Pair 091
+git add -- gpt/src/ui/settings.mjs
+git commit -m "feat(gpt-settings): persist safe local interface preferences" -m "Normalize browser-stored database and model settings, omit sensitive values where appropriate, provide stable defaults, and recover safely from malformed state."
+
+# Pair 092
+git add -- gpt/src/ui/main.jsx
+git commit -m "feat(gpt-ui): bootstrap standalone runtime configuration" -m "Mount the conversational research application with the correct API base, shared-host compatibility, authentication behavior, and React development safeguards."
+
+# Pair 093
+git add -- gpt/src/ui/GptTool.jsx
+git commit -m "feat(gpt-ui): build the private conversational research workspace" -m "Add conversation navigation, grounded question submission, live research progress, cited answers, setup guidance, model controls, history management, and exports."
+
+# Pair 094
+git add -- gpt/src/ui/gpt.css
+git commit -m "style(gpt-ui): create a responsive research conversation layout" -m "Style navigation, messages, citations, progress states, setup panels, model controls, empty states, and mobile layouts for focused long-form use."
+
+# Pair 095
+git add -- gpt/scripts/benchmarkModels.js
+git commit -m "perf(gpt): add repeatable local model benchmarking" -m "Measure representative research prompts across configured Ollama models, capture latency and answer statistics, and emit comparable results for informed model selection."
+
+# Pair 096
+git add -- gpt/eval/cases.json
+git commit -m "test(gpt-eval): add representative grounded research questions" -m "Define a reusable evaluation set covering factual retrieval, synthesis, ambiguity, citation discipline, and no-answer behavior over the local spiritual corpus."
+
+# Pair 097
+git add -- gpt/eval/ratings.example.json
+git commit -m "docs(gpt-eval): provide a structured human rating example" -m "Show how to score answer grounding, usefulness, citation quality, completeness, and failure behavior consistently after running the model benchmark suite."
+
+# Pair 098
+git add -- gpt/test/config.test.js
+git commit -m "test(gpt-config): cover defaults, validation, and safe exposure" -m "Verify environment parsing, model normalization, connection settings, public configuration redaction, invalid-value handling, and deterministic fallback behavior."
+
+# Pair 099
+git add -- gpt/test/corpus.test.js
+git commit -m "test(gpt-corpus): cover retrieval shaping and source preservation" -m "Exercise ranked passage queries, evidence normalization, metadata mapping, empty results, database failures, and the read-only constraints used by grounded research."
+
+# Pair 100
+git add -- gpt/test/routes.test.js
+git commit -m "test(gpt-api): cover conversation and research endpoint contracts" -m "Validate authenticated routes, request errors, streaming progress, cancellation, setup checks, model operations, conversation lifecycle, and safe failure responses."
+
+# Pair 101
+git add -- GIT_ADD_COMMIT_PAIRS.txt
+git commit -m "docs(workflow): add curated staging and commit command sequences" -m "Provide a project-specific set of reviewed git add targets and detailed conventional commit messages while explicitly excluding credentials and unrelated personal content."
+
