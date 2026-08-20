@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DEFAULT_SETTINGS, LOCAL_DEMO_SETTINGS, UNIVERSAL_QA_SETTINGS, mergeSettings, stripSecrets } from './settings.mjs';
 import './semantic-qa.css';
 
@@ -91,6 +92,7 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
           ollamaBaseUrl: settings.ollamaBaseUrl,
           model: settings.model,
           summaryModel: settings.summaryModel,
+          hardwarePreference: settings.summaryHardwarePreference,
         },
         timeoutMs: 180000,
       }));
@@ -177,7 +179,198 @@ function sameMatch(left, right) {
     left.answer === right.answer;
 }
 
-function MatchRecord({ match, label }) {
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+
+function downloadText(filename, text, type = 'text/markdown;charset=utf-8') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function HighlightedDocument({ text, highlights }) {
+  const safe = (highlights || []).filter((item) => item.start >= 0 && item.end > item.start && item.end <= text.length)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const parts = [];
+  let cursor = 0;
+  safe.forEach((highlight, index) => {
+    if (highlight.start < cursor) return;
+    parts.push(text.slice(cursor, highlight.start));
+    parts.push(<mark id={`evidence-highlight-${index}`} key={`${highlight.start}:${highlight.end}`} title={highlight.label}>{text.slice(highlight.start, highlight.end)}</mark>);
+    cursor = highlight.end;
+  });
+  parts.push(text.slice(cursor));
+  return <div className="qa-full-document">{parts}</div>;
+}
+
+function DocumentViewer({ runtime, indexConnection, request, onClose }) {
+  const [documentResult, setDocumentResult] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!request) return undefined;
+    let active = true;
+    setDocumentResult(null); setError('');
+    api(runtime, '/documents/get', { body: { indexConnection, reference: request.reference, highlights: request.highlights || [] }, timeoutMs: 60000 })
+      .then((value) => { if (active) setDocumentResult(value.document); })
+      .catch((loadError) => { if (active) setError(loadError.message); });
+    return () => { active = false; };
+  }, [request, runtime.apiBasePath, indexConnection]);
+  useEffect(() => {
+    if (!documentResult?.highlights?.length) return;
+    requestAnimationFrame(() => document.getElementById('evidence-highlight-0')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  }, [documentResult]);
+  useEffect(() => {
+    if (!request) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [request, onClose]);
+  if (!request) return null;
+  return createPortal(
+    <div className="semantic-qa qa-document-portal">
+      <div className="qa-modal-backdrop">
+        <section className="qa-document-viewer" role="dialog" aria-modal="true" aria-label="Full discourse reader">
+          <header className="qa-document-header">
+            <div className="qa-document-heading"><span className="badge">Full discourse</span><h2>{documentResult?.title || request.title || 'Loading source…'}</h2></div>
+            <button className="btn" type="button" onClick={onClose}>Back to discourses</button>
+          </header>
+          <div className="qa-document-body">
+            {error ? <div className="alert warn">{error}</div> : null}
+            {!documentResult && !error ? <div className="hint qa-document-loading">Reconstructing all available discourse chunks…</div> : null}
+            {documentResult ? <>
+              <div className="toolbar qa-document-meta">
+                <span className="badge">{documentResult.sourceGroup}</span>
+                <span className="badge">{documentResult.chunks.length} chunk{documentResult.chunks.length === 1 ? '' : 's'}</span>
+                <span className="badge">{documentResult.highlights.length} highlighted passage{documentResult.highlights.length === 1 ? '' : 's'}</span>
+              </div>
+              <HighlightedDocument text={documentResult.text} highlights={documentResult.highlights} />
+            </> : null}
+          </div>
+        </section>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function evidenceSourceTitle(item) {
+  return String(item?.sourceTitle || item?.question || '').trim() || `Source ${item?.sourceId || 'unknown'}`;
+}
+
+function evidenceTitleLabel(item) {
+  const sourceReference = String(item?.sourceGroup || item?.sourceId || '');
+  return sourceReference.startsWith('discourse:') ? 'Discourse title' : 'Source title';
+}
+
+function deepSummaryMarkdown(question, searchMode, result) {
+  const lines = [`# ${result.title || 'Deep summary'}`, '', `**Question:** ${question}`, `**Search mode:** ${searchMode === 'search' ? 'Search' : 'Semantic Search'}`, ''];
+  for (const paragraph of result.paragraphs || []) lines.push(paragraph.text, '');
+  lines.push('## Coverage', '');
+  Object.entries(result.coverage || {}).forEach(([key, value]) => lines.push(`- ${key}: ${value}`));
+  lines.push('', '## Evidence', '');
+  (result.evidence || []).forEach((item) => lines.push(
+    `### [${item.evidenceNumber}] ${evidenceSourceTitle(item)}`,
+    '',
+    `**Source:** ${item.sourceId}`,
+    '',
+    item.text,
+    '',
+  ));
+  return `${lines.join('\n')}\n`;
+}
+
+function formatDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+}
+
+function phaseStatusText(status) {
+  return ({ completed: 'Done', running: 'In progress', pending: 'Yet to start', skipped: 'Skipped', failed: 'Failed', cancelled: 'Cancelled' })[status] || status;
+}
+
+function DeepSummaryProgress({ job, collapsible = false }) {
+  const phases = Array.isArray(job?.phases) ? job.phases : [];
+  if (!phases.length) return null;
+  const overallPercent = Number(job.overallPercent ?? job.percent) || 0;
+  const eta = job.status === 'completed'
+    ? `Completed in ${formatDuration(job.elapsedSeconds)}`
+    : job.etaSeconds != null
+      ? `Overall ETA: about ${formatDuration(job.etaSeconds)} for all remaining phases · projected total ${formatDuration(job.estimatedTotalSeconds)}${job.estimatedCompletionAt ? ` · completion around ${new Date(job.estimatedCompletionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`
+      : 'ETA will appear after the first Ollama batch finishes';
+  const content = <>
+    <div className="qa-overall-progress"><div className="qa-phase-title"><strong>Overall progress</strong><span>{overallPercent}%</span></div><div className="qa-progress"><span style={{ width: `${overallPercent}%` }} /></div><div className="hint">{eta}</div></div>
+    <div className="qa-runtime-device"><span className="badge">Device choice: {({ auto: 'Auto', gpu: 'Prefer GPU', cpu: 'CPU only' })[job.hardwarePreference] || 'Auto'}</span><span className="badge">Actual processor: {job.hardware?.runtime?.processor || 'checking after first Ollama batch…'}</span></div>
+    <ol className="qa-phase-list">
+      {phases.map((phase, index) => <li className={`qa-phase-step ${phase.status}`} key={phase.id}>
+        <span className="qa-phase-marker" aria-hidden="true">{phase.status === 'completed' ? '✓' : index + 1}</span>
+        <div className="qa-phase-content">
+          <div className="qa-phase-title"><strong>Phase {index + 1}: {phase.name}</strong><span>{phaseStatusText(phase.status)}</span></div>
+          {phase.status === 'running' ? <><div className="qa-progress"><span style={{ width: `${phase.percent || 0}%` }} /></div><div className="hint">{phase.processed || 0} / {phase.total || '—'} {phase.unit} · {phase.percent || 0}%{phase.etaSeconds != null ? ` · phase ETA ${formatDuration(phase.etaSeconds)} · projected phase total ${formatDuration(phase.estimatedDurationSeconds)}` : ''}{job.parallelism > 1 ? ` · up to ${job.parallelism} parallel Ollama requests` : ''}{job.activeRequests ? ` · ${job.activeRequests} active` : ''}</div></> : null}
+          {phase.status === 'pending' && phase.estimatedDurationSeconds != null ? <div className="hint">Estimated phase duration: {formatDuration(phase.estimatedDurationSeconds)}</div> : null}
+          {phase.status === 'completed' && phase.elapsedSeconds != null ? <div className="hint">Finished in {formatDuration(phase.elapsedSeconds)}</div> : null}
+        </div>
+      </li>)}
+    </ol>
+  </>;
+  return collapsible ? <details className="qa-phase-tracker completed"><summary>{eta}</summary>{content}</details> : <div className="qa-phase-tracker">{content}</div>;
+}
+
+function DeepSummary({ question, searchMode, job, onOpenDocument, onCancel }) {
+  const result = job?.result;
+  if (!job) return null;
+  if (job.status !== 'completed' || result?.status !== 'ready') {
+    return <div className="card qa-deep-summary"><div className="qa-card-title"><h3>Deep Summary</h3><div className="toolbar"><span className="badge">{job.phase || job.status}</span>{['queued', 'running'].includes(job.status) ? <button className="btn" type="button" onClick={onCancel}>Cancel</button> : null}</div></div><DeepSummaryProgress job={job} />{job.error ? <div className="alert warn">{job.error}</div> : null}{job.status === 'completed' && result?.status !== 'ready' ? <div className="alert warn">No answer passages could be independently verified for a deep summary.</div> : null}</div>;
+  }
+  const markdown = deepSummaryMarkdown(question, searchMode, result);
+  const printReport = () => {
+    const popup = window.open('', '_blank');
+    if (!popup) return;
+    popup.document.write(`<!doctype html><meta charset="utf-8"><title>${escapeHtml(result.title)}</title><style>body{font:16px/1.7 system-ui;max-width:900px;margin:40px auto;padding:0 24px}h1,h2{line-height:1.25}.source{color:#555;margin-top:-12px}blockquote{border-left:3px solid #999;padding-left:16px;white-space:pre-wrap}@media print{button{display:none}}</style><h1>${escapeHtml(result.title)}</h1><p><strong>Question:</strong> ${escapeHtml(question)}</p>${result.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph.text)}</p>`).join('')}<h2>Evidence</h2>${result.evidence.map((item) => `<h3>[${item.evidenceNumber}] ${escapeHtml(evidenceSourceTitle(item))}</h3><p class="source">Source ${escapeHtml(item.sourceId)}</p><blockquote>${escapeHtml(item.text)}</blockquote>`).join('')}<script>window.onload=()=>window.print()<\/script>`);
+    popup.document.close();
+  };
+  return (
+    <article className="card qa-deep-summary">
+      <div className="qa-card-title"><div><span className="badge">Verified Deep Summary{result.coverage?.exhaustiveScan ? ' · Corpus-wide scan' : ''}</span><h2>{result.title}</h2></div><div className="toolbar"><button className="btn" onClick={() => downloadText(`search-engine-deep-summary-${new Date().toISOString().slice(0, 10)}.md`, markdown)}>Download Markdown</button><button className="btn" onClick={printReport}>Print / Save PDF</button></div></div>
+      <DeepSummaryProgress job={job} collapsible />
+      {result.coverage?.fallbackClaimCount ? <div className="alert warn">{result.coverage.fallbackClaimCount} verified source passage{result.coverage.fallbackClaimCount === 1 ? ' was' : 's were'} used directly because the local model could not return parseable claim JSON for {result.coverage.fallbackClaimCount === 1 ? 'it' : 'them'}. Citations still point to the original verified passages.</div> : null}
+      <div className="qa-coverage-grid">
+        <span><strong>{result.coverage?.scannedPassages ?? '—'}</strong> passages scored</span><span><strong>{result.coverage?.candidateRecords}</strong> relevant candidates</span><span><strong>{result.coverage?.verifiedRecords}</strong> verified</span><span><strong>{result.coverage?.usedSourceCount}</strong> cited sources</span>
+      </div>
+      <div className="qa-deep-article">{(result.paragraphs || []).map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}</div>
+      <details className="qa-deep-evidence"><summary>Evidence ({result.evidence.length})</summary><ol className="qa-summary-lines">{result.evidence.map((item) => <li key={item.evidenceNumber}>
+        <div className="qa-evidence-heading">
+          <div><span className="qa-evidence-title-label">{evidenceTitleLabel(item)}</span><button className="qa-evidence-title" type="button" onClick={() => onOpenDocument({ reference: item.sourceGroup || item.sourceId, title: evidenceSourceTitle(item), highlights: [{ sourceId: item.sourceId, start: item.start, end: item.end, evidenceNumber: item.evidenceNumber, label: `Evidence ${item.evidenceNumber}` }] })}>[{item.evidenceNumber}] {evidenceSourceTitle(item)}</button></div>
+          <span className="hint">Source {item.sourceId}</span>
+        </div>
+        <div className="qa-summary-text">{item.text}</div>
+      </li>)}</ol></details>
+    </article>
+  );
+}
+
+function MatchRecord({ match, label, searchMode = 'semantic', onOpenDocument }) {
+  const bestPassage = match.matchedPassages?.[0];
+  const open = () => onOpenDocument?.({
+    reference: match.sourceId,
+    title: match.question,
+    highlights: bestPassage ? [{ sourceId: match.sourceId, start: bestPassage.start, end: bestPassage.end, label: 'Best matching passage' }] : [],
+  });
   return (
     <article className="card qa-answer">
       <div className="qa-answer-head">
@@ -185,16 +378,17 @@ function MatchRecord({ match, label }) {
           <span className="badge">{label}</span>
           {match.relevanceRank != null ? <span className="badge">#{match.relevanceRank}</span> : null}
           <span className="badge">Relevance {Number(match.relevanceScore ?? match.similarity).toFixed(3)}</span>
-          {match.relevanceScore != null ? <span className="badge">Cosine {Number(match.similarity).toFixed(3)}</span> : null}
+          {searchMode === 'semantic' && match.relevanceScore != null ? <span className="badge">Cosine {Number(match.similarity).toFixed(3)}</span> : null}
+          {searchMode === 'search' && match.matchChannels?.length ? <span className="badge">{match.matchChannels.join(' · ')}</span> : null}
         </div>
-        <span className="mono">Record {match.sourceId}</span>
+        <button className="btn qa-source-link" type="button" onClick={open}>Source {match.sourceId}</button>
       </div>
-      <div className="qa-stored-question">{match.question}</div>
-      {match.matchedPassages?.[0] ? (
+      <button className="qa-stored-question qa-title-button" type="button" onClick={open}>{match.question}</button>
+      {bestPassage ? (
         <div className="qa-matched-passage">
           <div className="section-title">Best matching answer passage</div>
-          <div className="qa-summary-text">{match.matchedPassages[0].text}</div>
-          <div className="hint">Passage meaning {Number(match.matchedPassages[0].semanticSimilarity).toFixed(3)} · stored title/question had zero ranking weight</div>
+          <div className="qa-summary-text">{bestPassage.text}</div>
+          <div className="hint">{searchMode === 'search' ? `Search score ${Number(bestPassage.searchScore || match.searchScore).toFixed(3)} · ${bestPassage.matchChannels?.join(', ') || 'text match'}` : `Passage meaning ${Number(bestPassage.semanticSimilarity).toFixed(3)} · stored title/question had zero ranking weight`}</div>
         </div>
       ) : null}
       <div className="section-title">Complete stored answer</div>
@@ -211,7 +405,7 @@ function MatchRecord({ match, label }) {
   );
 }
 
-function GroundedSummary({ summary, relevantMatches }) {
+function GroundedSummary({ summary, relevantMatches, onOpenDocument, searchMode = 'semantic' }) {
   const allowedSources = new Set((relevantMatches || []).map((match) => String(match.sourceId)));
   const evidence = (summary?.evidence || []).filter((item) => allowedSources.has(String(item.sourceId)));
   if (summary?.status !== 'ready' || !evidence.length) return null;
@@ -223,10 +417,10 @@ function GroundedSummary({ summary, relevantMatches }) {
           <span className="badge">{evidence.length} excerpt{evidence.length === 1 ? '' : 's'}</span>
           <span className="badge">{new Set(evidence.map((item) => String(item.sourceId))).size} source{new Set(evidence.map((item) => String(item.sourceId))).size === 1 ? '' : 's'}</span>
         </div>
-        <span className="mono">meaning-based · grounded</span>
+        <span className="mono">{searchMode === 'search' ? 'text-ranked' : 'meaning-based'} · grounded</span>
       </div>
       <div className="qa-summary-text">{summary.text}</div>
-      <div className="hint qa-summary-note">This answer may paraphrase. It is generated only from passages that independently passed the same “show relevant only” threshold.</div>
+      <div className="hint qa-summary-note">This answer may paraphrase. It is generated only from accepted passages and is withheld if the requested relationship cannot be grounded in them.</div>
       <div className="section-title">Supporting passages</div>
       <ol className="qa-summary-lines">
         {evidence.map((item, index) => (
@@ -234,8 +428,8 @@ function GroundedSummary({ summary, relevantMatches }) {
             <div className="qa-summary-text">{item.text}</div>
             <div className="qa-summary-citation">
               <span className="badge">Evidence {item.evidenceNumber ?? index + 1}</span>
-              <span className="badge">Source {item.sourceId}</span>
-              <span className="badge">Passage meaning {Number(item.semanticSimilarity).toFixed(3)}</span>
+              <button className="badge qa-source-button" type="button" onClick={() => onOpenDocument?.({ reference: item.sourceId, title: item.question, highlights: [{ sourceId: item.sourceId, start: item.start, end: item.end, evidenceNumber: item.evidenceNumber, label: `Evidence ${item.evidenceNumber}` }] })}>Source {item.sourceId}</button>
+              <span className="badge">{searchMode === 'search' ? 'Passage search' : 'Passage meaning'} {Number(item.semanticSimilarity).toFixed(3)}</span>
               <span className="badge">Record relevance {Number(item.recordRelevance).toFixed(3)}</span>
             </div>
           </li>
@@ -248,13 +442,32 @@ function GroundedSummary({ summary, relevantMatches }) {
 function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
   const [question, setQuestion] = useState('');
   const [result, setResult] = useState(null);
+  const [deepJob, setDeepJob] = useState(null);
+  const [viewerRequest, setViewerRequest] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const deepEvents = useRef(null);
   const readyForSearch = connectionConfigured(settings.indexConnection);
+
+  useEffect(() => () => deepEvents.current?.close(), []);
 
   if (!readyForSearch) {
     return <div className="card qa-empty-state"><h3>Index database credentials are required</h3><div className="hint">Configure the index PostgreSQL connection, initialize it, and complete a first sync before searching.</div><div className="toolbar"><button className="btn primary" onClick={() => onNavigate('setup')}>Open setup</button><button className="btn" onClick={() => onNavigate('settings')}>Open Settings</button></div></div>;
   }
+
+  const followDeepJob = (jobId) => {
+    deepEvents.current?.close();
+    const source = new EventSource(authQuery(joinPath(runtime.apiBasePath, `/deep-summary/${encodeURIComponent(jobId)}/events`)));
+    deepEvents.current = source;
+    const update = (event) => {
+      try {
+        const next = JSON.parse(event.data);
+        setDeepJob(next);
+        if (['completed', 'failed', 'cancelled'].includes(next.status)) source.close();
+      } catch { /* ignore malformed progress */ }
+    };
+    ['status', 'progress', 'log'].forEach((name) => source.addEventListener(name, update));
+  };
 
   const search = async (event) => {
     event.preventDefault();
@@ -262,23 +475,35 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
     setBusy(true);
     setError('');
     setResult(null);
+    setDeepJob(null);
+    deepEvents.current?.close();
     try {
-      setResult(await api(runtime, '/search', {
+      const response = await api(runtime, '/search', {
         body: {
           indexConnection: settings.indexConnection,
           ollamaBaseUrl: settings.ollamaBaseUrl,
           question,
+          searchMode: settings.searchMode,
           topK: settings.topK,
           threshold: settings.threshold,
           summary: {
-            enabled: settings.summaryEnabled,
+            enabled: settings.summaryMode === 'standard',
+            mode: settings.summaryMode,
             model: settings.summaryModel,
             maxRecords: settings.summaryMaxRecords,
             maxLines: settings.summaryMaxLines,
+            parallelRequests: settings.deepSummaryParallelRequests,
+            requestTimeoutMs: settings.deepSummaryTimeoutSeconds * 1000,
+            hardwarePreference: settings.summaryHardwarePreference,
           },
         },
         timeoutMs: 180000,
-      }));
+      });
+      setResult(response);
+      if (response.deepSummaryJob?.id) {
+        setDeepJob(response.deepSummaryJob);
+        followDeepJob(response.deepSummaryJob.id);
+      }
     } catch (searchError) {
       setError(searchError.message);
     } finally {
@@ -286,7 +511,16 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
     }
   };
 
+  const cancelDeepSummary = async () => {
+    if (!deepJob?.id) return;
+    try {
+      const response = await api(runtime, `/deep-summary/${encodeURIComponent(deepJob.id)}/cancel`, { body: {} });
+      setDeepJob(response.job);
+    } catch (cancelError) { setError(cancelError.message); }
+  };
+
   const acceptedMatch = result?.acceptedMatch || null;
+  const deepReady = deepJob?.status === 'completed' && deepJob?.result?.status === 'ready';
   const summaryEvidenceIds = new Set(
     result?.summary?.status === 'ready'
       ? (result.summary.evidence || []).map((item) => String(item.sourceId))
@@ -306,40 +540,36 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
   return (
     <div className="qa-stack">
       <form className="card qa-search-card" onSubmit={search}>
-        <h3>Ask the indexed corpus</h3>
+        <div className="qa-card-title"><div><h3>{settings.searchMode === 'semantic' ? 'Semantic Search' : 'Search'}</h3><div className="hint">{settings.searchMode === 'semantic' ? 'Meaning-first retrieval over independently indexed answer passages.' : 'Exact phrase, PostgreSQL full-text, and trigram-distance ranking fused together.'}</div></div><div className="qa-mode-toggle" role="group" aria-label="Search mode"><button type="button" className={`btn ${settings.searchMode === 'semantic' ? 'primary' : ''}`} onClick={() => setSettings((current) => ({ ...current, searchMode: 'semantic' }))}>Semantic Search</button><button type="button" className={`btn ${settings.searchMode === 'search' ? 'primary' : ''}`} onClick={() => setSettings((current) => ({ ...current, searchMode: 'search' }))}>Search</button></div></div>
         <div className="hint">
-          Retrieval compares your question with independently indexed answer passages. The summary may paraphrase, but it can use only passages that pass “show relevant only.”
+          Standard Summary uses accepted evidence only. Deep Summary also inspects nearby records, but admits them only after independent answerability validation.
         </div>
         <textarea className="qa-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Enter a question…" />
         <div className="toolbar">
           <button className="btn primary" type="submit" disabled={busy || !question.trim()}>
-            {busy ? (settings.summaryEnabled ? 'Pooling evidence…' : 'Searching…') : (settings.summaryEnabled ? 'Search and summarize' : 'Search answers')}
+            {busy ? 'Searching…' : settings.summaryMode === 'deep' ? 'Search and generate Deep Summary' : settings.summaryMode === 'standard' ? 'Search and summarize' : 'Search'}
           </button>
-          <label className="chip qa-summary-toggle">
-            <input
-              type="checkbox"
-              checked={Boolean(settings.summaryEnabled)}
-              onChange={(event) => setSettings((current) => ({ ...current, summaryEnabled: event.target.checked }))}
-            />
-            Synthesized grounded answer
-          </label>
+          <label className="field qa-summary-select"><span className="field-label">Answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Standard Summary</option><option value="deep">Deep Summary</option></select></label>
+          {settings.summaryMode !== 'off' ? <label className="field qa-summary-select qa-device-choice"><span className="field-label">Summary processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select></label> : null}
           <span className="badge">Top {settings.topK}</span>
-          <span className="badge">Threshold {Number(settings.threshold).toFixed(2)}</span>
-          {settings.summaryEnabled ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
+          <span className="badge">{settings.searchMode === 'semantic' ? `Threshold ${Number(settings.threshold).toFixed(2)}` : 'Exact + full-text + fuzzy RRF'}</span>
+          {settings.summaryMode === 'standard' ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
+          {settings.summaryMode === 'deep' ? <span className="badge">{settings.searchMode === 'semantic' ? 'Score every indexed answer passage' : 'Pool independently verified text matches'}</span> : null}
         </div>
       </form>
       {error ? <div className="alert warn">{error}</div> : null}
-      {!acceptedMatch && result?.message ? <div className="alert warn qa-no-match">{result.message}</div> : null}
+      {!acceptedMatch && result?.message && !deepReady ? <div className="alert warn qa-no-match">{result.message}</div> : null}
       {!summaryCitationValid ? (
         <div className="alert warn qa-no-match">The summary was withheld because its evidence citations did not pass relevance validation.</div>
       ) : null}
-      {summaryCitationValid ? <GroundedSummary summary={result?.summary} relevantMatches={result?.relevantMatches} /> : null}
+      {summaryCitationValid ? <GroundedSummary summary={result?.summary} relevantMatches={result?.relevantMatches} searchMode={result?.searchMode || settings.searchMode} onOpenDocument={setViewerRequest} /> : null}
+      <DeepSummary question={question} searchMode={result?.searchMode || settings.searchMode} job={deepJob} onOpenDocument={setViewerRequest} onCancel={cancelDeepSummary} />
       {acceptedMatch && result?.summary?.status === 'unavailable' ? (
         <div className="alert warn qa-no-match">Relevant evidence was found, but its semantic summary could not be prepared. The stored answer remains available below.</div>
       ) : null}
       {acceptedMatch ? (
         <div className="qa-results">
-          <MatchRecord match={acceptedMatch} label={result?.summary?.status === 'ready' ? 'Primary stored source' : 'Best answer'} />
+          <MatchRecord match={acceptedMatch} searchMode={result?.searchMode || settings.searchMode} onOpenDocument={setViewerRequest} label={result?.summary?.status === 'ready' ? 'Primary stored source' : 'Best answer'} />
         </div>
       ) : null}
       {remainingMatches.length ? (
@@ -348,12 +578,14 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
             {inspectorLabel} ({remainingMatches.length}) — inspection only
           </summary>
           <div className="hint" style={{ margin: '10px 0 14px' }}>
-            These are retrieval neighbors, not accepted answers and not summary evidence. Open them only to inspect why the search ranked nearby source records.
+            {settings.summaryMode === 'deep' ? 'Deep Summary inspects these neighbors, but uses them only when the independent verifier accepts their answer passages.' : 'These are retrieval neighbors, not accepted answers and not Standard Summary evidence.'}
           </div>
           <div className="qa-results">
             {remainingMatches.map((match, index) => (
               <MatchRecord
                 match={match}
+                searchMode={result?.searchMode || settings.searchMode}
+                onOpenDocument={setViewerRequest}
                 label={acceptedMatch ? 'Related / nearest source' : 'Nearest source'}
                 key={`${match.sourceId ?? 'match'}:${match.relevanceRank ?? index}`}
               />
@@ -361,8 +593,51 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
           </div>
         </details>
       ) : null}
+      <DocumentViewer runtime={runtime} indexConnection={settings.indexConnection} request={viewerRequest} onClose={() => setViewerRequest(null)} />
     </div>
   );
+}
+
+function DiscoursesScreen({ runtime, settings, onNavigate }) {
+  const [query, setQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState(null);
+  const [viewerRequest, setViewerRequest] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const ready = connectionConfigured(settings.indexConnection);
+  const load = async (nextPage = page, nextQuery = submittedQuery) => {
+    if (!ready) return;
+    setBusy(true); setError('');
+    try {
+      setResult(await api(runtime, '/documents/list', { body: { indexConnection: settings.indexConnection, query: nextQuery, page: nextPage, pageSize: 50 }, timeoutMs: 60000 }));
+    } catch (loadError) { setError(loadError.message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { void load(page, submittedQuery); }, [page, submittedQuery, ready]);
+  if (!ready) return <div className="card qa-empty-state"><h3>Index database credentials are required</h3><button className="btn primary" onClick={() => onNavigate('settings')}>Open Settings</button></div>;
+  const pages = Math.max(1, Math.ceil(Number(result?.total || 0) / Number(result?.pageSize || 50)));
+  return <div className="qa-stack">
+    <form className="card qa-discourse-search" onSubmit={(event) => { event.preventDefault(); setPage(1); setSubmittedQuery(query.trim()); }}><div className="qa-card-title"><div><h3>Browse Discourses</h3><div className="hint">Searches every discourse question and its complete answer content. Open a card to reconstruct all ordered chunks.</div></div><span className="badge">{result?.total ?? '—'} discourses</span></div><div className="toolbar"><input style={{ flex: 1, minWidth: 240 }} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search questions and full answers…" /><button className="btn primary" disabled={busy}>{busy ? 'Searching…' : 'Search discourses'}</button>{submittedQuery ? <button className="btn" type="button" onClick={() => { setQuery(''); setPage(1); setSubmittedQuery(''); }}>Clear</button> : null}</div></form>
+    {error ? <div className="alert warn">{error}</div> : null}
+    {!busy && result && !(result.documents || []).length ? <div className="card qa-empty-state"><h3>No matching discourses</h3><div className="hint">No question or answer content matched “{submittedQuery}”.</div></div> : null}
+    <div className="qa-discourse-list">{(result?.documents || []).map((document) => {
+      const highlightStart = document.highlightStart == null ? null : Number(document.highlightStart);
+      const highlightEnd = document.highlightEnd == null ? null : Number(document.highlightEnd);
+      const highlights = Number.isInteger(highlightStart) && Number.isInteger(highlightEnd) && highlightEnd > highlightStart
+        ? [{ sourceId: document.previewSourceId || document.firstSourceId, start: highlightStart, end: highlightEnd, label: 'Browse search match' }]
+        : [];
+      return <button className="card qa-discourse-card" type="button" key={document.sourceGroup} onClick={() => setViewerRequest({ reference: document.sourceGroup, title: document.title, highlights })}>
+        <div className="qa-discourse-card-top"><span className="badge">{document.matchKind || 'Discourse'}</span><span className="hint">{document.sourceGroup}</span></div>
+        <div className="qa-discourse-question"><span className="qa-preview-label">Question</span><strong>{document.title}</strong></div>
+        <div className="qa-discourse-answer"><span className="qa-preview-label">Answer preview</span><p>{document.answerPreview || 'No answer preview is available.'}</p></div>
+        <div className="qa-discourse-card-footer"><span className="hint">{document.language || 'Unknown language'} · {document.chunkCount} chunk{document.chunkCount === 1 ? '' : 's'}</span><span className="qa-open-discourse">Open full discourse →</span></div>
+      </button>;
+    })}</div>
+    <div className="toolbar qa-pagination"><button className="btn" disabled={busy || page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button><span className="badge">Page {page} of {pages}</span><button className="btn" disabled={busy || page >= pages} onClick={() => setPage((value) => value + 1)}>Next</button></div>
+    <DocumentViewer runtime={runtime} indexConnection={settings.indexConnection} request={viewerRequest} onClose={() => setViewerRequest(null)} />
+  </div>;
 }
 
 function IndexScreen({ runtime, settings }) {
@@ -487,12 +762,37 @@ function IndexScreen({ runtime, settings }) {
 function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [hardware, setHardware] = useState(null);
+  const [hardwareBusy, setHardwareBusy] = useState(false);
+  const [hardwareError, setHardwareError] = useState('');
   const selectedSchema = catalog.find((schema) => schema.name === settings.mapping.schema);
   const selectedTable = selectedSchema?.tables.find((table) => table.name === settings.mapping.table);
   const columns = selectedTable?.columns || [];
 
   const updateConnection = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
   const updateMapping = (patch) => setSettings((current) => ({ ...current, mapping: { ...current.mapping, ...patch } }));
+
+  const detectHardware = async () => {
+    setHardwareBusy(true);
+    setHardwareError('');
+    try {
+      const response = await api(runtime, '/ollama/hardware', {
+        body: { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.summaryModel },
+        timeoutMs: 30000,
+      });
+      setHardware(response.hardware);
+      return response.hardware;
+    } catch (error) {
+      setHardware(null);
+      setHardwareError(error.message);
+      return null;
+    } finally { setHardwareBusy(false); }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => { void detectHardware(); }, 250);
+    return () => clearTimeout(timer);
+  }, [runtime.apiBasePath, settings.ollamaBaseUrl, settings.summaryModel]);
 
   const call = async (path, body, success) => {
     setBusy(true); setStatus(null);
@@ -545,8 +845,17 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
           <label className="field"><span className="field-label">Base URL</span><input value={settings.ollamaBaseUrl} onChange={(event) => setSettings((current) => ({ ...current, ollamaBaseUrl: event.target.value }))} /></label>
           <label className="field"><span className="field-label">Embedding model</span><input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} /></label>
           <label className="field"><span className="field-label">Summary model</span><input value={settings.summaryModel} onChange={(event) => setSettings((current) => ({ ...current, summaryModel: event.target.value }))} /></label>
+          <label className="field"><span className="field-label">Summary processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select><span className="hint">Auto lets Ollama choose. Prefer GPU requests maximum layer offload; CPU only disables GPU offload.</span></label>
         </div>
-        <button className="btn" style={{ marginTop: 12 }} disabled={busy} onClick={() => call('/ollama/test', { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.model }, (response) => `Ollama connected; ${response.model} returns ${response.dimension} dimensions.`)}>Test Ollama</button>
+        <div className="toolbar" style={{ marginTop: 12 }}><button className="btn" disabled={busy} onClick={() => call('/ollama/test', { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.model }, (response) => `Ollama connected; ${response.model} returns ${response.dimension} dimensions.`)}>Test Ollama</button><button className="btn" disabled={hardwareBusy} onClick={() => void detectHardware()}>{hardwareBusy ? 'Detecting hardware…' : 'Refresh hardware detection'}</button></div>
+        {hardware ? <div className="qa-hardware-panel">
+          <div><span>Detected GPU</span><strong>{hardware.host?.accelerators?.length ? hardware.host.accelerators.map((item) => `${item.name}${item.backend ? ` (${item.backend})` : ''}`).join(', ') : 'None detected'}</strong></div>
+          <div><span>CPU</span><strong>{hardware.host?.cpu?.name || 'Unknown'} · {hardware.host?.cpu?.logicalCores || '—'} logical cores</strong></div>
+          <div><span>Summary model allocation</span><strong>{hardware.runtime?.processor || 'Not loaded yet'}</strong></div>
+          <div><span>Recommendation</span><strong>Auto{hardware.gpuAvailable ? ' — GPU is available' : ' — CPU fallback'}</strong></div>
+        </div> : null}
+        {hardwareError ? <div className="hint" style={{ marginTop: 10 }}>Hardware detection: {hardwareError}</div> : null}
+        {settings.summaryHardwarePreference === 'gpu' && hardware && !hardware.gpuAvailable ? <div className="alert warn" style={{ marginTop: 12 }}>No compatible GPU was detected. Ollama may fall back to CPU or reject forced GPU offload.</div> : null}
       </div>
       <div className="card">
         <h3>Corpus mapping</h3>
@@ -579,12 +888,11 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Maximum summary sentences</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Source page size</span><input type="number" min="25" max="1000" value={settings.fetchSize} onChange={(event) => setSettings((current) => ({ ...current, fetchSize: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Embedding batch size</span><input type="number" min="1" max="64" value={settings.embeddingBatchSize} onChange={(event) => setSettings((current) => ({ ...current, embeddingBatchSize: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Deep Summary parallel Ollama requests</span><input type="number" min="1" max="4" value={settings.deepSummaryParallelRequests} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryParallelRequests: Number(event.target.value) }))} /><span className="hint">Use 2 for normal local hardware. Set 1 if Ollama is memory constrained; use 3–4 only when the model can run several contexts concurrently.</span></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Deep Summary Ollama timeout (seconds)</span><input type="number" min="60" max="900" step="30" value={settings.deepSummaryTimeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryTimeoutSeconds: Number(event.target.value) }))} /><span className="hint">A timed-out validation or extraction batch is automatically retried as smaller batches.</span></label>
         </div>
-        <label className="chip qa-summary-toggle" style={{ marginTop: 12 }}>
-          <input type="checkbox" checked={Boolean(settings.summaryEnabled)} onChange={(event) => setSettings((current) => ({ ...current, summaryEnabled: event.target.checked }))} />
-          Enable grounded semantic summaries by default
-        </label>
-        <div className="hint" style={{ marginTop: 10 }}>The summary model may paraphrase and combine evidence from several records. It receives only answer passages whose passage-level relevance independently passes the clear-match threshold.</div>
+        <label className="field" style={{ marginTop: 12, maxWidth: 360 }}><span className="field-label">Default answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Standard Summary</option><option value="deep">Deep Summary</option></select></label>
+        <div className="hint" style={{ marginTop: 10 }}>Standard Summary uses accepted passages only. Deep Summary inspects a larger pool and independently verifies every nearby passage before synthesis.</div>
         <div className="hint" style={{ marginTop: 12 }}>Non-secret settings save automatically. Passwords and connection strings are never persisted.</div>
       </div>
     </div>
@@ -608,6 +916,7 @@ export default function SemanticQaTool({ runtime: providedRuntime }) {
 
   const screen = useMemo(() => {
     if (tab === 'setup') return <SetupScreen runtime={runtime} settings={settings} onNavigate={setTab} onLoadDemo={() => setSettings(mergeSettings(LOCAL_DEMO_SETTINGS))} onLoadUniversal={() => setSettings(mergeSettings(UNIVERSAL_QA_SETTINGS))} />;
+    if (tab === 'discourses') return <DiscoursesScreen runtime={runtime} settings={settings} onNavigate={setTab} />;
     if (tab === 'index') return <IndexScreen runtime={runtime} settings={settings} />;
     if (tab === 'settings') return <SettingsScreen runtime={runtime} settings={settings} setSettings={setSettings} catalog={catalog} setCatalog={setCatalog} />;
     return <SearchScreen runtime={runtime} settings={settings} setSettings={setSettings} onNavigate={setTab} />;
@@ -617,8 +926,8 @@ export default function SemanticQaTool({ runtime: providedRuntime }) {
     <div className="semantic-qa">
       <div className="panel">
         <div className="panel-header">
-          <div><h3 style={{ margin: 0 }}>Semantic Q&A retrieval</h3><div className="hint" style={{ marginTop: 5 }}>Meaning-first retrieval with grounded, verbatim evidence summaries.</div></div>
-          <div className="tabs" role="tablist">{[['setup', 'Setup'], ['search', 'Search'], ['index', 'Index'], ['settings', 'Settings']].map(([id, label]) => <button key={id} className="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>)}</div>
+          <div><h3 style={{ margin: 0 }}>Search Engine</h3><div className="hint" style={{ marginTop: 5 }}>Semantic and conventional search with grounded summaries and complete source documents.</div></div>
+          <div className="tabs" role="tablist">{[['setup', 'Setup'], ['search', 'Search'], ['discourses', 'Discourses'], ['index', 'Index'], ['settings', 'Settings']].map(([id, label]) => <button key={id} className="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>)}</div>
         </div>
         <div className="panel-body">{screen}</div>
       </div>
