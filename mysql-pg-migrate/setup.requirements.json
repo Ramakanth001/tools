@@ -1,0 +1,13 @@
+{
+  "toolId": "mysql-pg-migrate",
+  "setupCommand": "npm --prefix ./mysql-pg-migrate install",
+  "checks": [
+    {
+      "id": "node-packages",
+      "type": "node-packages",
+      "label": "Node packages and database drivers",
+      "packageFile": "package.json",
+      "fix": "Run: npm --prefix ./mysql-pg-migrate install"
+    }
+  ]
+}
