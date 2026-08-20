@@ -325,6 +325,107 @@ select:disabled {
   margin: 10px 0;
 }
 
+.workspace-setup-result,
+.workspace-setup-error {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.workspace-setup-result.is-ready {
+  border-color: rgba(16, 185, 129, 0.34);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.workspace-setup-result.needs-setup,
+.workspace-setup-error {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.workspace-setup-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.workspace-setup-summary .hint {
+  text-align: right;
+}
+
+.workspace-setup-summary code,
+.workspace-setup-command code {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.workspace-setup-checks {
+  display: grid;
+  gap: 9px;
+}
+
+.workspace-setup-check {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  align-items: start;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.workspace-setup-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+.workspace-setup-dot.ok {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.workspace-setup-dot.error {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.workspace-setup-fix {
+  margin-top: 3px;
+  color: rgba(254, 215, 170, 0.9);
+  line-height: 1.4;
+}
+
+.workspace-setup-command {
+  display: grid;
+  gap: 5px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workspace-setup-command code {
+  color: var(--text);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .workspace-setup-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-setup-summary .hint {
+    text-align: left;
+  }
+}
+
 /* ---- Schema left-panel sectioning ---- */
 .section {
   display: flex;
