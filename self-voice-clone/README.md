@@ -13,7 +13,7 @@ npm install
 npm run setup:self-voice-clone
 ```
 
-Python 3.11 or 3.12 plus `ffmpeg` and `ffprobe` are required. The setup installs the API, tests, quality analysis, faster-whisper, speaker verification, VoxCPM2, and Chatterbox extras. Model weights remain in the normal local model cache and may download on first use.
+Python 3.11 or 3.12 plus `ffmpeg` and `ffprobe` are required. The setup installs the tool's `requirements.txt`, including the API, tests, quality analysis, faster-whisper, speaker verification, VoxCPM2, and Chatterbox extras. Model weights remain in the normal local model cache and may download on first use.
 
 ## Run
 
@@ -44,7 +44,9 @@ The FastAPI process listens only on `127.0.0.1:8792`. It can be started separate
 2. **Saved Profiles** shows readiness, clone prompt state, diagnostics, adaptation export/preparation, and imported checkpoints.
 3. **Generate** runs preview/final synthesis, polls job progress, exposes engine diagnostics, and serves WAV/FLAC output through the authenticated shared API.
 
-VoxCPM2 is the primary prompt-audio and prompt-text clone engine. Chatterbox is the fallback. XTTS remains a legacy baseline and is not silently selected when modern engines are unavailable.
+VoxCPM2 is the primary prompt-audio and exact-transcript clone engine. A synthesis is not considered complete merely because it produced fluent speech: each chunk is transcribed, compared with the target text, checked for prompt leakage, and measured against the enrolled speaker with 16 kHz SpeechBrain ECAPA embeddings. VoxCPM2 can generate up to three takes and only publishes a take that clears the identity gate. Chatterbox is an explicit fallback/bakeoff engine. XTTS remains a legacy baseline and is not silently selected when modern engines are unavailable.
+
+Profile `ready` status means that enrollment artifacts exist; the generation result is the actual clone-quality decision. The Generate page reports the measured speaker score and number of takes. If all takes fail identity verification, the job fails instead of returning generic TTS as a voice clone.
 
 ## Local Data
 
@@ -66,6 +68,10 @@ These paths are ignored by Git because they contain large, personal, and potenti
 - `SELF_VOICE_CLONE_API_URL` — upstream URL used by the Express proxy, default `http://127.0.0.1:8792`.
 - `TOOLS_AUTH_TOKEN` — protects the shared API when configured; the UI forwards it for requests and media downloads.
 - Existing FastAPI settings such as `PRIMARY_TTS_ENGINE`, `VOXCPM_DEVICE`, and `CHATTERBOX_VARIANT` remain supported.
+- `SYNTHESIS_MIN_SPEAKER_SIMILARITY` — measured speaker gate, default `0.72`.
+- `SYNTHESIS_CANDIDATE_ATTEMPTS` — stochastic takes evaluated per chunk, default `3` (the VoxCPM2-recommended range is 1–3).
+- `SYNTHESIS_IDENTITY_EARLY_STOP` — stop retrying after a strong verified take, default `0.76`.
+- `VOXCPM_ENABLE_ULTIMATE` — use reference audio plus its transcript before reference-only fallback, default `true`.
 
 Recommended Apple Silicon defaults:
 
@@ -83,6 +89,6 @@ npm run test:self-voice-clone
 npm run build
 ```
 
-The normal API suite mocks heavy model calls. A real synthesis smoke test requires installed engine dependencies and available model weights.
+The normal API suite mocks heavy model calls. A real synthesis smoke test requires installed engine dependencies and available model weights. Chatterbox also requires `setuptools<81` because its Perth watermarker still imports `pkg_resources`; setup pins the compatible version and runtime health reports it accurately.
 
 See [UPSTREAM.md](./UPSTREAM.md) for migration provenance and `vclone/docs/` for the detailed design and adaptation plan.
