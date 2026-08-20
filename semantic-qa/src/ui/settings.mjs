@@ -4,12 +4,18 @@ export const DEFAULT_SETTINGS = {
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   model: 'embeddinggemma',
   summaryModel: 'gemma3:4b',
+  summaryHardwarePreference: 'auto',
   mapping: { schema: '', table: '', idColumn: '', questionColumn: '', answerColumn: '', metadataColumns: [], groupColumn: '', orderColumn: '' },
   topK: 5,
   threshold: 0.60,
+  searchMode: 'semantic',
+  summaryMode: 'standard',
   summaryEnabled: true,
   summaryMaxRecords: 15,
   summaryMaxLines: 3,
+  deepSummaryMaxRecords: 60,
+  deepSummaryParallelRequests: 2,
+  deepSummaryTimeoutSeconds: 300,
   fetchSize: 250,
   embeddingBatchSize: 32,
 };
@@ -78,9 +84,15 @@ export function stripSecrets(settings) {
 }
 
 export function mergeSettings(value = {}) {
+  const summaryMode = value.summaryMode || (value.summaryEnabled === false ? 'off' : 'standard');
   return {
     ...DEFAULT_SETTINGS,
     ...value,
+    searchMode: ['semantic', 'search'].includes(value.searchMode) ? value.searchMode : DEFAULT_SETTINGS.searchMode,
+    summaryMode: ['off', 'standard', 'deep'].includes(summaryMode) ? summaryMode : DEFAULT_SETTINGS.summaryMode,
+    summaryHardwarePreference: ['auto', 'gpu', 'cpu'].includes(value.summaryHardwarePreference) ? value.summaryHardwarePreference : DEFAULT_SETTINGS.summaryHardwarePreference,
+    deepSummaryParallelRequests: Math.max(1, Math.min(4, Math.trunc(Number(value.deepSummaryParallelRequests) || DEFAULT_SETTINGS.deepSummaryParallelRequests))),
+    deepSummaryTimeoutSeconds: Math.max(60, Math.min(900, Math.trunc(Number(value.deepSummaryTimeoutSeconds) || DEFAULT_SETTINGS.deepSummaryTimeoutSeconds))),
     sourceConnection: { ...DEFAULT_SETTINGS.sourceConnection, ...(value.sourceConnection || {}), password: '', connectionString: '' },
     indexConnection: { ...DEFAULT_SETTINGS.indexConnection, ...(value.indexConnection || {}), password: '', connectionString: '' },
     mapping: { ...DEFAULT_SETTINGS.mapping, ...(value.mapping || {}) },
