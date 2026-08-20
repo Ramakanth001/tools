@@ -1,0 +1,18 @@
+[
+  { "question": "Who is Datta Swami?", "expectedSourceGroups": ["discourse:737", "discourse:891", "discourse:702", "qa:233"] },
+  { "question": "Where can I meet Shri Datta Swami?", "expectedSourceGroups": ["discourse:2854", "qa:320"] },
+  { "question": "What is the real nature of Datta?", "expectedSourceGroups": ["qa:49", "discourse:550", "discourse:879"] },
+  { "question": "What is the difference between Lord Datta and Lord Dattatreya?", "expectedSourceGroups": ["discourse:2068", "discourse:675", "discourse:415"] },
+  { "question": "How can I stop watching pornography?", "expectedSourceGroups": ["qa:396", "discourse:4531"] },
+  { "question": "Why do my prayers go unanswered?", "expectedSourceGroups": ["qa:159", "discourse:3463", "discourse:4513", "qa:98"] },
+  { "question": "Is the world real or an illusion?", "expectedSourceGroups": ["qa:60", "discourse:2496", "discourse:1526"] },
+  { "question": "How should I deal with anxiety about having a child?", "expectedSourceGroups": ["qa:208"] },
+  { "question": "How can I serve Swami?", "expectedSourceGroups": ["qa:323", "discourse:728", "discourse:5594"] },
+  { "question": "Should we use an oil based lamp?", "expectedSourceGroups": ["discourse:1841", "discourse:533", "qa:144"] },
+  { "question": "What is the meaning of Jesus saying \"The light is in me\"?", "expectedSourceGroups": ["discourse:1199", "discourse:1322", "discourse:228"] },
+  { "question": "What is the capital of France?", "expectAbstention": true },
+  { "question": "Should I use an oil lamp to heat my house?", "expectAbstention": true },
+  { "question": "How do I bake a chocolate cake?", "expectAbstention": true },
+  { "question": "Who won the 2026 FIFA World Cup?", "expectAbstention": true },
+  { "question": "asdf qwer zxcv", "expectAbstention": true }
+]
