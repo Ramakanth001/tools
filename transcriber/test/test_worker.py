@@ -1,8 +1,10 @@
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 
 WORKER_PATH = Path(__file__).resolve().parents[1] / "python" / "transcriber_worker.py"
@@ -25,6 +27,12 @@ class FakeModel:
     def transcribe(self, file_path, **options):
         self.calls.append((file_path, options))
         return {"segments": [{"start": 0.0, "end": 2.25, "text": " hello   world "}]}
+
+
+class FakeQwenModel:
+    def transcribe(self, **_options):
+        timestamp = types.SimpleNamespace(text="quality result", start_time=0.5, end_time=2.5)
+        return [types.SimpleNamespace(text="quality result", time_stamps=types.SimpleNamespace(items=[timestamp]))]
 
 
 class WorkerTests(unittest.TestCase):
@@ -101,16 +109,55 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 worker.transcribe_media(model_name="unknown", language="auto", **kwargs)
             with self.assertRaises(ValueError):
+                worker.transcribe_media(model_name="large", language="auto", engine="qwen3-asr", **kwargs)
+            with self.assertRaises(ValueError):
                 worker.transcribe_media(model_name="small", language="English", **kwargs)
             worker._CANCELLED = True
             with self.assertRaises(worker.CancelledError):
                 worker.transcribe_media(model_name="small", language="en", **kwargs)
 
-    def test_choose_device_prefers_cuda_and_falls_back_to_cpu(self):
-        cuda = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+    def test_qwen_quality_engine_writes_aligned_segments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "media.wav"
+            input_path.write_bytes(b"media")
+
+            def extract(_input, output, _offset, _duration):
+                output.write_bytes(b"wav")
+
+            result = worker.transcribe_media(
+                input_path=input_path,
+                output_dir=root / "artifacts",
+                work_dir=root / "work",
+                model_name="qwen3-asr-1.7b",
+                language="en",
+                engine="qwen3-asr",
+                cache_dir=root / "cache",
+                duration_probe=lambda _path: 3.0,
+                chunk_extractor=extract,
+                torch_module=types.SimpleNamespace(cuda=FakeCuda()),
+                qwen_model_loader=lambda _device, _cache: FakeQwenModel(),
+            )
+
+            self.assertEqual(result["segments"], 1)
+            self.assertIn("00:00:00,500 --> 00:00:02,500", (root / "artifacts" / "transcript.srt").read_text())
+            self.assertEqual((root / "artifacts" / "transcript.txt").read_text(), "quality result")
+
+    def test_choose_device_prefers_the_gpu_with_most_free_memory_and_falls_back_to_cpu(self):
+        cuda = types.SimpleNamespace(cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 2,
+            mem_get_info=lambda index: [(8, 16), (12, 24)][index],
+        ))
         cpu = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False))
-        self.assertEqual(worker.choose_device(cuda), "cuda")
-        self.assertEqual(worker.choose_device(cpu), "cpu")
+        with mock.patch.dict(os.environ, {"TRANSCRIBER_DEVICE": "auto"}):
+            self.assertEqual(worker.choose_device(cuda), "cuda:1")
+            self.assertEqual(worker.choose_device(cpu), "cpu")
+
+    def test_choose_device_honors_manual_override(self):
+        cuda = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+        with mock.patch.dict(os.environ, {"TRANSCRIBER_DEVICE": "cuda:3"}):
+            self.assertEqual(worker.choose_device(cuda), "cuda:3")
 
 
 if __name__ == "__main__":
