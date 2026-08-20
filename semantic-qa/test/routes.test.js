@@ -35,7 +35,12 @@ async function withServer(callback, overrides = {}) {
     ...(overrides.ollama || {}),
   };
   const syncManager = { start: () => ({ id: 'job' }), get: () => null, cancel: () => null, subscribe: () => false, unsubscribe: () => {} };
-  registerSemanticQaRoutes(app, { basePath: '/api', deps: { database, ollama, syncManager } });
+  registerSemanticQaRoutes(app, { basePath: '/api', deps: {
+    database,
+    ollama,
+    syncManager,
+    ...(overrides.deepSummaryManager ? { deepSummaryManager: overrides.deepSummaryManager } : {}),
+  } });
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   try {
@@ -54,6 +59,21 @@ test('health and source connection endpoints expose the expected contract', asyn
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).connection.database, 'qa');
+}));
+
+test('Ollama hardware endpoint reports detected devices and actual model allocation', async () => withServer(async (baseUrl) => {
+  const response = await fetch(`${baseUrl}/api/ollama/hardware`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ollamaBaseUrl: 'http://127.0.0.1:11434', model: 'gemma3:4b' }),
+  });
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.hardware.gpuAvailable, true);
+  assert.equal(payload.hardware.runtime.processor, '100% GPU');
+}, {
+  ollama: {
+    getOllamaHardware: async () => ({ gpuAvailable: true, runtime: { processor: '100% GPU' }, host: { accelerators: [{ name: 'Test GPU' }] } }),
+  },
 }));
 
 test('search uses the corpus embedding format and ranks indexed answer passages', async () => {
@@ -446,4 +466,140 @@ test('weak searches never perform summary generation', async () => {
   });
   assert.equal(embeddingCalls, 1);
   assert.equal(generationCalls, 0);
+});
+
+test('conventional Search uses text RRF without calling the embedding model', async () => {
+  let embeddingCalls = 0;
+  let textQuery;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' },
+        question: 'light is in me', searchMode: 'search', topK: 5,
+        summary: { enabled: false, mode: 'off' },
+      }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.searchMode, 'search');
+    assert.equal(payload.retrieval, 'text-rrf');
+    assert.equal(payload.matches[0].sourceId, 'discourse:810:005');
+    assert.equal(payload.matches[0].matchedPassages[0].matchChannels.includes('exact passage'), true);
+  }, {
+    database: {
+      getIndexStatus: async () => ({
+        initialized: true, recordCount: 1,
+        corpus: {
+          embeddingModel: 'embeddinggemma', embeddingModelDigest: 'model-digest', embeddingDimension: 3,
+          embeddingFormatVersion: EMBEDDINGGEMMA_FORMAT, retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
+        },
+      }),
+      searchTextIndex: async (_connection, query) => {
+        textQuery = query;
+        return { hybrid: true, rows: [{
+          sourceId: 'discourse:810:005', sourceGroup: 'discourse:810', sourceOrder: 5,
+          question: 'The three statements of Jesus', answer: 'The Light is in Me means qualified monism.',
+          metadata: { source_type: 'discourse', chunk_count: 5 }, passageIndex: 0,
+          passageText: 'The Light is in Me means qualified monism.', passageStart: 0, passageEnd: 43,
+          searchScore: 0.72, lexicalScore: 0.4, trigramSimilarity: 0.8, matchChannels: ['exact passage', 'full text'],
+        }] };
+      },
+    },
+    ollama: { embedTexts: async () => { embeddingCalls += 1; return [[1, 0, 0]]; } },
+  });
+  assert.equal(textQuery, 'light is in me');
+  assert.equal(embeddingCalls, 0);
+});
+
+test('document catalog and viewer return a reconstructed highlighted discourse', async () => {
+  let listQuery;
+  await withServer(async (baseUrl) => {
+    const listResponse = await fetch(`${baseUrl}/api/documents/list`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ indexConnection: { host: 'db', user: 'writer', database: 'index' }, query: 'what is mula maya?', page: 1, pageSize: 50 }),
+    });
+    const list = await listResponse.json();
+    assert.equal(list.documents[0].sourceGroup, 'discourse:810');
+    assert.equal(list.documents[0].answerPreview, 'The Light is in Me means qualified monism.');
+    assert.equal(list.documents[0].matchKind, 'Exact answer match');
+    assert.equal(listQuery, 'what is mula maya?');
+
+    const documentResponse = await fetch(`${baseUrl}/api/documents/get`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' }, reference: 'discourse:810:002',
+        highlights: [{ sourceId: 'discourse:810:002', start: 0, end: 18, label: 'Evidence' }],
+      }),
+    });
+    const payload = await documentResponse.json();
+    assert.equal(documentResponse.status, 200);
+    assert.equal(payload.document.sourceGroup, 'discourse:810');
+    assert.equal(payload.document.text, 'First chunk.\n\nThe Light is in Me means qualified monism.');
+    assert.equal(payload.document.text.slice(payload.document.highlights[0].start, payload.document.highlights[0].end), 'The Light is in Me');
+  }, {
+    database: {
+      listDocuments: async (_connection, data) => {
+        listQuery = data.query;
+        return {
+          page: 1, pageSize: 50, total: 1,
+          documents: [{
+            sourceGroup: 'discourse:810', title: 'Jesus', chunkCount: 2,
+            answerPreview: 'The Light is in Me means qualified monism.', matchKind: 'Exact answer match',
+          }],
+        };
+      },
+      getDocumentRecords: async () => [
+        { sourceId: 'discourse:810:001', sourceGroup: 'discourse:810', sourceOrder: 1, question: 'Jesus', answer: 'First chunk.', metadata: { source_type: 'discourse' } },
+        { sourceId: 'discourse:810:002', sourceGroup: 'discourse:810', sourceOrder: 2, question: 'Jesus', answer: 'The Light is in Me means qualified monism.', metadata: { source_type: 'discourse' } },
+      ],
+    },
+  });
+});
+
+test('Deep Summary starts an asynchronous verified pooling job', async () => {
+  const started = [];
+  let exhaustiveCalls = 0;
+  const deepSummaryManager = {
+    start: (config) => { started.push(config); return { id: 'deep-1', status: 'queued', phase: 'queued', processed: 0, total: 0, percent: 0 }; },
+    get: () => ({ id: 'deep-1', status: 'running' }), cancel: () => ({ id: 'deep-1', status: 'running' }),
+    subscribe: () => true, unsubscribe: () => {},
+  };
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' }, question: 'What does the phrase mean?',
+        searchMode: 'semantic', threshold: 0.49,
+        summary: { enabled: false, mode: 'deep', model: 'gemma3:4b', hardwarePreference: 'gpu' },
+      }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.deepSummaryJob.id, 'deep-1');
+  }, {
+    database: {
+      getIndexStatus: async () => ({
+        initialized: true, recordCount: 1,
+        corpus: {
+          embeddingModel: 'embeddinggemma', embeddingModelDigest: 'model-digest', embeddingDimension: 3,
+          embeddingFormatVersion: EMBEDDINGGEMMA_FORMAT, retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
+        },
+      }),
+      searchAllPassageIndex: async () => {
+        exhaustiveCalls += 1;
+        return { hybrid: true, exhaustive: true, scannedPassages: 19777, rows: [asPassage({
+          sourceId: 'meaning', question: 'Meaning', answer: 'The passage explains the phrase.', similarity: 0.8, metadata: {},
+        })] };
+      },
+    },
+    deepSummaryManager,
+  });
+  assert.equal(started.length, 1);
+  assert.equal(exhaustiveCalls, 1);
+  assert.equal(started[0].matches[0].sourceId, 'meaning');
+  assert.deepEqual(started[0].retrievalCoverage, { exhaustive: true, scannedPassages: 19777 });
+  assert.equal(started[0].parallelRequests, 2);
+  assert.equal(started[0].requestTimeoutMs, 300000);
+  assert.equal(started[0].hardwarePreference, 'gpu');
 });
