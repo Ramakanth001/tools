@@ -1,6 +1,6 @@
-# Semantic Q&A: Technical Architecture and Internal Working
+# Search Engine: Technical Architecture and Internal Working
 
-This guide explains the `semantic-qa` tool for developers who are new to PostgreSQL, pgvector, Ollama, embeddings, and semantic search. It describes the implementation that is running in this workspace, including the imported `tblQA` and `tblDiscourse` corpus.
+This guide explains Search Engine (internal compatibility ID: `semantic-qa`) for developers who are new to PostgreSQL, pgvector, Ollama, embeddings, and semantic search. It describes the implementation that is running in this workspace, including the imported `tblQA` and `tblDiscourse` corpus.
 
 ## 1. The Short Version
 
@@ -504,8 +504,8 @@ sequenceDiagram
     API->>Ollama: Verify configured model digest
     API->>Ollama: Embed task-formatted user question
     Ollama-->>API: Query vector(768)
-    API->>PG: Answer-passage HNSW + passage GIN candidates
-    PG-->>API: Candidate passages joined to stored records
+    API->>PG: Score every answer passage + passage GIN recall
+    PG-->>API: Relevance-qualified passages joined to stored records
     API->>API: Pool passages and deduplicate explicit document chunks
     API->>API: Independently admit up to 15 relevant records
     API->>Ollama: Generate from accepted passages only
@@ -520,7 +520,7 @@ Step by step:
 2. It rejects stale formats or a configured Ollama model whose current digest differs from the indexed digest.
 3. Ollama embeds the new question using the query format recorded with that model and live corpus.
 4. The API rejects the query if the returned dimension differs from the indexed dimension.
-5. pgvector and PostgreSQL full-text search each oversample a bounded pool of answer passages. Broad OR lexical terms widen recall, but lexical rank cannot independently accept evidence.
+5. pgvector computes the query cosine against every indexed answer passage. PostgreSQL full-text matches widen recall, but lexical rank cannot independently accept evidence. The former bounded HNSW pool remains only as a compatibility fallback.
 6. Passage hits are pooled by `source_id`. The best passage cosine is primary; only additional semantically supporting passages provide a small bonus.
 7. Stored questions, titles, detailed-question context, metadata, and structured-Q&A type have zero weight in passage acceptance.
 8. When the question contains a quotation, exact occurrences of that quotation are preferred over passages containing similar words in a different order or relationship.
