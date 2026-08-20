@@ -1,0 +1,2 @@
+# Canonical pip entry point for the Transcriber tool.
+-r requirements-runtime.txt
