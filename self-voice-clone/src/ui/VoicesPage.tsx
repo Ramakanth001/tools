@@ -77,7 +77,7 @@ export default function VoicesPage() {
       <SectionCard title="What this page tells you" kicker="Quick note">
         <div className="helper">
           <strong>If the profile is visible, your upload step worked.</strong>
-          <div className="muted">For a real clone, also check that clone dataset and prompt are ready. VoxCPM2 uses the prompt audio plus exact prompt text for stable voice identity.</div>
+          <div className="muted">Dataset/prompt readiness means the profile can be tested; it does not certify the output. Generation now certifies each take with measured ASR and 16 kHz speaker embeddings before it is downloadable.</div>
         </div>
         <div className="helper">
           <strong>For true voice adoption:</strong>
