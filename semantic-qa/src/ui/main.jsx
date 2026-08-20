@@ -7,7 +7,7 @@ createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <div className="container">
       <div className="topbar">
-        <div className="brand"><div className="logo" aria-hidden="true" /><div><h1>semantic-qa</h1><div className="subtitle">Grounded retrieval from PostgreSQL Q&A records</div></div></div>
+        <div className="brand"><div className="logo" aria-hidden="true" /><div><h1>Search Engine</h1><div className="subtitle">Semantic and conventional search across grounded source records</div></div></div>
       </div>
       <SemanticQaTool runtime={STANDALONE_RUNTIME} />
     </div>
