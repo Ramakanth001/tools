@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     voxcpm_cfg_value: float = 2.0  # Upstream recommended CFG value.
     voxcpm_inference_timesteps: int = 10  # Upstream quickstart default.
     voxcpm_optimize: bool = False  # Stability first; avoid VoxCPM warm-up/compile path unless explicitly enabled.
-    voxcpm_enable_ultimate: bool = False  # Ultimate/Hi-Fi mode is quarantined until a prompt smoke test proves it does not leak.
+    voxcpm_enable_ultimate: bool = True  # Prefer audio + exact-transcript cloning; generated takes still have to pass prompt-leak, ASR, and speaker gates.
     synthesis_chunk_timeout_seconds: int = 900  # User-facing timeout guidance for long model calls.
     synthesis_single_chunk_timeout_seconds: int = 900  # Timeout applied to one isolated generated chunk.
     synthesis_resume_existing_chunks: bool = True  # Reuse already-rendered chunk WAVs when retrying a failed/partial job.
@@ -84,7 +84,10 @@ class Settings(BaseSettings):
     synthesis_preview_candidate_limit: int = 3  # Number of prompt/strategy candidates to try for preview selection.
     synthesis_final_candidate_limit: int = 2  # Number of prompt/strategy candidates to try for final selection.
     synthesis_candidate_max_wer: float = 0.45  # Threshold beyond which a candidate is considered poor text fidelity.
-    synthesis_similarity_hard_gate: bool = False  # Speaker embeddings rank candidates, but should not alone fail synthesis.
+    synthesis_similarity_hard_gate: bool = True  # Never publish a fluent generic TTS take as a clone when measured speaker embeddings disagree.
+    synthesis_min_speaker_similarity: float = 0.72  # SpeechBrain ECAPA threshold used for measured cross-content speaker verification.
+    synthesis_candidate_attempts: int = 3  # VoxCPM2 is stochastic; generate up to the upstream-recommended three takes and keep only a verified clone.
+    synthesis_identity_early_stop: float = 0.76  # Stop retrying once a take clears this measured speaker-similarity score and all other gates.
     synthesis_enable_chatterbox_bakeoff: bool = False  # Keep preview stable; only compare Chatterbox when explicitly enabled.
     synthesis_pause_paragraph_ms: int = 260  # Keep paragraph breath, but avoid audible chunk-joint gaps.
     synthesis_pause_sentence_ms: int = 120  # Short natural breath; generated audio often already contains sentence-final silence.
