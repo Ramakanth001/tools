@@ -53,7 +53,7 @@ class CandidateGatingTests(unittest.TestCase):
             self.assertTrue(any(reason.startswith("wer_above_threshold") for reason in gate.hard_reasons))
             self.assertTrue(any(reason.startswith("intelligibility_below_threshold") for reason in gate.hard_reasons))
 
-    def test_similarity_failure_is_soft_by_default_even_when_trusted(self):
+    def test_similarity_failure_is_hard_when_measured_and_trusted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             audio = Path(temp_dir) / "candidate.wav"
             _silent_wav(audio)
@@ -70,8 +70,8 @@ class CandidateGatingTests(unittest.TestCase):
             trusted = CandidateGateService().evaluate(**common_kwargs, similarity_trusted=True)
             untrusted = CandidateGateService().evaluate(**common_kwargs, similarity_trusted=False)
 
-            self.assertTrue(trusted.passed)
-            self.assertNotIn("trusted_similarity_failed", trusted.hard_reasons)
+            self.assertFalse(trusted.passed)
+            self.assertIn("trusted_similarity_failed", trusted.hard_reasons)
             self.assertTrue(untrusted.passed)
 
 
