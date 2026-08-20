@@ -14,8 +14,11 @@ const MODEL_OPTIONS = [
   ['base', 'Base — fast and compact'],
   ['small', 'Small — recommended local default'],
   ['medium', 'Medium — slower, higher accuracy'],
+  ['large', 'Large-v3 — best Whisper accuracy'],
   ['turbo', 'Turbo — fast large-model transcription'],
 ];
+
+const QWEN_MODEL = 'qwen3-asr-1.7b';
 
 const LANGUAGE_OPTIONS = [
   ['auto', 'Auto-detect'],
@@ -94,6 +97,10 @@ function statusClass(status) {
   return '';
 }
 
+function engineLabel(job) {
+  return job?.engine === 'qwen3-asr' ? 'Qwen3-ASR 1.7B' : `Whisper ${job?.model || ''}`.trim();
+}
+
 function Diagnostics({ report, loading, onRefresh }) {
   const checks = Object.entries(report?.checks || {});
   return (
@@ -111,7 +118,7 @@ function Diagnostics({ report, loading, onRefresh }) {
             <span className={`transcriber-dot ${check.ok ? 'ok' : 'error'}`} />
             <div>
               <strong>{name}</strong>
-              <div className="hint">{check.ok ? (check.version || check.path || 'Ready') : (check.error || 'Unavailable')}</div>
+              <div className="hint">{check.ok ? (check.version || check.path || check.name || 'Ready') : (check.error || 'Unavailable')}</div>
             </div>
           </div>
         )) : <div className="hint">Run diagnostics to verify Python, Whisper, FFmpeg, and FFprobe.</div>}
@@ -133,7 +140,10 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
   const [jobs, setJobs] = useState([]);
   const [currentJob, setCurrentJob] = useState(null);
   const [file, setFile] = useState(null);
+  const [operation, setOperation] = useState('transcribe');
+  const [engine, setEngine] = useState('whisper');
   const [model, setModel] = useState('small');
+  const [chunkMinutes, setChunkMinutes] = useState(10);
   const [language, setLanguage] = useState('auto');
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -141,6 +151,7 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
   const [preview, setPreview] = useState('');
   const fileInputRef = useRef(null);
   const eventSourceRef = useRef(null);
+  const logRef = useRef(null);
 
   const loadHealth = useCallback(async () => {
     setHealthBusy(true);
@@ -200,15 +211,26 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
     return () => eventSourceRef.current?.close();
   }, [loadHealth, loadJobs]);
 
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [currentJob?.logs?.length]);
+
   async function start() {
     if (!file) return setError('Choose an audio or video file first.');
+    const chunkSeconds = Math.round(Number(chunkMinutes) * 60);
+    if (operation === 'transcribe' && (!Number.isInteger(chunkSeconds) || chunkSeconds < 60 || chunkSeconds > 3600)) {
+      return setError('Choose a chunk length between 1 and 60 minutes.');
+    }
     setBusy(true);
     setError('');
     setPreview('');
     try {
       const body = new FormData();
       body.append('media', file);
+      body.append('operation', operation);
+      body.append('engine', engine);
       body.append('model', model);
+      body.append('chunkSeconds', String(chunkSeconds));
       body.append('language', language);
       const payload = await request(runtime, '/jobs', { method: 'POST', body });
       setCurrentJob(payload.job);
@@ -249,6 +271,7 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
 
   const progress = Math.max(0, Math.min(100, Number(currentJob?.progress?.percent) || 0));
   const running = ACTIVE_STATUSES.has(currentJob?.status);
+  const extractingAudio = operation === 'extract_audio';
 
   return (
     <div className="transcriber-tool">
@@ -299,9 +322,30 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
 
             <div className="transcriber-field-grid">
               <label>
+                <span>Task</span>
+                <select value={operation} onChange={(event) => setOperation(event.target.value)} disabled={running}>
+                  <option value="transcribe">Transcribe media</option>
+                  <option value="extract_audio">Extract audio from video (MP3)</option>
+                </select>
+              </label>
+              {operation === 'transcribe' ? <label>
+                <span>Engine</span>
+                <select value={engine} onChange={(event) => {
+                  const next = event.target.value;
+                  setEngine(next);
+                  setModel(next === 'qwen3-asr' ? QWEN_MODEL : 'large');
+                }} disabled={running}>
+                  <option value="whisper">Whisper — local, broad compatibility</option>
+                  <option value="qwen3-asr">Qwen3-ASR 1.7B — quality-first</option>
+                </select>
+              </label> : <div className="transcriber-extraction-note">Creates a high-quality MP3 from the first audio stream. No transcription model is loaded.</div>}
+            </div>
+
+            {operation === 'transcribe' ? <div className="transcriber-field-grid">
+              <label>
                 <span>Model</span>
                 <select value={model} onChange={(event) => setModel(event.target.value)} disabled={running}>
-                  {MODEL_OPTIONS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                  {(engine === 'qwen3-asr' ? [[QWEN_MODEL, 'Qwen3-ASR 1.7B — highest quality, high memory']] : MODEL_OPTIONS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                 </select>
               </label>
               <label>
@@ -310,11 +354,24 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
                   {LANGUAGE_OPTIONS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                 </select>
               </label>
-            </div>
+              <label>
+                <span>Chunk length (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  step="1"
+                  value={chunkMinutes}
+                  onChange={(event) => setChunkMinutes(event.target.value)}
+                  disabled={running}
+                />
+                <span className="hint">10 is a balanced default; shorter lowers memory use.</span>
+              </label>
+            </div> : null}
 
             <div className="toolbar">
               <button className="btn primary" type="button" onClick={start} disabled={busy || !file || healthBusy || health?.ready === false}>
-                {busy ? 'Transcribing…' : 'Start transcription'}
+                {busy ? (extractingAudio ? 'Extracting audio…' : 'Transcribing…') : (extractingAudio ? 'Extract audio' : 'Start transcription')}
               </button>
               {running ? <button className="btn danger" type="button" onClick={cancel}>Cancel</button> : null}
             </div>
@@ -322,7 +379,7 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
             {currentJob ? (
               <div className="transcriber-current">
                 <div className="transcriber-job-heading">
-                  <div><strong>{currentJob.originalName}</strong><div className="hint">{currentJob.model} · {currentJob.language === 'auto' ? 'auto language' : currentJob.language}</div></div>
+                  <div><strong>{currentJob.originalName}</strong><div className="hint">{currentJob.operation === 'extract_audio' ? 'MP3 audio extraction' : `${engineLabel(currentJob)} · ${currentJob.language === 'auto' ? 'auto language' : currentJob.language} · ${Math.round((currentJob.chunkSeconds || 600) / 60)}m chunks`}</div></div>
                   <span className={`transcriber-status ${statusClass(currentJob.status)}`}>{currentJob.status}</span>
                 </div>
                 <div className="transcriber-progress" aria-label={`${progress}% complete`}>
@@ -335,14 +392,15 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
                 {currentJob.error ? <div className="transcriber-inline-error">{currentJob.error}</div> : null}
                 {currentJob.status === 'done' ? (
                   <div className="toolbar">
-                    <a className="btn primary" href={artifactUrl(currentJob, 'txt')}>Download TXT</a>
-                    <a className="btn" href={artifactUrl(currentJob, 'srt')}>Download SRT</a>
-                    <span className="hint">{formatDuration(currentJob.durationSeconds)} · {currentJob.segments || 0} segments · {currentJob.device}</span>
+                    {currentJob.artifacts?.audio ? <a className="btn primary" href={artifactUrl(currentJob, 'audio')}>Download MP3</a> : null}
+                    {currentJob.artifacts?.txt ? <a className="btn primary" href={artifactUrl(currentJob, 'txt')}>Download TXT</a> : null}
+                    {currentJob.artifacts?.srt ? <a className="btn" href={artifactUrl(currentJob, 'srt')}>Download SRT</a> : null}
+                    <span className="hint">{formatDuration(currentJob.durationSeconds)}{currentJob.operation === 'transcribe' ? ` · ${currentJob.segments || 0} segments · ${currentJob.device}` : ''}</span>
                   </div>
                 ) : null}
-                <details className="transcriber-logs">
+                <details className="transcriber-logs" open={running}>
                   <summary>Job log ({currentJob.logs?.length || 0})</summary>
-                  <pre>{(currentJob.logs || []).join('\n') || 'Waiting for worker output…'}</pre>
+                  <pre ref={logRef}>{(currentJob.logs || []).join('\n') || 'Waiting for worker output…'}</pre>
                 </details>
               </div>
             ) : null}
@@ -381,12 +439,13 @@ export default function TranscriberTool({ runtime: runtimeProp }) {
                     } catch (jobError) { setError(jobError.message); }
                   }}>
                     <strong>{job.originalName}</strong>
-                    <span className="hint">{new Date(job.createdAt).toLocaleString()} · {formatBytes(job.mediaBytes)} · {job.model}</span>
+                    <span className="hint">{new Date(job.createdAt).toLocaleString()} · {formatBytes(job.mediaBytes)} · {job.operation === 'extract_audio' ? 'MP3 extraction' : engineLabel(job)}</span>
                   </button>
                   <span className={`transcriber-status ${statusClass(job.status)}`}>{job.status}</span>
                   <div className="toolbar">
                     {job.artifacts?.txt ? <a className="btn" href={artifactUrl(job, 'txt')}>TXT</a> : null}
                     {job.artifacts?.srt ? <a className="btn" href={artifactUrl(job, 'srt')}>SRT</a> : null}
+                    {job.artifacts?.audio ? <a className="btn" href={artifactUrl(job, 'audio')}>MP3</a> : null}
                     {!ACTIVE_STATUSES.has(job.status) ? <button className="btn danger" type="button" onClick={() => remove(job)}>Delete</button> : null}
                   </div>
                 </div>
