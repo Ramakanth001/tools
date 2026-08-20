@@ -31,4 +31,12 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(UNIVERSAL_QA_SETTINGS.summaryEnabled, true);
   assert.equal(UNIVERSAL_QA_SETTINGS.summaryMaxRecords, 15);
   assert.equal(UNIVERSAL_QA_SETTINGS.summaryMaxLines, 3);
+  assert.equal(UNIVERSAL_QA_SETTINGS.summaryHardwarePreference, 'auto');
+  assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryParallelRequests, 2);
+  assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryTimeoutSeconds, 300);
+
+  const boundedDeepSettings = mergeSettings({ deepSummaryParallelRequests: 99, deepSummaryTimeoutSeconds: 10 });
+  assert.equal(boundedDeepSettings.deepSummaryParallelRequests, 4);
+  assert.equal(boundedDeepSettings.deepSummaryTimeoutSeconds, 60);
+  assert.equal(mergeSettings({ summaryHardwarePreference: 'invalid' }).summaryHardwarePreference, 'auto');
 });
