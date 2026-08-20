@@ -2,8 +2,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const toolDir = path.resolve(__dirname, '..');
-const apiDir = path.join(toolDir, 'vclone', 'apps', 'api');
 const venvDir = path.join(toolDir, '.venv');
+const requirements = path.join(toolDir, 'requirements.txt');
 
 function run(command, args, cwd = toolDir) {
   const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
@@ -31,6 +31,6 @@ const venvPython = process.platform === 'win32'
   : path.join(venvDir, 'bin', 'python');
 
 if (!run(venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip'])) process.exit(1);
-if (!run(venvPython, ['-m', 'pip', 'install', '-e', '.[dev,quality,asr,speaker,voxcpm,chatterbox]'], apiDir)) process.exit(1);
+if (!run(venvPython, ['-m', 'pip', 'install', '-r', requirements])) process.exit(1);
 
 console.log(`Self Voice Clone Python environment is ready: ${venvPython}`);
