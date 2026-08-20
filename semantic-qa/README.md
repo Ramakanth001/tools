@@ -1,6 +1,6 @@
-# semantic-qa
+# Search Engine
 
-`semantic-qa` is a retrieval-first question-answer search tool. It divides every stored answer into bounded passages, embeds those passages with a local Ollama embedding model, and stores the vectors plus an exact text snapshot in a separate pgvector database. Search returns the best stored answer and can use a second local Ollama model to synthesize a short, cited answer from independently accepted passages.
+Search Engine (internally still identified as `semantic-qa` for route and settings compatibility) is a retrieval-first question-answer tool. It divides every stored answer into bounded passages, embeds those passages with a local Ollama embedding model, and stores the vectors plus an exact text snapshot in a separate PostgreSQL database. It offers meaning-first Semantic Search, conventional text Search, grounded summaries, and complete source-document viewing.
 
 The tool includes a 20-record sample corpus and local-demo preset. It still requires running PostgreSQL and Ollama services. The **Setup** screen checks each dependency and shows what is missing.
 
@@ -13,6 +13,7 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 - Local Ollama embeddings through `POST /api/embed`
 - pgvector storage with an HNSW cosine index
 - Passage-level semantic retrieval across answer text, with PostgreSQL full-text used only to widen recall
+- Conventional Search that fuses exact phrases, PostgreSQL full-text rank, and trigram word-distance rank with reciprocal-rank fusion
 - Zero question/title weight in passage acceptance, plus document-group deduplication
 - Exact quoted-phrase identity checks, so nearby statements with reversed relationships do not outrank the requested quotation
 - Atomic full rebuilds and content-hash-based incremental synchronization
@@ -20,10 +21,14 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 - Verbatim stored answers with source IDs and metadata
 - Meaning-based evidence pooling across as many as 15 independently relevant records
 - Grounded generative summaries that may paraphrase and pool cited evidence across relevant records
+- Verified Deep Summary jobs that score the complete answer-passage corpus, validate relevant expansions, hierarchically pool grounded claims, and produce publishable cited prose
+- A searchable catalog of all synchronized discourses
+- Clickable source citations that reconstruct the full ordered discourse and highlight the cited answer passage
+- Deep Summary export to Markdown and browser Print / Save PDF
 - Configurable result count and clear-match threshold
 - Standalone and shared-workspace operation
 
-The summary model never sees retrieval neighbors that failed the clear-match threshold. It receives only accepted answer passages, treats them as quoted data, and must return citations to those passages. If local summary generation fails, the accepted stored answer remains available.
+Standard Summary never sees retrieval neighbors that failed the clear-match threshold. Deep Summary may inspect those neighbors, but semantic neighbors outside the existing gate and every conventional-search candidate must pass an independent answerability verifier before claim extraction. Both modes treat evidence as quoted data and require resolvable citations. If local summary generation fails, stored results remain available.
 
 ## Prerequisites
 
@@ -101,6 +106,7 @@ Use a separate PostgreSQL database for the index. It may live in the same Postgr
 The index account needs permission to:
 
 - enable the `vector` extension;
+- enable the `pg_trgm` extension;
 - create the `semantic_qa` schema;
 - create, alter, and drop tool-owned staging/index tables.
 
@@ -108,6 +114,7 @@ If pgvector is already installed at the server level, the UI's **Initialize** ac
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
 If PostgreSQL reports that the extension is unavailable, install pgvector on the database server first. A convenient isolated development option is the official pgvector PostgreSQL image:
@@ -270,6 +277,11 @@ Passwords and complete connection strings remain in browser memory only. They ar
 
 ## Retrieval Behavior
 
+The Search screen has two independent retrieval modes:
+
+- **Semantic Search** compares the meaning and intent of the user question with every indexed answer passage. Stored questions and titles do not contribute to semantic acceptance.
+- **Search** performs conventional exact-phrase, full-text, and typo-tolerant trigram retrieval over answer passages and titles. Weighted reciprocal-rank fusion combines the independent ranks; exact answer passages receive the strongest weight. It does not call the embedding model.
+
 With EmbeddingGemma, each bounded answer passage is embedded using the model's asymmetric document format without the stored question/title:
 
 ```text
@@ -282,11 +294,15 @@ The user question is embedded as:
 task: question answering | query: <user question>
 ```
 
-Retrieval v4 searches the answer-passage HNSW index directly and unions it with bounded full-text passage candidates for recall. Acceptance is driven by answer-passage cosine meaning; lexical rank, word overlap, the stored question, and the title all have zero acceptance weight. Only additional semantically supporting passages can add a small bonus. Results are pooled back to their stored source records, and explicit multi-chunk documents are deduplicated.
+Retrieval v4 scores every indexed answer passage for each Semantic Search and unions relevance-qualified cosine results with full-text passage matches for recall. Acceptance is driven by answer-passage cosine meaning; lexical rank, word overlap, the stored question, and the title all have zero acceptance weight. Only additional semantically supporting passages can add a small bonus. Results are pooled back to their stored source records, and explicit multi-chunk documents are deduplicated. The HNSW path remains as a compatibility fallback when the exhaustive scorer is unavailable.
 
 The default clear-match threshold is `0.60`; the universal preset uses `0.49`. Final ordering and clear-match status use the passage relevance score. The API exposes at most one `acceptedMatch`; the UI presents only that record as the best stored source.
 
-When **Synthesized grounded answer** is enabled, search internally considers up to 15 passage-ranked records independently. A record may enter `relevantMatches` only when it passes the same clear-match threshold and a dense-semantic floor. Only indexed passages from those accepted records are sent to the local summary model; rejected neighbors, stored questions, titles, metadata, and source context are excluded.
+With **Standard Summary**, search internally considers up to 15 passage-ranked records independently. In Semantic Search, a record may enter `relevantMatches` only when it passes the same clear-match threshold and a dense-semantic floor. Only indexed passages from accepted records are sent to the local summary model; rejected neighbors, stored questions, titles, metadata, and source context are excluded.
+
+With **Deep Summary**, semantic mode performs an exact corpus-wide scoring pass over every indexed answer passage instead of stopping at an HNSW candidate cap. Existing threshold-passing semantic evidence remains governed by the same “show relevant only” gate. Lower-scoring but plausible semantic records are separately validated against the exact requested relationship before they can be used. Accepted passages become individually cited claims; large claim sets are hierarchically pooled without dropping their original evidence mappings. The final writer produces one connected, publishable explanation in coherent paragraphs, and the UI places the complete evidence appendix after the prose.
+
+Clicking any result source or evidence citation opens the original discourse reconstructed from every available ordered chunk. Importer overlap is removed at chunk boundaries and the cited chunk-relative offsets are translated into highlights in the reconstructed document. The **Discourses** tab lists all synchronized discourse groups independently of retrieval.
 
 The model may paraphrase and combine the evidence, but every returned citation is validated against an exact passage from an accepted stored answer. It must also state whether the evidence answers the requested relationship or purpose; a related passage about a different use is rejected through the same “show relevant only” result. “How” answers receive an additional adequacy check so a description of the problem cannot masquerade as guidance. If no passage passes semantic admission—or generation fails—the accepted stored answer remains available without a summary.
 
@@ -316,11 +332,16 @@ Shared-host base path: `/api/tools/semantic-qa`
 | `POST` | `/ollama/test` | Test the configured embedding model |
 | `POST` | `/index/initialize` | Create the extension/schema/index objects |
 | `POST` | `/index/status` | Read corpus and recent sync status |
+| `POST` | `/documents/list` | Page and filter all synchronized discourses |
+| `POST` | `/documents/get` | Reconstruct a complete source document and map evidence highlights |
 | `POST` | `/sync` | Start an incremental sync or full rebuild |
 | `GET` | `/sync/:jobId` | Read an in-memory job status |
 | `GET` | `/sync/:jobId/events` | Stream job progress with SSE |
 | `POST` | `/sync/:jobId/cancel` | Request cancellation |
-| `POST` | `/search` | Embed a question, retrieve answer passages, pool source records, and optionally synthesize a grounded answer |
+| `POST` | `/search` | Run semantic or conventional retrieval and optionally start Standard or Deep Summary |
+| `GET` | `/deep-summary/:jobId` | Read a Deep Summary job and final report |
+| `GET` | `/deep-summary/:jobId/events` | Stream Deep Summary progress with SSE |
+| `POST` | `/deep-summary/:jobId/cancel` | Request Deep Summary cancellation |
 
 All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection.
 
@@ -333,6 +354,7 @@ All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection
 | PostgreSQL `connection refused` or `no response` | Start the database server or correct its host/port. Installing `psql` alone does not start PostgreSQL. |
 | `server does not support SSL` | Choose SSL mode `disable` for a local database. |
 | `extension "vector" is not available` | Install pgvector on the index database server, then retry Initialize. |
+| `extension "pg_trgm" is not available` | Install PostgreSQL contrib extensions on the index server, then retry Initialize. |
 | `permission denied to create extension/schema` | Use an index account with setup privileges or have an administrator enable pgvector and create the schema. |
 | `Source ID column must be unique` | Select a real unique/primary-key column or expose a database view with a stable unique ID. |
 | Empty question/answer errors | Fix the source rows; incomplete records are not silently skipped. |
@@ -364,5 +386,5 @@ export SEMANTIC_QA_TEST_MODEL='embeddinggemma' # optional
 - One unique ID column rather than composite IDs
 - Manual full/incremental synchronization
 - Loopback Ollama only
-- No conversational memory or generative answer composition
-- Running sync jobs are tracked in memory; persisted run metadata remains in the index database
+- No conversational memory
+- Running sync and Deep Summary jobs are tracked in memory; persisted sync metadata remains in the index database
