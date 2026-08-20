@@ -138,8 +138,13 @@ class AudioSegmenterService:
                 )
             segment = item["segment"]
             speech_analysis = item["speech_analysis"]
-            start = max(0.0, (segment.start_ms / 1000.0) - 0.08)
-            end = min(duration_seconds or (segment.end_ms / 1000.0), (segment.end_ms / 1000.0) + 0.12)
+            detected_start = float(speech_analysis.get("detected_start_seconds") or (segment.start_ms / 1000.0))
+            detected_end = float(speech_analysis.get("detected_end_seconds") or (segment.end_ms / 1000.0))
+            # Use the speech bounds we already measured instead of extracting the
+            # full subtitle-display window. A small breath margin preserves natural
+            # attacks/releases without feeding seconds of silence into the clone.
+            start = max(0.0, detected_start - 0.08)
+            end = min(duration_seconds or detected_end + 0.12, detected_end + 0.12)
             expected_duration = max(0.0, end - start)
             output = work_dir / f"segment_{idx:04d}.wav"
             command = [
