@@ -209,6 +209,23 @@ test('an explicit quoted phrase excludes semantically nearby statements with dif
   assert.deepEqual(result.relevantMatches.map((item) => item.sourceId), ['exact']);
 });
 
+test('an unquoted saying phrase excludes a nearby statement with reversed word order', async () => {
+  let generationEvidence;
+  const exact = 'The Light is in Me means the intermediate stage of qualified monism.';
+  const nearby = 'I am the Light means complete monism.';
+  const result = await buildSemanticSummary({
+    question: 'What is the meaning of Jesus saying The light is in me?',
+    matches: [
+      { sourceId: 'nearby', answer: nearby, relevanceScore: 0.80, similarity: 0.80, matchedPassages: [{ text: nearby, start: 0, end: nearby.length, semanticSimilarity: 0.80 }] },
+      { sourceId: 'exact', answer: exact, relevanceScore: 0.70, similarity: 0.70, matchedPassages: [{ text: exact, start: 0, end: exact.length, semanticSimilarity: 0.70 }] },
+    ],
+    threshold: 0.49,
+    generateAnswer: async ({ evidence }) => { generationEvidence = evidence; return { answer: 'It means qualified monism.', evidenceNumbers: [1] }; },
+  });
+  assert.equal(result.summary.status, 'ready');
+  assert.deepEqual(generationEvidence.map((item) => item.sourceId), ['exact']);
+});
+
 test('quoted synthesis prefers a direct same-sentence definition over an ambiguous mention', async () => {
   let generationEvidence;
   const direct = 'The Light is in Me (qualified monism between dualism and monism).';
