@@ -94,10 +94,20 @@ function significantTokens(value) {
 
 function quotedPhrases(value) {
   const phrases = [];
+  const add = (candidate, minimumWords = 1) => {
+    const phrase = normalizedComparableText(candidate)
+      .replace(/^[\s"'‘’“”:,-]+|[\s"'‘’“”?.!,;:-]+$/gu, '')
+      .toLocaleLowerCase();
+    const words = phrase.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+    if (phrase && words >= minimumWords && words <= 15 && !phrases.includes(phrase)) phrases.push(phrase);
+  };
   const expression = /"([^"\n]{3,})"|“([^”\n]{3,})”|'([^'\n]{3,})'|‘([^’\n]{3,})’/gu;
   for (const match of String(value || '').matchAll(expression)) {
-    const phrase = normalizedComparableText(match.slice(1).find(Boolean)).toLocaleLowerCase();
-    if (phrase && !phrases.includes(phrase)) phrases.push(phrase);
+    add(match.slice(1).find(Boolean));
+  }
+  const raw = normalizedComparableText(value);
+  for (const match of raw.matchAll(/\b(?:saying|said|phrase|statement|words)\b(?:\s+(?:that|of))?\s+(.+)$/giu)) {
+    add(match[1], 3);
   }
   return phrases;
 }
@@ -307,6 +317,57 @@ function rerankPassageMatches(rows, query, limit = 5) {
   return sorted.slice(0, Math.max(1, Number(limit) || 5));
 }
 
+function rerankTextMatches(rows, limit = 5) {
+  const records = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = String(row.sourceId);
+    if (!records.has(key)) records.set(key, []);
+    records.get(key).push(row);
+  }
+  const ranked = [];
+  for (const sourceRows of records.values()) {
+    const passages = sourceRows.map((row) => ({
+      sourceId: row.sourceId,
+      passageIndex: Number(row.passageIndex),
+      text: row.passageText,
+      start: Number(row.passageStart),
+      end: Number(row.passageEnd),
+      searchScore: Math.max(0, Math.min(1, Number(row.searchScore) || 0)),
+      semanticSimilarity: Math.max(0, Math.min(1, Number(row.searchScore) || 0)),
+      lexicalScore: Number(row.lexicalScore) || 0,
+      trigramSimilarity: Number(row.trigramSimilarity) || 0,
+      matchChannels: Array.isArray(row.matchChannels) ? row.matchChannels : [],
+    })).sort((left, right) => (
+      right.searchScore - left.searchScore ||
+      right.lexicalScore - left.lexicalScore ||
+      right.trigramSimilarity - left.trigramSimilarity ||
+      left.passageIndex - right.passageIndex
+    ));
+    if (!passages.length) continue;
+    const best = passages[0];
+    const representative = sourceRows.find((row) => Number(row.passageIndex) === best.passageIndex) || sourceRows[0];
+    ranked.push({
+      ...representative,
+      similarity: best.searchScore,
+      relevanceScore: best.searchScore,
+      searchScore: best.searchScore,
+      matchedPassages: passages.slice(0, 5),
+      matchChannels: [...new Set(passages.flatMap((passage) => passage.matchChannels))],
+      retrievalMode: 'search',
+      rankingSignals: { algorithm: 'reciprocal-rank-fusion', semanticWeight: 0 },
+    });
+  }
+  const groups = new Map();
+  for (const row of ranked) {
+    const key = isDocumentChunk(row) ? `document:${String(row.sourceGroup)}` : `record:${String(row.sourceId)}`;
+    const current = groups.get(key);
+    if (!current || row.relevanceScore > current.relevanceScore) groups.set(key, row);
+  }
+  return [...groups.values()]
+    .sort((left, right) => right.relevanceScore - left.relevanceScore || String(left.sourceId).localeCompare(String(right.sourceId)))
+    .slice(0, Math.max(1, Number(limit) || 5));
+}
+
 function contentHash(record) {
   const stable = {
     sourceId: String(record.sourceId),
@@ -376,8 +437,10 @@ module.exports = {
   buildPassageEmbeddingText,
   buildQueryEmbeddingText,
   buildLexicalQuery,
+  extractRequestedPhrases: quotedPhrases,
   rerankMatches,
   rerankPassageMatches,
+  rerankTextMatches,
   scoreCandidate,
   contentHash,
   toVectorLiteral,
