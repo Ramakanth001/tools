@@ -2,6 +2,7 @@ import PgBackupTool from '../../pg-backup/src/ui/PgBackupTool.jsx';
 import MysqlTool from '../../mysql-tool/src/ui/MysqlTool.jsx';
 import MysqlPgMigrateTool from '../../mysql-pg-migrate/src/ui/main.jsx';
 import SemanticQaTool from '../../semantic-qa/src/ui/SemanticQaTool.jsx';
+import GptTool from '../../gpt/src/ui/GptTool.jsx';
 import TranscriberTool from '../../transcriber/src/ui/TranscriberTool.jsx';
 import SelfVoiceCloneTool from '../../self-voice-clone/src/ui/SelfVoiceCloneTool.tsx';
 
@@ -53,8 +54,8 @@ export const TOOLS = [
   },
   {
     id: 'semantic-qa',
-    name: 'semantic-qa',
-    description: 'Grounded semantic retrieval across an existing PostgreSQL Q&A corpus.',
+    name: 'Search Engine',
+    description: 'Semantic and conventional search with grounded summaries and complete source documents.',
     path: '/tools/semantic-qa',
     logsPath: '/tools/semantic-qa/logs',
     component: SemanticQaTool,
@@ -64,6 +65,19 @@ export const TOOLS = [
       homePath: '/tools/semantic-qa',
       logsPath: '/tools/semantic-qa/logs',
       storagePrefix: 'tools.semantic-qa',
+    },
+  },
+  {
+    id: 'gpt',
+    name: 'GPT',
+    description: 'A private conversational researcher grounded exclusively in the local spiritual corpus.',
+    path: '/tools/gpt',
+    component: GptTool,
+    runtime: {
+      toolId: 'gpt',
+      apiBasePath: '/api/tools/gpt',
+      homePath: '/tools/gpt',
+      storagePrefix: 'tools.gpt',
     },
   },
   {
