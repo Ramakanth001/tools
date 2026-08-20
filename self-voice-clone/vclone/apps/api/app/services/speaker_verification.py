@@ -22,6 +22,7 @@ class SpeakerVerificationReport:
 class SpeakerVerificationService:
     _classifier_cache: dict[str, Any] = {}
     _speechbrain_unavailable_reason: str | None = None
+    embedding_sample_rate_hz = 16_000
 
     def __init__(self, threshold: float = 0.72) -> None:
         self.threshold = threshold
@@ -77,7 +78,11 @@ class SpeakerVerificationService:
         import torchaudio
 
         waveform, sample_rate = torchaudio.load(audio_path)
-        target_rate = getattr(classifier, "sample_rate", sample_rate)
+        # SpeechBrain's spkrec-ecapa-voxceleb model is a 16 kHz model, but the
+        # EncoderClassifier object does not expose a sample_rate attribute.
+        # Falling back to the input rate made 16/24/48 kHz comparisons invalid
+        # and allowed generic-but-fluent TTS through the clone quality gate.
+        target_rate = self.embedding_sample_rate_hz
         if sample_rate != target_rate:
             waveform = torchaudio.functional.resample(waveform, sample_rate, target_rate)
         if waveform.shape[0] > 1:
