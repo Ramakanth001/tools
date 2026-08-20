@@ -56,8 +56,8 @@ class EngineRegistry:
             "secondary_engine": secondary["name"],
             "legacy_fallback_engine": legacy_preview["name"] if legacy_preview["runtime"]["available"] else legacy_final["name"],
             "native_distribution_master_available": bool(resolved.supports_native_distribution_master and resolved.runtime_status()["available"]),
-            "final_delivery_warning": "Voice identity quality now depends on the curated clone profile and selected clone engine. Mastering cannot repair a bad clone.",
-            "clone_pipeline": "VoxCPM2 primary, Chatterbox fallback, XTTS legacy only.",
+            "final_delivery_warning": "Every published chunk must pass measured ASR, prompt-leak, and 16 kHz speaker-identity gates. Mastering cannot repair a bad clone.",
+            "clone_pipeline": "VoxCPM2 reference+transcript cloning with up to three verified takes; Chatterbox bakeoff/fallback; XTTS legacy only.",
             "true_voice_adoption_path": "Export curated dataset, fine-tune F5-TTS/GPT-SoVITS externally, import checkpoint, then benchmark against VoxCPM2.",
         }
 
