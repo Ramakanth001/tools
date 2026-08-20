@@ -24,10 +24,19 @@ function normalizeEvidenceText(value) {
 
 function extractQuotedPhrases(value) {
   const phrases = [];
+  const add = (candidate, minimumWords = 1) => {
+    const phrase = normalizeEvidenceText(candidate)
+      .replace(/^[\s"'‘’“”:,-]+|[\s"'‘’“”?.!,;:-]+$/gu, '');
+    const words = phrase.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+    if (phrase && words >= minimumWords && words <= 15 && !phrases.includes(phrase)) phrases.push(phrase);
+  };
   const expression = /"([^"\n]{3,})"|“([^”\n]{3,})”|'([^'\n]{3,})'|‘([^’\n]{3,})’/gu;
   for (const match of String(value || '').matchAll(expression)) {
-    const phrase = normalizeEvidenceText(match.slice(1).find(Boolean));
-    if (phrase && !phrases.includes(phrase)) phrases.push(phrase);
+    add(match.slice(1).find(Boolean));
+  }
+  const raw = normalizeEvidenceText(value);
+  for (const match of raw.matchAll(/\b(?:saying|said|phrase|statement|words)\b(?:\s+(?:that|of))?\s+(.+)$/giu)) {
+    add(match[1], 3);
   }
   return phrases;
 }
@@ -359,6 +368,7 @@ async function buildSemanticSummary({
   maxLines = DEFAULT_MAX_LINES,
   baseUrl,
   model,
+  hardwarePreference = 'auto',
   generateAnswer,
 }) {
   const relevant = filterRelevantMatches(matches, threshold, { maxRecords, question });
@@ -406,6 +416,8 @@ async function buildSemanticSummary({
       sourceOrder: candidate.sourceOrder,
       question: candidate.question,
       text: candidate.text,
+      start: candidate.start,
+      end: candidate.end,
       semanticSimilarity: candidate.semanticSimilarity,
       recordRelevance: candidate.recordRelevance,
       relevanceRank: candidate.relevanceRank,
@@ -431,6 +443,7 @@ async function buildSemanticSummary({
     question,
     evidence: candidateEvidence,
     maxSentences: maxLines,
+    hardwarePreference,
   });
   if (generated.answerable === false) {
     return {
