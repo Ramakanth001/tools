@@ -20,6 +20,20 @@ function formatDuration(seconds?: number | null): string {
   return `${minutes}m ${remainder}s`;
 }
 
+function summarizeCloneIdentity(download: any) {
+  const selections = Array.isArray(download?.candidate_selections) ? download.candidate_selections : [];
+  const measured = selections.filter((item: any) => item?.similarity?.provider === "speechbrain_ecapa");
+  const scores = measured
+    .map((item: any) => Number(item?.similarity?.similarity_score))
+    .filter((value: number) => Number.isFinite(value));
+  return {
+    verified: selections.length > 0 && selections.every((item: any) => item?.identity_verified === true),
+    score: scores.length ? Math.min(...scores) : null,
+    attempts: selections.reduce((total: number, item: any) => total + Number(item?.attempt_count || 0), 0),
+    provider: measured.length ? "SpeechBrain ECAPA" : "unavailable",
+  };
+}
+
 export default function SynthesisPage() {
   const [job, setJob] = useState<any>(null);
   const [download, setDownload] = useState<any>(null);
@@ -61,12 +75,14 @@ export default function SynthesisPage() {
     getSystemCapabilities().then(setCapabilities).catch(() => setCapabilities(null));
   }, []);
 
+  const cloneIdentity = summarizeCloneIdentity(download);
+
   return (
     <div className="grid two-col">
       <SectionCard title="Generate speech" kicker="Step 3">
         <div className="page-header">
           <h1>Turn text into output</h1>
-          <p className="muted">Start with Preview mode for a reliable first voice test. The backend now prefers VoxCPM2 from your curated prompt bundle, with Chatterbox as fallback.</p>
+          <p className="muted">Start with Preview mode for a verified voice test. The backend uses VoxCPM2 reference audio plus its transcript, generates up to three takes, and rejects fluent speech that does not match the enrolled speaker.</p>
         </div>
         <p className="muted">Final/master mode exports a mastered delivery file. Derived stereo/high-rate packaging is reported honestly, but no longer blocks normal personal renders.</p>
         <p className="muted">If VoxCPM2/Chatterbox dependencies are missing, generation fails clearly instead of silently returning another bad XTTS clone.</p>
@@ -164,7 +180,7 @@ export default function SynthesisPage() {
         </div>
         <div className="helper" style={{ marginTop: 16 }}>
           <strong>Voice diagnostics</strong>
-          <div className="muted">Optional: run smoke/mock tests against prompt candidates. This can be slow on CPU and is no longer required before normal synthesis.</div>
+          <div className="muted">Optional: compare prompt candidates before a long render. Normal synthesis now performs its own mandatory ASR and speaker-identity verification.</div>
           <div className="actions" style={{ marginTop: 12 }}>
             <button
               type="button"
@@ -246,6 +262,9 @@ export default function SynthesisPage() {
                     <div className="helper" key={`${item.label || "candidate"}-${index}`}>
                       <strong>{item.passed ? "✓" : "✕"} {String(item.label || `Candidate ${index + 1}`)}</strong>
                       <div className="muted">Engine: {String(item.engine_name || "unknown")} • Mode: {String(item.clone_mode || "unknown")}</div>
+                      {item.similarity?.similarity_score != null ? (
+                        <div className="muted">Speaker match: {(Number(item.similarity.similarity_score) * 100).toFixed(1)}% ({String(item.similarity.provider || "unknown")})</div>
+                      ) : null}
                       {item.error ? <div className="muted">Error: {String(item.error)}</div> : null}
                       {item.audio_url ? <audio controls src={String(item.audio_url)} style={{ width: "100%", marginTop: 8 }} /> : null}
                     </div>
@@ -301,8 +320,16 @@ export default function SynthesisPage() {
           ) : null}
           {download ? (
             <div className="result-box">
-              <strong>{download.partial_output ? "Partial audio ready" : "Audio ready"}</strong>
+              <strong>{cloneIdentity.verified ? "Verified voice clone ready" : download.partial_output ? "Partial audio ready" : "Audio ready"}</strong>
               <div className="muted">{download.asset.format.toUpperCase()} • {download.asset.sample_rate_hz} Hz • {download.asset.channels} channel(s) • {(download.asset.duration_ms / 1000).toFixed(2)}s</div>
+              {cloneIdentity.score != null ? (
+                <div className="helper" style={{ marginTop: 8 }}>
+                  <strong>Speaker identity verified: {(cloneIdentity.score * 100).toFixed(1)}%</strong>
+                  <div className="muted">Measured with {cloneIdentity.provider} across every generated chunk. {cloneIdentity.attempts} take(s) evaluated.</div>
+                </div>
+              ) : (
+                <div className="helper error-box" style={{ marginTop: 8 }}>No measured speaker-identity result is attached. Treat this as historical/unverified audio, not a confirmed clone.</div>
+              )}
               {download.synthesis_elapsed_seconds != null ? (
                 <div className="muted">Synthesis processing time: {formatDuration(download.synthesis_elapsed_seconds)}</div>
               ) : null}
