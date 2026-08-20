@@ -12,11 +12,13 @@ const {
   buildPassageEmbeddingText,
   buildQueryEmbeddingText,
   contentHash,
+  extractRequestedPhrases,
   buildSearchResponse,
   orderMatches,
   redactConnection,
   rerankMatches,
   rerankPassageMatches,
+  rerankTextMatches,
   toVectorLiteral,
 } = require('../src/core');
 
@@ -35,6 +37,18 @@ test('builds a labeled question and answer embedding input without rewriting tex
     buildPassageEmbeddingText('The light in Me signifies qualified monism.', { model: 'embeddinggemma' }),
     'title:  | text: The light in Me signifies qualified monism.',
   );
+});
+
+test('conventional search pools exact, full-text, and fuzzy passage ranks by source', () => {
+  const matches = rerankTextMatches([
+    { sourceId: 'a', sourceGroup: 'a', passageIndex: 0, passageText: 'Exact light phrase.', passageStart: 0, passageEnd: 19, searchScore: 0.9, lexicalScore: 0.3, trigramSimilarity: 0.8, matchChannels: ['exact passage'] },
+    { sourceId: 'a', sourceGroup: 'a', passageIndex: 1, passageText: 'Supporting text.', passageStart: 20, passageEnd: 36, searchScore: 0.5, lexicalScore: 0.2, trigramSimilarity: 0.4, matchChannels: ['full text'] },
+    { sourceId: 'b', sourceGroup: 'b', passageIndex: 0, passageText: 'Fuzzy result.', passageStart: 0, passageEnd: 13, searchScore: 0.6, lexicalScore: 0, trigramSimilarity: 0.7, matchChannels: ['fuzzy passage'] },
+  ], 5);
+  assert.equal(matches[0].sourceId, 'a');
+  assert.equal(matches[0].matchedPassages.length, 2);
+  assert.deepEqual(new Set(matches[0].matchChannels), new Set(['exact passage', 'full text']));
+  assert.equal(matches[1].rankingSignals.semanticWeight, 0);
 });
 
 test('passage reranking accepts answer meaning without using the stored question or title', () => {
@@ -105,6 +119,18 @@ test('an explicit quoted phrase orders the matching semantic answer before a nea
   assert.equal(matches[0].sourceId, 'exact');
   assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
   assert.equal(matches[0].rankingSignals.titleWeight, 0);
+});
+
+test('an unquoted saying clause is treated as a phrase identity constraint', () => {
+  assert.deepEqual(
+    extractRequestedPhrases('What is the meaning of Jesus saying The light is in me?'),
+    ['the light is in me'],
+  );
+  const matches = rerankPassageMatches([
+    { sourceId: 'nearby', passageIndex: 0, passageText: 'Jesus said I am the Light, meaning monism.', passageStart: 0, passageEnd: 43, similarity: 0.70 },
+    { sourceId: 'exact', passageIndex: 0, passageText: 'The Light is in Me means qualified monism.', passageStart: 0, passageEnd: 43, similarity: 0.55 },
+  ], 'What is the meaning of Jesus saying The light is in me?', 5);
+  assert.equal(matches[0].sourceId, 'exact');
 });
 
 test('the final response order preserves an explicit quote identity constraint', () => {
