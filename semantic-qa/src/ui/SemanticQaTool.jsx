@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { DEFAULT_SETTINGS, LOCAL_DEMO_SETTINGS, UNIVERSAL_QA_SETTINGS, mergeSettings, stripSecrets } from './settings.mjs';
+import { DEFAULT_SETTINGS, LOCAL_DEMO_SETTINGS, UNIVERSAL_QA_SETTINGS, mergeSettings, reconcileCatalogMapping, stripSecrets } from './settings.mjs';
 import './semantic-qa.css';
 
 const STANDALONE_RUNTIME = {
@@ -92,6 +92,7 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
           ollamaBaseUrl: settings.ollamaBaseUrl,
           model: settings.model,
           summaryModel: settings.summaryModel,
+          deepSummaryModel: settings.deepSummaryModel,
           hardwarePreference: settings.summaryHardwarePreference,
         },
         timeoutMs: 180000,
@@ -122,7 +123,7 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
         <div className="qa-diagnostics">
           <DiagnosticRow label="Tool API" check={report?.checks?.api} pendingText="Run diagnostics to verify" />
           <DiagnosticRow label="Ollama + embedding model" check={report?.checks?.ollama} pendingText="Requires a running Ollama service" />
-          <DiagnosticRow label="Ollama + summary model" check={report?.checks?.summaryModel} pendingText="Required for synthesized answers" />
+          <DiagnosticRow label="Deep Search Qwen" check={report?.checks?.summaryModel} pendingText="Required only for Deep Search" />
           <DiagnosticRow label="Source PostgreSQL" check={report?.checks?.sourceDatabase} pendingText="Requires Q&A credentials, or load the local demo" />
           <DiagnosticRow label="Index PostgreSQL" check={report?.checks?.indexDatabase} pendingText="Requires a writable database, or load the local demo" />
           <div className="qa-diagnostic-row">
@@ -134,7 +135,7 @@ function SetupScreen({ runtime, settings, onNavigate, onLoadDemo, onLoadUniversa
       </div>
 
       <div className="qa-setup-grid">
-        <div className="card"><span className="qa-step-number">1</span><h3>Install and start Ollama</h3><pre className="qa-command">brew install ollama{`\n`}brew services start ollama{`\n`}ollama pull {settings.model}{`\n`}ollama pull {settings.summaryModel}</pre><div className="hint">The embedding model finds answer passages; the summary model writes a grounded synthesis from accepted passages only.</div></div>
+        <div className="card"><span className="qa-step-number">1</span><h3>Install and start Ollama</h3><pre className="qa-command">brew install ollama{`\n`}brew services start ollama{`\n`}ollama pull {settings.model}{`\n`}ollama pull {settings.deepSummaryModel}</pre><div className="hint">The embedding model finds teachings. Deep Search uses a reasoning-capable Qwen model only to select and classify exact source text.</div></div>
         <div className="card"><span className="qa-step-number">2</span><h3>Connect both databases</h3><div className="hint">The source account is read-only. The index account must be able to create the vector extension, schema, tables, and index.</div><button className="btn" style={{ marginTop: 12 }} onClick={() => onNavigate('settings')}>Open Settings</button></div>
         <div className="card"><span className="qa-step-number">3</span><h3>Map the corpus</h3><div className="hint">Discover the source catalog and select a unique ID, question, answer, and optional metadata/order fields.</div><button className="btn" style={{ marginTop: 12 }} onClick={() => onNavigate('settings')}>Configure mapping</button></div>
         <div className="card"><span className="qa-step-number">4</span><h3>Build the index</h3><div className="hint">Initialize pgvector, then run Full rebuild once. Later source changes can use Incremental sync.</div><button className="btn" style={{ marginTop: 12 }} onClick={() => onNavigate('index')}>Open Index</button></div>
@@ -274,10 +275,10 @@ function evidenceTitleLabel(item) {
 }
 
 function deepSummaryMarkdown(question, searchMode, result) {
-  const lines = [`# ${result.title || 'Deep summary'}`, '', `**Question:** ${question}`, `**Search mode:** ${searchMode === 'search' ? 'Search' : 'Semantic Search'}`, ''];
+  const lines = [`# ${result.title || 'Deep Search'}`, '', `**Question:** ${question}`, `**Outcome:** ${result.answerStatus}`, '', result.notice || '', ''];
   for (const paragraph of result.paragraphs || []) lines.push(paragraph.text, '');
-  lines.push('## Coverage', '');
-  Object.entries(result.coverage || {}).forEach(([key, value]) => lines.push(`- ${key}: ${value}`));
+  lines.push('## Audit', '');
+  Object.entries(result.audit || {}).forEach(([key, value]) => lines.push(`- ${key}: ${value}`));
   lines.push('', '## Evidence', '');
   (result.evidence || []).forEach((item) => lines.push(
     `### [${item.evidenceNumber}] ${evidenceSourceTitle(item)}`,
@@ -310,9 +311,7 @@ function DeepSummaryProgress({ job, collapsible = false }) {
   const overallPercent = Number(job.overallPercent ?? job.percent) || 0;
   const eta = job.status === 'completed'
     ? `Completed in ${formatDuration(job.elapsedSeconds)}`
-    : job.etaSeconds != null
-      ? `Overall ETA: about ${formatDuration(job.etaSeconds)} for all remaining phases · projected total ${formatDuration(job.estimatedTotalSeconds)}${job.estimatedCompletionAt ? ` · completion around ${new Date(job.estimatedCompletionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`
-      : 'ETA will appear after the first Ollama batch finishes';
+    : `${job.currentOperation || 'Working'} · elapsed ${formatDuration(job.elapsedSeconds)}`;
   const content = <>
     <div className="qa-overall-progress"><div className="qa-phase-title"><strong>Overall progress</strong><span>{overallPercent}%</span></div><div className="qa-progress"><span style={{ width: `${overallPercent}%` }} /></div><div className="hint">{eta}</div></div>
     <div className="qa-runtime-device"><span className="badge">Device choice: {({ auto: 'Auto', gpu: 'Prefer GPU', cpu: 'CPU only' })[job.hardwarePreference] || 'Auto'}</span><span className="badge">Actual processor: {job.hardware?.runtime?.processor || 'checking after first Ollama batch…'}</span></div>
@@ -321,7 +320,7 @@ function DeepSummaryProgress({ job, collapsible = false }) {
         <span className="qa-phase-marker" aria-hidden="true">{phase.status === 'completed' ? '✓' : index + 1}</span>
         <div className="qa-phase-content">
           <div className="qa-phase-title"><strong>Phase {index + 1}: {phase.name}</strong><span>{phaseStatusText(phase.status)}</span></div>
-          {phase.status === 'running' ? <><div className="qa-progress"><span style={{ width: `${phase.percent || 0}%` }} /></div><div className="hint">{phase.processed || 0} / {phase.total || '—'} {phase.unit} · {phase.percent || 0}%{phase.etaSeconds != null ? ` · phase ETA ${formatDuration(phase.etaSeconds)} · projected phase total ${formatDuration(phase.estimatedDurationSeconds)}` : ''}{job.parallelism > 1 ? ` · up to ${job.parallelism} parallel Ollama requests` : ''}{job.activeRequests ? ` · ${job.activeRequests} active` : ''}</div></> : null}
+          {phase.status === 'running' ? <><div className="qa-progress"><span style={{ width: `${phase.percent || 0}%` }} /></div><div className="hint">{phase.processed || 0} / {phase.total || '—'} {phase.unit} · {phase.percent || 0}% · elapsed {formatDuration(phase.elapsedSeconds)}{phase.etaSeconds != null ? ` · phase ETA ${formatDuration(phase.etaSeconds)} · projected phase total ${formatDuration(phase.estimatedDurationSeconds)}` : ''}{job.parallelism > 1 ? ` · limit ${job.parallelism} in-flight Ollama requests` : ''}{job.activeRequests ? ` · ${job.activeRequests} in flight` : ''}</div></> : null}
           {phase.status === 'pending' && phase.estimatedDurationSeconds != null ? <div className="hint">Estimated phase duration: {formatDuration(phase.estimatedDurationSeconds)}</div> : null}
           {phase.status === 'completed' && phase.elapsedSeconds != null ? <div className="hint">Finished in {formatDuration(phase.elapsedSeconds)}</div> : null}
         </div>
@@ -335,7 +334,7 @@ function DeepSummary({ question, searchMode, job, onOpenDocument, onCancel }) {
   const result = job?.result;
   if (!job) return null;
   if (job.status !== 'completed' || result?.status !== 'ready') {
-    return <div className="card qa-deep-summary"><div className="qa-card-title"><h3>Deep Summary</h3><div className="toolbar"><span className="badge">{job.phase || job.status}</span>{['queued', 'running'].includes(job.status) ? <button className="btn" type="button" onClick={onCancel}>Cancel</button> : null}</div></div><DeepSummaryProgress job={job} />{job.error ? <div className="alert warn">{job.error}</div> : null}{job.status === 'completed' && result?.status !== 'ready' ? <div className="alert warn">No answer passages could be independently verified for a deep summary.</div> : null}</div>;
+    return <div className="card qa-deep-summary"><div className="qa-card-title"><h3>Deep Search</h3><div className="toolbar"><span className="badge">{job.currentOperation || job.phase || job.status}</span>{['queued', 'running'].includes(job.status) ? <button className="btn" type="button" onClick={onCancel}>Cancel</button> : null}</div></div><DeepSummaryProgress job={job} />{job.error ? <div className="alert warn">{job.error}</div> : null}{job.status === 'completed' && result?.status !== 'ready' ? <div className="alert warn">{result?.notice || 'No responsibly relevant Swami teaching was found.'}</div> : null}</div>;
   }
   const markdown = deepSummaryMarkdown(question, searchMode, result);
   const printReport = () => {
@@ -346,11 +345,11 @@ function DeepSummary({ question, searchMode, job, onOpenDocument, onCancel }) {
   };
   return (
     <article className="card qa-deep-summary">
-      <div className="qa-card-title"><div><span className="badge">Verified Deep Summary{result.coverage?.exhaustiveScan ? ' · Corpus-wide scan' : ''}</span><h2>{result.title}</h2></div><div className="toolbar"><button className="btn" onClick={() => downloadText(`search-engine-deep-summary-${new Date().toISOString().slice(0, 10)}.md`, markdown)}>Download Markdown</button><button className="btn" onClick={printReport}>Print / Save PDF</button></div></div>
+      <div className="qa-card-title"><div><span className="badge">Verified Deep Search · {result.answerStatus}</span><h2>{result.title}</h2></div><div className="toolbar"><button className="btn" onClick={() => downloadText(`search-engine-deep-search-${new Date().toISOString().slice(0, 10)}.md`, markdown)}>Download Markdown</button><button className="btn" onClick={printReport}>Print / Save PDF</button></div></div>
       <DeepSummaryProgress job={job} collapsible />
-      {result.coverage?.fallbackClaimCount ? <div className="alert warn">{result.coverage.fallbackClaimCount} verified source passage{result.coverage.fallbackClaimCount === 1 ? ' was' : 's were'} used directly because the local model could not return parseable claim JSON for {result.coverage.fallbackClaimCount === 1 ? 'it' : 'them'}. Citations still point to the original verified passages.</div> : null}
+      <div className="alert">{result.notice}</div>
       <div className="qa-coverage-grid">
-        <span><strong>{result.coverage?.scannedPassages ?? '—'}</strong> passages scored</span><span><strong>{result.coverage?.candidateRecords}</strong> relevant candidates</span><span><strong>{result.coverage?.verifiedRecords}</strong> verified</span><span><strong>{result.coverage?.usedSourceCount}</strong> cited sources</span>
+        <span><strong>{result.audit?.probes ?? '—'}</strong> probes</span><span><strong>{result.audit?.sourcesRead ?? '—'}</strong> sources read</span><span><strong>{result.audit?.rejectedEvidence ?? '—'}</strong> discarded</span><span><strong>{result.audit?.finalVerification ?? '—'}</strong> verified</span>
       </div>
       <div className="qa-deep-article">{(result.paragraphs || []).map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}</div>
       <details className="qa-deep-evidence"><summary>Evidence ({result.evidence.length})</summary><ol className="qa-summary-lines">{result.evidence.map((item) => <li key={item.evidenceNumber}>
@@ -413,14 +412,14 @@ function GroundedSummary({ summary, relevantMatches, onOpenDocument, searchMode 
     <article className="card qa-grounded-summary">
       <div className="qa-answer-head">
         <div>
-          <span className="badge">Synthesized answer</span>
+          <span className="badge">Verbatim teaching selection</span>
           <span className="badge">{evidence.length} excerpt{evidence.length === 1 ? '' : 's'}</span>
           <span className="badge">{new Set(evidence.map((item) => String(item.sourceId))).size} source{new Set(evidence.map((item) => String(item.sourceId))).size === 1 ? '' : 's'}</span>
         </div>
         <span className="mono">{searchMode === 'search' ? 'text-ranked' : 'meaning-based'} · grounded</span>
       </div>
       <div className="qa-summary-text">{summary.text}</div>
-      <div className="hint qa-summary-note">This answer may paraphrase. It is generated only from accepted passages and is withheld if the requested relationship cannot be grounded in them.</div>
+      <div className="hint qa-summary-note">Every teaching above is exact stored Swami text. Only the neutral status label is generated by the interface.</div>
       <div className="section-title">Supporting passages</div>
       <ol className="qa-summary-lines">
         {evidence.map((item, index) => (
@@ -490,8 +489,11 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
             enabled: settings.summaryMode === 'standard',
             mode: settings.summaryMode,
             model: settings.summaryModel,
+            deepModel: settings.deepSummaryModel,
+            deliberation: settings.deepSummaryDeliberation,
             maxRecords: settings.summaryMaxRecords,
             maxLines: settings.summaryMaxLines,
+            deepMaxRecords: settings.deepSummaryMaxRecords,
             parallelRequests: settings.deepSummaryParallelRequests,
             requestTimeoutMs: settings.deepSummaryTimeoutSeconds * 1000,
             hardwarePreference: settings.summaryHardwarePreference,
@@ -542,19 +544,19 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
       <form className="card qa-search-card" onSubmit={search}>
         <div className="qa-card-title"><div><h3>{settings.searchMode === 'semantic' ? 'Semantic Search' : 'Search'}</h3><div className="hint">{settings.searchMode === 'semantic' ? 'Meaning-first retrieval over independently indexed answer passages.' : 'Exact phrase, PostgreSQL full-text, and trigram-distance ranking fused together.'}</div></div><div className="qa-mode-toggle" role="group" aria-label="Search mode"><button type="button" className={`btn ${settings.searchMode === 'semantic' ? 'primary' : ''}`} onClick={() => setSettings((current) => ({ ...current, searchMode: 'semantic' }))}>Semantic Search</button><button type="button" className={`btn ${settings.searchMode === 'search' ? 'primary' : ''}`} onClick={() => setSettings((current) => ({ ...current, searchMode: 'search' }))}>Search</button></div></div>
         <div className="hint">
-          Standard Summary uses accepted evidence only. Deep Summary also inspects nearby records, but admits them only after independent answerability validation.
+          Verbatim Selection returns exact Swami passages quickly. Deep Search reads complete answers and independently adjudicates related teachings.
         </div>
         <textarea className="qa-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Enter a question…" />
         <div className="toolbar">
           <button className="btn primary" type="submit" disabled={busy || !question.trim()}>
-            {busy ? 'Searching…' : settings.summaryMode === 'deep' ? 'Search and generate Deep Summary' : settings.summaryMode === 'standard' ? 'Search and summarize' : 'Search'}
+            {busy ? 'Searching…' : settings.summaryMode === 'deep' ? 'Run Deep Search' : settings.summaryMode === 'standard' ? 'Select verbatim teachings' : 'Search'}
           </button>
-          <label className="field qa-summary-select"><span className="field-label">Answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Standard Summary</option><option value="deep">Deep Summary</option></select></label>
-          {settings.summaryMode !== 'off' ? <label className="field qa-summary-select qa-device-choice"><span className="field-label">Summary processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select></label> : null}
+          <label className="field qa-summary-select"><span className="field-label">Answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Verbatim Selection</option><option value="deep">Deep Search</option></select></label>
+          {settings.summaryMode === 'deep' ? <label className="field qa-summary-select qa-device-choice"><span className="field-label">Deep Search processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select></label> : null}
           <span className="badge">Top {settings.topK}</span>
           <span className="badge">{settings.searchMode === 'semantic' ? `Threshold ${Number(settings.threshold).toFixed(2)}` : 'Exact + full-text + fuzzy RRF'}</span>
           {settings.summaryMode === 'standard' ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
-          {settings.summaryMode === 'deep' ? <span className="badge">{settings.searchMode === 'semantic' ? 'Score every indexed answer passage' : 'Pool independently verified text matches'}</span> : null}
+          {settings.summaryMode === 'deep' ? <span className="badge">{settings.searchMode === 'semantic' ? `Score corpus · process top ${settings.deepSummaryMaxRecords}` : `Verify up to ${settings.deepSummaryMaxRecords} text matches`}</span> : null}
         </div>
       </form>
       {error ? <div className="alert warn">{error}</div> : null}
@@ -578,7 +580,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
             {inspectorLabel} ({remainingMatches.length}) — inspection only
           </summary>
           <div className="hint" style={{ margin: '10px 0 14px' }}>
-            {settings.summaryMode === 'deep' ? 'Deep Summary inspects these neighbors, but uses them only when the independent verifier accepts their answer passages.' : 'These are retrieval neighbors, not accepted answers and not Standard Summary evidence.'}
+            {settings.summaryMode === 'deep' ? 'Deep Search reads complete Swami units from these neighbors and may discard any of them.' : 'These are retrieval neighbors, not accepted answers and not Verbatim Selection evidence.'}
           </div>
           <div className="qa-results">
             {remainingMatches.map((match, index) => (
@@ -777,7 +779,7 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
     setHardwareError('');
     try {
       const response = await api(runtime, '/ollama/hardware', {
-        body: { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.summaryModel },
+        body: { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.deepSummaryModel },
         timeoutMs: 30000,
       });
       setHardware(response.hardware);
@@ -792,7 +794,7 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
   useEffect(() => {
     const timer = setTimeout(() => { void detectHardware(); }, 250);
     return () => clearTimeout(timer);
-  }, [runtime.apiBasePath, settings.ollamaBaseUrl, settings.summaryModel]);
+  }, [runtime.apiBasePath, settings.ollamaBaseUrl, settings.deepSummaryModel]);
 
   const call = async (path, body, success) => {
     setBusy(true); setStatus(null);
@@ -808,14 +810,10 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
     const response = await call('/source/catalog', { connection: settings.sourceConnection }, () => 'Source connected; catalog loaded.');
     if (!response) return;
     setCatalog(response.schemas || []);
-    const schema = response.schemas?.find((item) => item.name === settings.mapping.schema) || response.schemas?.[0];
-    const table = schema?.tables.find((item) => item.name === settings.mapping.table) || schema?.tables?.[0];
-    if (schema && table) {
-      const primary = table.columns.find((column) => column.primaryKey)?.name || '';
-      const question = table.columns.find((column) => /question|query/i.test(column.name))?.name || '';
-      const answer = table.columns.find((column) => /answer|response/i.test(column.name))?.name || '';
-      updateMapping({ schema: schema.name, table: table.name, idColumn: primary, questionColumn: question, answerColumn: answer, metadataColumns: [] });
-    }
+    setSettings((current) => ({
+      ...current,
+      mapping: reconcileCatalogMapping(response.schemas || [], current.mapping),
+    }));
   };
 
   const chooseSchema = (name) => {
@@ -844,8 +842,8 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
         <div className="form-grid">
           <label className="field"><span className="field-label">Base URL</span><input value={settings.ollamaBaseUrl} onChange={(event) => setSettings((current) => ({ ...current, ollamaBaseUrl: event.target.value }))} /></label>
           <label className="field"><span className="field-label">Embedding model</span><input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} /></label>
-          <label className="field"><span className="field-label">Summary model</span><input value={settings.summaryModel} onChange={(event) => setSettings((current) => ({ ...current, summaryModel: event.target.value }))} /></label>
-          <label className="field"><span className="field-label">Summary processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select><span className="hint">Auto lets Ollama choose. Prefer GPU requests maximum layer offload; CPU only disables GPU offload.</span></label>
+          <label className="field"><span className="field-label">Deep Search reasoning model</span><select value={settings.deepSummaryModel} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryModel: event.target.value }))}><option value="qwen3:14b-q8_0">qwen3:14b-q8_0 (default)</option><option value="qwen3:14b-q4_K_M">qwen3:14b-q4_K_M</option></select><span className="hint">Thinking is mandatory. Gemma and other non-thinking models are rejected.</span></label>
+          <label className="field"><span className="field-label">Deep Search processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select><span className="hint">Auto lets Ollama choose. Prefer GPU requests maximum layer offload; CPU only disables GPU offload.</span></label>
         </div>
         <div className="toolbar" style={{ marginTop: 12 }}><button className="btn" disabled={busy} onClick={() => call('/ollama/test', { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.model }, (response) => `Ollama connected; ${response.model} returns ${response.dimension} dimensions.`)}>Test Ollama</button><button className="btn" disabled={hardwareBusy} onClick={() => void detectHardware()}>{hardwareBusy ? 'Detecting hardware…' : 'Refresh hardware detection'}</button></div>
         {hardware ? <div className="qa-hardware-panel">
@@ -884,15 +882,15 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
         <div className="form-grid">
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Result count</span><input type="number" min="1" max="20" value={settings.topK} onChange={(event) => setSettings((current) => ({ ...current, topK: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Clear-match threshold</span><input type="number" min="-1" max="1" step="0.01" value={settings.threshold} onChange={(event) => setSettings((current) => ({ ...current, threshold: Number(event.target.value) }))} /></label>
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Summary source pool</span><input type="number" min="1" max="15" value={settings.summaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxRecords: Number(event.target.value) }))} /></label>
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Maximum summary sentences</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Verbatim source pool</span><input type="number" min="1" max="15" value={settings.summaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxRecords: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Maximum selected teachings</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Source page size</span><input type="number" min="25" max="1000" value={settings.fetchSize} onChange={(event) => setSettings((current) => ({ ...current, fetchSize: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Embedding batch size</span><input type="number" min="1" max="64" value={settings.embeddingBatchSize} onChange={(event) => setSettings((current) => ({ ...current, embeddingBatchSize: Number(event.target.value) }))} /></label>
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Deep Summary parallel Ollama requests</span><input type="number" min="1" max="4" value={settings.deepSummaryParallelRequests} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryParallelRequests: Number(event.target.value) }))} /><span className="hint">Use 2 for normal local hardware. Set 1 if Ollama is memory constrained; use 3–4 only when the model can run several contexts concurrently.</span></label>
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Deep Summary Ollama timeout (seconds)</span><input type="number" min="60" max="900" step="30" value={settings.deepSummaryTimeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryTimeoutSeconds: Number(event.target.value) }))} /><span className="hint">A timed-out validation or extraction batch is automatically retried as smaller batches.</span></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Deep Search candidate limit</span><input type="number" min="1" max="100" value={settings.deepSummaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryMaxRecords: Number(event.target.value) }))} /><span className="hint">Complete answer units from this many fused source candidates can enter adjudication.</span></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Qwen request limit (seconds)</span><input type="number" min="60" max="600" step="30" value={settings.deepSummaryTimeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryTimeoutSeconds: Number(event.target.value) }))} /><span className="hint">One Qwen generation runs at a time. Each call is capped at ten minutes; the complete job is capped at 45 minutes.</span></label>
         </div>
-        <label className="field" style={{ marginTop: 12, maxWidth: 360 }}><span className="field-label">Default answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Standard Summary</option><option value="deep">Deep Summary</option></select></label>
-        <div className="hint" style={{ marginTop: 10 }}>Standard Summary uses accepted passages only. Deep Summary inspects a larger pool and independently verifies every nearby passage before synthesis.</div>
+        <label className="field" style={{ marginTop: 12, maxWidth: 360 }}><span className="field-label">Default answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Verbatim Selection</option><option value="deep">Deep Search</option></select></label>
+        <div className="hint" style={{ marginTop: 10 }}>Both answer modes display only exact stored Swami text. Deep Search adds role-aware complete-answer reading and independent adjudication.</div>
         <div className="hint" style={{ marginTop: 12 }}>Non-secret settings save automatically. Passwords and connection strings are never persisted.</div>
       </div>
     </div>
