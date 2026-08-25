@@ -1,6 +1,21 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildDiscourseRecords, buildRecords, chunkText, htmlToPlainText } = require('../scripts/importUniversalQa');
+const { buildDocuments, buildDiscourseRecords, buildRecords, chunkText, htmlToPlainText, quoteMysqlIdentifier, resolveMysqlDatabase } = require('../scripts/importUniversalQa');
+
+test('MySQL source database is discovered from the two authoritative tables', async () => {
+  const prior = process.env.UNIVERSAL_MYSQL_DATABASE;
+  delete process.env.UNIVERSAL_MYSQL_DATABASE;
+  try {
+    const source = { query: async () => [[{ schema_name: 'universal' }]] };
+    assert.equal(await resolveMysqlDatabase(source), 'universal');
+    assert.equal(quoteMysqlIdentifier('universal-0'), '`universal-0`');
+    assert.equal(quoteMysqlIdentifier('a`b'), '`a``b`');
+  } finally {
+    if (prior == null) delete process.env.UNIVERSAL_MYSQL_DATABASE;
+    else process.env.UNIVERSAL_MYSQL_DATABASE = prior;
+  }
+});
+const { sha256 } = require('../src/corpusStructure');
 
 test('legacy HTML becomes readable plain text without rewriting words', () => {
   assert.equal(
@@ -81,4 +96,38 @@ test('discourse records use language-aware chunks and distinct source identities
   assert.equal(records[0].sourceGroup, 'discourse:66');
   assert.equal(records[0].sourceContext, 'Opening discourse.');
   assert.ok(records.every((record) => record.answer.length <= 400));
+});
+
+test('document projection preserves immutable raw source beside faithful display text', () => {
+  const raw = '<p>Swami replied:-&nbsp;Keep&nbsp;&nbsp;the source wording.</p>';
+  const { documents, rejected, duplicates } = buildDocuments([{
+    qaId: 70,
+    masterId: 400,
+    title: 'How?',
+    briefQuestion: '',
+    questionBk: '',
+    answerBySwami: raw,
+    masterLanguage: 'ENG',
+  }], []);
+  assert.deepEqual(rejected, []);
+  assert.deepEqual(duplicates, []);
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0].rawContent, raw);
+  assert.equal(documents[0].rawContentHash, sha256(raw));
+  assert.equal(documents[0].displayText, 'Swami replied:- Keep the source wording.');
+  assert.equal(documents[0].author, 'Swami');
+  assert.equal(documents[0].answerUnitCount, 1);
+});
+
+test('document projection flags ambiguous speaker boundaries without guessing', () => {
+  const { documents } = buildDocuments([], [{
+    dcId: 71,
+    masterId: 401,
+    title: 'A conversation',
+    summary: '',
+    textDC: 'Devotee: Please explain.\nFather: Wait.',
+    masterLanguage: 'ENG',
+  }]);
+  assert.equal(documents[0].ambiguous, true);
+  assert.equal(documents[0].answerUnitCount, 0);
 });
