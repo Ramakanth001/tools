@@ -413,3 +413,45 @@ git commit -m "test(gpt-api): cover conversation and research endpoint contracts
 git add -- GIT_ADD_COMMIT_PAIRS.txt
 git commit -m "docs(workflow): add curated staging and commit command sequences" -m "Provide a project-specific set of reviewed git add targets and detailed conventional commit messages while explicitly excluding credentials and unrelated personal content."
 
+# -----------------------------------------------------------------------------
+# Role-aware corpus v5 migration (current working tree, 2026-08-26)
+# -----------------------------------------------------------------------------
+# Run these pairs in order. They keep the source import, v5 index, Deep Search,
+# GPT integration, documentation, source material, and generated bundle
+# independently reviewable.
+
+# Pair 102
+git add -- GIT_ADD_COMMIT_PAIRS.txt
+git commit -m "docs(workflow): add a reviewed commit sequence for the role-aware v5 migration" -m "Document the current cohesive staging groups so the corpus import, index promotion, Deep Search, GPT consumer update, operational notes, and generated bundle can be committed with meaningful history."
+
+# Pair 103
+git add -- semantic-qa/scripts/importUniversalQa.js semantic-qa/src/corpusStructure.js semantic-qa/test/corpusStructure.test.js semantic-qa/test/universalImport.test.js semantic-qa/package.json
+git commit -m "feat(search-import): project Universal content as faithful role-aware documents" -m "Replace the legacy character-chunk projection with corpus_documents, preserve complete display text and lineage, parse citable Swami answer units, retain legacy aliases, and expose safe import validation commands."
+
+# Pair 104
+git add -- semantic-qa/src/core.js semantic-qa/src/database.js semantic-qa/src/syncManager.js semantic-qa/test/core.test.js semantic-qa/test/database.test.js semantic-qa/test/syncManager.test.js semantic-qa/scripts/validateV5Database.js
+git commit -m "feat(search-index): promote the answer-unit v5 retrieval contract" -m "Build and atomically promote answer units, exact citation spans, discovery passages, and source aliases; reject legacy chunk input; and verify rollback-safe v5 database promotion in a disposable validation database."
+
+# Pair 105
+git add -- semantic-qa/src/ollama.js semantic-qa/src/semanticSummary.js semantic-qa/src/deepSummaryManager.js semantic-qa/src/registerRoutes.js semantic-qa/test/ollama.test.js semantic-qa/test/semanticSummary.test.js semantic-qa/test/deepSummaryManager.test.js semantic-qa/test/routes.test.js semantic-qa/scripts/evaluateV5Promotion.js
+git commit -m "feat(search): provide verbatim selection and Qwen-adjudicated Deep Search" -m "Keep standard results as exact stored Swami text, require a thinking-capable Qwen model for Deep Search, read complete answer units before adjudication, and add a live promotion replay that checks exact evidence spans."
+
+# Pair 106
+git add -- semantic-qa/src/ui/SemanticQaTool.jsx semantic-qa/src/ui/settings.mjs semantic-qa/test/settings.test.js semantic-qa/public/index.html
+git commit -m "feat(search-ui): configure and explain role-aware answer modes" -m "Migrate saved settings, preserve the Universal corpus mapping during catalog discovery, expose Qwen Deep Search controls, and clarify the difference between verbatim selections and independently adjudicated teachings."
+
+# Pair 107
+git add -- gpt/src/config.js gpt/src/corpus.js gpt/src/ollama.js gpt/src/research.js gpt/src/registerRoutes.js gpt/src/setup.js gpt/src/ui/GptTool.jsx gpt/src/ui/export.mjs gpt/src/ui/gpt.css gpt/src/ui/settings.mjs gpt/test/config.test.js gpt/test/corpus.test.js gpt/test/benchmark.test.js gpt/test/export.test.js gpt/test/isolation.test.js gpt/test/ollama.test.js gpt/test/research.test.js gpt/test/setup.test.js gpt/public/index.html
+git commit -m "feat(gpt): consume v5 answer units with exact evidence and per-answer exports" -m "Require the role-aware index, retrieve complete answer units and exact citation ranges, support robust structured-model retries, make low-temperature replies verbatim, and export each answer or the complete chat with only its cited corpus spans."
+
+# Pair 108
+git add -- semantic-qa/ARCHITECTURE.md semantic-qa/README.md gpt/README.md DATA_ENGINEERING_FLOW.txt
+git commit -m "docs(corpus): document the v5 role-aware retrieval architecture and operational flow" -m "Explain the faithful source projection, answer-unit indexing, v5 promotion checks, independent Deep Search evidence rules, GPT's read-only use of the shared index, and the currently observed database state."
+
+# Pair 109
+git add -- aspiration-free.txt
+git commit -m "data(corpus): add the aspiration-free devotion teaching reference" -m "Add the supplied Sanskrit verse and English explanation as a standalone corpus reference for editorial review and future source ingestion."
+
+# Pair 110
+git add -- public/assets/index-Cq1LR09f.css public/assets/index-CrsON-JZ.js public/assets/index.es-RG0IzJvM.js public/assets/index-BYtehbdz.css public/assets/index-Dg06uc93.js public/assets/index.es-Bi03y8x1.js public/index.html
+git commit -m "build(workspace): refresh generated assets for the role-aware search and GPT update" -m "Replace the previous hashed workspace bundle and update the production entry document so the shared host serves the current Search Engine and GPT experience."
