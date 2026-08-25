@@ -7,10 +7,30 @@ const {
   RETRIEVAL_SCHEMA_VERSION,
 } = require('./core');
 const { embedTexts, testOllama } = require('./ollama');
-const { splitAnswerForIndex } = require('./semanticSummary');
+const { buildAnswerPassages, buildDiscoveryTexts, parseAnswerUnits } = require('./corpusStructure');
 
-const MAX_INDEX_PASSAGES_PER_RECORD = 256;
 const MAX_SINGLE_PASSAGE_RETRIES = 2;
+
+function connectionDatabase(connection = {}) {
+  if (String(connection.database || '').trim()) return String(connection.database).trim();
+  if (!connection.connectionString) return '';
+  try {
+    return decodeURIComponent(new URL(connection.connectionString).pathname.replace(/^\//u, ''));
+  } catch {
+    return '';
+  }
+}
+
+function assertRoleAwareUniversalSource(config = {}) {
+  const sourceDatabase = connectionDatabase(config.sourceConnection).toLowerCase();
+  const schema = String(config.mapping?.schema || 'public').toLowerCase();
+  const table = String(config.mapping?.table || '').toLowerCase();
+  if (sourceDatabase === 'universal_qa_source' && schema === 'public' && table === 'qa_records') {
+    const error = new Error('Role-aware v5 synchronization requires public.corpus_documents. The selected public.qa_records table contains legacy character chunks and is intentionally refused. Run the Universal MySQL import, then load the Universal corpus preset and select corpus_documents.');
+    error.code = 'LEGACY_CHUNK_SOURCE';
+    throw error;
+  }
+}
 
 function isRetriableEmbeddingError(error) {
   return /timed out|temporar|fetch failed|socket|econnreset|econnrefused|enotfound|http 5\d\d/i
@@ -31,6 +51,8 @@ function publicJob(job) {
     processed: job.processed,
     changed: job.changed,
     passages: job.passages,
+    discoveryPassages: job.discoveryPassages,
+    ambiguousDocuments: job.ambiguousDocuments,
     total: job.total,
     percent: job.total ? Math.round((job.processed / job.total) * 100) : 0,
     error: job.error,
@@ -74,14 +96,54 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
     return vector;
   }
 
-  function passageRows(records) {
-    return records.flatMap((record) => splitAnswerForIndex(record.answer, {
-      maxPassages: MAX_INDEX_PASSAGES_PER_RECORD,
-    }).map((passage, passageIndex) => ({
-      sourceId: record.sourceId,
-      passageIndex,
-      ...passage,
-    }))).sort((left, right) => left.text.length - right.text.length);
+  function structuralRows(records, job) {
+    const answerUnits = [];
+    const passages = [];
+    const discovery = [];
+    const aliases = [];
+    for (const record of records) {
+      const questionContext = String(record.metadata?.question_context || record.metadata?.source_context || '').trim();
+      const parsed = parseAnswerUnits({
+        sourceId: record.sourceId,
+        sourceType: record.metadata?.source_type || '',
+        question: [record.question, questionContext].filter(Boolean).join('\n\n'),
+        text: record.answer,
+        language: record.metadata?.language || '',
+        author: record.metadata?.author || '',
+      });
+      if (parsed.ambiguities.length) {
+        job.ambiguousDocuments += 1;
+        log(job, `Excluded ${record.sourceId} from citable evidence: ${parsed.ambiguities.map((item) => item.reason).join('; ')}`);
+      }
+      for (const unit of parsed.units) {
+        if (record.answer.slice(unit.start, unit.end) !== unit.text) {
+          throw new Error(`Answer-unit offsets do not reproduce source text for ${unit.answerUnitId}`);
+        }
+        answerUnits.push(unit);
+      }
+      const recordPassages = buildAnswerPassages(record.answer, parsed.units)
+        .map((passage, passageIndex) => ({ ...passage, passageIndex }));
+      for (const passage of recordPassages) {
+        if (record.answer.slice(passage.start, passage.end) !== passage.text ||
+            record.answer.slice(passage.citationStart, passage.citationEnd) !== passage.citationText) {
+          throw new Error(`Passage offsets do not reproduce source text for ${record.sourceId}:${passage.passageIndex}`);
+        }
+      }
+      passages.push(...recordPassages);
+      discovery.push(...buildDiscoveryTexts(record, parsed));
+      const configuredAliases = Array.isArray(record.metadata?.legacy_aliases)
+        ? record.metadata.legacy_aliases
+        : [record.sourceId];
+      for (const aliasId of new Set([record.sourceId, ...configuredAliases].map(String))) {
+        aliases.push({ aliasId, sourceId: record.sourceId, answerUnitId: parsed.units[0]?.answerUnitId || null });
+      }
+    }
+    return {
+      answerUnits,
+      passages: passages.sort((left, right) => left.text.length - right.text.length),
+      discovery: discovery.sort((left, right) => left.text.length - right.text.length),
+      aliases,
+    };
   }
 
   async function embedAndStagePassages(job, config, indexClient, tableName, rows, batchSize) {
@@ -132,6 +194,27 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       }));
       await db.insertStagePassages(indexClient, tableName, staged);
       job.passages += staged.length;
+    }
+  }
+
+  async function embedAndStageDiscovery(job, config, indexClient, tableName, rows, batchSize) {
+    for (let index = 0; index < rows.length; index += batchSize) {
+      throwIfCancelled(job);
+      const batch = rows.slice(index, index + batchSize);
+      const vectors = await embed({
+        baseUrl: config.ollamaBaseUrl,
+        model: config.model,
+        texts: batch.map((item) => buildPassageEmbeddingText(item.text, {
+          model: config.model,
+          formatVersion: config.embeddingFormatVersion,
+        })),
+        timeoutMs: 300000,
+      });
+      await db.insertStageDiscoveryPassages(indexClient, tableName, batch.map((item, vectorIndex) => ({
+        ...item,
+        embedding: vectors[vectorIndex],
+      })));
+      job.discoveryPassages += batch.length;
     }
   }
 
@@ -193,14 +276,18 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
           await db.insertStageRecords(indexClient, stageNames.stage, staged);
           job.changed += staged.length;
         }
+        const structured = structuralRows(changed, job);
+        await db.insertStageAnswerUnits(indexClient, stageNames.answerUnits, structured.answerUnits);
+        await db.insertStageAliases(indexClient, stageNames.aliases, structured.aliases);
         await embedAndStagePassages(
           job,
           config,
           indexClient,
           stageNames.passages,
-          passageRows(changed),
+          structured.passages,
           embeddingBatchSize,
         );
+        await embedAndStageDiscovery(job, config, indexClient, stageNames.discovery, structured.discovery, embeddingBatchSize);
 
         job.processed += records.length;
         await db.updateSyncRun(indexClient, job);
@@ -228,7 +315,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
 
       job.status = 'completed';
       job.finishedAt = new Date().toISOString();
-      log(job, `Indexed ${job.total} records; ${job.changed} changed records and ${job.passages} answer passages embedded.`);
+      log(job, `Indexed ${job.total} documents; ${job.changed} changed, ${job.passages} citable answer passages, ${job.discoveryPassages} discovery passages, and ${job.ambiguousDocuments} ambiguous documents excluded from citations.`);
       await db.updateSyncRun(indexClient, job);
     } catch (error) {
       job.status = error?.code === 'SYNC_CANCELLED' ? 'cancelled' : 'failed';
@@ -252,6 +339,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
   }
 
   function start(config) {
+    assertRoleAwareUniversalSource(config);
     const active = [...jobs.values()].find((job) => ['queued', 'running'].includes(job.status));
     if (active) {
       const error = new Error(`Synchronization ${active.id} is already running`);
@@ -265,6 +353,8 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       processed: 0,
       changed: 0,
       passages: 0,
+      discoveryPassages: 0,
+      ambiguousDocuments: 0,
       total: 0,
       error: null,
       logs: [],
@@ -309,4 +399,4 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
   return { start, get, cancel, subscribe, unsubscribe, _jobs: jobs };
 }
 
-module.exports = { createSyncManager, publicJob, sanitizeError };
+module.exports = { assertRoleAwareUniversalSource, connectionDatabase, createSyncManager, publicJob, sanitizeError };

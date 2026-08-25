@@ -27,7 +27,7 @@ test('incremental commit reconciles deleted source IDs inside one transaction', 
     },
   };
   await commitIncremental(client, {
-    names: { stage: 'stage_job', passages: 'passages_job', seen: 'seen_job' },
+    names: { stage: 'stage_job', passages: 'passages_job', answerUnits: 'units_job', discovery: 'discovery_job', aliases: 'aliases_job', seen: 'seen_job' },
     mapping: { schema: 'public', table: 'qa' },
     model: 'embeddinggemma', dimension: 768, formatVersion: 'embeddinggemma-asymmetric-v2', retrievalVersion: 'hybrid-v2',
     ollamaBaseUrl: 'http://127.0.0.1:11434', total: 10,
@@ -196,7 +196,7 @@ test('passage search compares the query against answer passages and joins source
   assert.equal(calls.at(-1).statement, 'COMMIT');
 });
 
-test('deep semantic retrieval scores the complete passage corpus without a candidate limit', async () => {
+test('deep semantic retrieval scores the complete passage corpus but bounds returned rows', async () => {
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -205,12 +205,12 @@ test('deep semantic retrieval scores the complete passage corpus without a candi
       return { rows: [{ sourceId: 'answer:1', passageText: 'Mula Maya is the original cause.', scannedPassages: 19777 }] };
     },
   };
-  const result = await searchAllPassages(client, { id: 'default' }, [0.2, 0.8], 'mula OR maya', 0.31);
+  const result = await searchAllPassages(client, { id: 'default' }, [0.2, 0.8], 'mula OR maya', 0.31, 180);
   const search = calls[0];
   assert.match(search.statement, /all_scored AS MATERIALIZED/);
   assert.match(search.statement, /FROM semantic_qa\.passages/);
-  assert.equal(/LIMIT \$|LIMIT \d/.test(search.statement), false);
-  assert.deepEqual(search.params, ['[0.2,0.8]', 'mula OR maya', 0.31]);
+  assert.match(search.statement, /LIMIT \$4/);
+  assert.deepEqual(search.params, ['[0.2,0.8]', 'mula OR maya', 0.31, 180]);
   assert.equal(result.exhaustive, true);
   assert.equal(result.scannedPassages, 19777);
   assert.equal(result.rows[0].scannedPassages, undefined);

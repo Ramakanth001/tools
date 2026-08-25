@@ -6,7 +6,7 @@ const LEGACY_EMBEDDING_FORMAT = 'legacy-v1';
 const GENERIC_EMBEDDING_FORMAT = 'generic-qa-v3';
 const EMBEDDINGGEMMA_FORMAT = 'embeddinggemma-asymmetric-v3';
 const LEGACY_EMBEDDINGGEMMA_FORMAT = 'embeddinggemma-asymmetric-v2';
-const RETRIEVAL_SCHEMA_VERSION = 'passage-v4';
+const RETRIEVAL_SCHEMA_VERSION = 'answer-unit-v5';
 
 const SEARCH_STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'can', 'could', 'did', 'do', 'does', 'for', 'from',
@@ -176,12 +176,13 @@ function scoreCandidate(row, query) {
   const lexical = 1 - Math.exp(-6 * Math.max(0, Number(row.lexicalScore) || 0));
   const titleCoverage = coverage(queryTokens, row.question);
   const answerCoverage = coverage(queryTokens, row.answer);
-  const contextCoverage = coverage(queryTokens, row?.metadata?.source_context || '');
+  const sourceContext = row?.metadata?.question_context || row?.metadata?.source_context || '';
+  const contextCoverage = coverage(queryTokens, sourceContext);
   const intent = intentSignals(query, row);
   const position = chunkPositionPrior(row, titleCoverage, intent.positive);
   const queryKey = significantTokens(query).join(' ');
   const titleKey = significantTokens(row.question).join(' ');
-  const contextKey = significantTokens(row?.metadata?.source_context || '').join(' ');
+  const contextKey = significantTokens(sourceContext).join(' ');
   const exactTitle = Boolean(queryKey && queryKey === titleKey);
   const exactContext = Boolean(queryKey && queryKey === contextKey);
   const structuredQa = row?.metadata?.source_type === 'qa' ? 1 : 0;
@@ -253,9 +254,20 @@ function rerankPassageMatches(rows, query, limit = 5) {
         end: Number(row.passageEnd),
         semanticSimilarity: Math.max(0, Math.min(1, Number(row.similarity) || 0)),
         lexicalScore: Number(row.lexicalScore) || 0,
+        discoverySimilarity: Math.max(0, Math.min(1, Number(row.discoverySimilarity) || 0)),
+        answerUnitId: row.answerUnitId || null,
+        author: row.author || '',
+        unitKind: row.unitKind || '',
+        associatedQuestion: row.associatedQuestion || '',
+        citationStart: Number(row.citationStart),
+        citationEnd: Number(row.citationEnd),
+        citationText: row.citationText || row.passageText,
+        contextComplete: row.contextComplete !== false,
+        storyComplete: row.storyComplete !== false,
+        matchChannels: Array.isArray(row.matchChannels) ? row.matchChannels : [],
       }))
       .sort((left, right) => (
-        right.semanticSimilarity - left.semanticSimilarity ||
+        Math.max(right.semanticSimilarity, right.discoverySimilarity * 0.92) - Math.max(left.semanticSimilarity, left.discoverySimilarity * 0.92) ||
         right.lexicalScore - left.lexicalScore ||
         left.passageIndex - right.passageIndex
       ));
@@ -269,7 +281,7 @@ function rerankPassageMatches(rows, query, limit = 5) {
     // only add a small bonus; word overlap and stored titles add nothing.
     const relevanceScore = Math.min(
       1,
-      best.semanticSimilarity + Math.min(0.03, supportingPassages * 0.015),
+      Math.max(best.semanticSimilarity, best.discoverySimilarity * 0.92) + Math.min(0.03, supportingPassages * 0.015),
     );
     const representative = sourceRows.find((row) => Number(row.passageIndex) === best.passageIndex) || sourceRows[0];
     rankedRecords.push({
@@ -337,6 +349,15 @@ function rerankTextMatches(rows, limit = 5) {
       lexicalScore: Number(row.lexicalScore) || 0,
       trigramSimilarity: Number(row.trigramSimilarity) || 0,
       matchChannels: Array.isArray(row.matchChannels) ? row.matchChannels : [],
+      answerUnitId: row.answerUnitId || null,
+      author: row.author || '',
+      unitKind: row.unitKind || '',
+      associatedQuestion: row.associatedQuestion || '',
+      citationStart: Number(row.citationStart),
+      citationEnd: Number(row.citationEnd),
+      citationText: row.citationText || row.passageText,
+      contextComplete: row.contextComplete !== false,
+      storyComplete: row.storyComplete !== false,
     })).sort((left, right) => (
       right.searchScore - left.searchScore ||
       right.lexicalScore - left.lexicalScore ||

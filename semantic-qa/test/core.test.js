@@ -151,7 +151,7 @@ test('the final response order preserves an explicit quote identity constraint',
 test('current embedding formats include distinct source context and retain the EmbeddingGemma prompts', () => {
   assert.equal(GENERIC_EMBEDDING_FORMAT, 'generic-qa-v3');
   assert.equal(EMBEDDINGGEMMA_FORMAT, 'embeddinggemma-asymmetric-v3');
-  assert.equal(RETRIEVAL_SCHEMA_VERSION, 'passage-v4');
+  assert.equal(RETRIEVAL_SCHEMA_VERSION, 'answer-unit-v5');
   assert.equal(
     buildDocumentEmbeddingText('Who is Ada?', 'Ada was a mathematician.', {
       model: 'embeddinggemma',

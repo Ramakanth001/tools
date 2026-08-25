@@ -272,6 +272,11 @@ async function passagesTableExists(client) {
   return result.rows[0].exists;
 }
 
+async function relationExists(client, relation) {
+  const result = await client.query('SELECT to_regclass($1) IS NOT NULL AS exists', [`semantic_qa.${relation}`]);
+  return result.rows[0].exists;
+}
+
 async function createRecordsTable(client, tableName, dimension, { unlogged = false } = {}) {
   const name = assertIdentifier(tableName, 'Index table');
   const dim = ensureDimension(dimension);
@@ -287,7 +292,7 @@ async function createRecordsTable(client, tableName, dimension, { unlogged = fal
       embedding vector(${dim}) NOT NULL,
       search_vector tsvector GENERATED ALWAYS AS (
         setweight(to_tsvector('simple'::regconfig, question), 'A') ||
-        setweight(to_tsvector('simple'::regconfig, coalesce(metadata->>'source_context', '')), 'B') ||
+        setweight(to_tsvector('simple'::regconfig, coalesce(metadata->>'question_context', metadata->>'source_context', '')), 'B') ||
         setweight(to_tsvector('simple'::regconfig, answer), 'D')
       ) STORED,
       updated_at timestamptz NOT NULL DEFAULT now()
@@ -302,14 +307,74 @@ async function createPassagesTable(client, tableName, dimension, { unlogged = fa
     CREATE ${unlogged ? 'UNLOGGED ' : ''}TABLE semantic_qa.${quoteIdentifier(name)} (
       source_id text NOT NULL,
       passage_index integer NOT NULL,
+      answer_unit_id text NOT NULL,
       passage_text text NOT NULL,
       start_offset integer NOT NULL,
       end_offset integer NOT NULL,
+      citation_start_offset integer NOT NULL,
+      citation_end_offset integer NOT NULL,
+      citation_text text NOT NULL,
+      author text NOT NULL DEFAULT 'Swami',
+      unit_kind text NOT NULL CHECK (unit_kind IN ('swami_reply', 'swami_teaching')),
+      associated_question text NOT NULL DEFAULT '',
+      context_complete boolean NOT NULL DEFAULT true,
+      story_complete boolean NOT NULL DEFAULT true,
       embedding vector(${dim}) NOT NULL,
       search_vector tsvector GENERATED ALWAYS AS (
         to_tsvector('simple'::regconfig, passage_text)
       ) STORED,
-      PRIMARY KEY (source_id, passage_index)
+      PRIMARY KEY (source_id, passage_index),
+      CHECK (start_offset >= 0 AND end_offset > start_offset),
+      CHECK (citation_start_offset >= 0 AND citation_end_offset > citation_start_offset),
+      CHECK (author = 'Swami')
+    )
+  `);
+}
+
+async function createAnswerUnitsTable(client, tableName, { unlogged = false } = {}) {
+  const name = assertIdentifier(tableName, 'Answer unit table');
+  await client.query(`
+    CREATE ${unlogged ? 'UNLOGGED ' : ''}TABLE semantic_qa.${quoteIdentifier(name)} (
+      answer_unit_id text PRIMARY KEY,
+      source_id text NOT NULL,
+      unit_index integer NOT NULL,
+      unit_kind text NOT NULL CHECK (unit_kind IN ('swami_reply', 'swami_teaching')),
+      author text NOT NULL CHECK (author = 'Swami'),
+      associated_question text NOT NULL DEFAULT '',
+      language text NOT NULL DEFAULT '',
+      start_offset integer NOT NULL,
+      end_offset integer NOT NULL,
+      unit_text text NOT NULL,
+      content_hash text NOT NULL CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+      context_complete boolean NOT NULL DEFAULT true,
+      UNIQUE (source_id, unit_index),
+      CHECK (start_offset >= 0 AND end_offset > start_offset)
+    )
+  `);
+}
+
+async function createDiscoveryPassagesTable(client, tableName, dimension, { unlogged = false } = {}) {
+  const name = assertIdentifier(tableName, 'Discovery passage table');
+  const dim = ensureDimension(dimension);
+  await client.query(`
+    CREATE ${unlogged ? 'UNLOGGED ' : ''}TABLE semantic_qa.${quoteIdentifier(name)} (
+      source_id text NOT NULL,
+      discovery_index integer NOT NULL,
+      discovery_text text NOT NULL,
+      embedding vector(${dim}) NOT NULL,
+      search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, discovery_text)) STORED,
+      PRIMARY KEY (source_id, discovery_index)
+    )
+  `);
+}
+
+async function createSourceAliasesTable(client, tableName, { unlogged = false } = {}) {
+  const name = assertIdentifier(tableName, 'Source alias table');
+  await client.query(`
+    CREATE ${unlogged ? 'UNLOGGED ' : ''}TABLE semantic_qa.${quoteIdentifier(name)} (
+      alias_id text PRIMARY KEY,
+      source_id text NOT NULL,
+      answer_unit_id text
     )
   `);
 }
@@ -337,6 +402,35 @@ async function createPassageIndexes(client) {
   await client.query(`
     CREATE INDEX IF NOT EXISTS semantic_qa_passages_text_trgm
       ON semantic_qa.passages USING gin (passage_text gin_trgm_ops)
+  `);
+}
+
+async function createV5Indexes(client) {
+  if (await relationExists(client, 'answer_units')) {
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_answer_units_source_id ON semantic_qa.answer_units (source_id, unit_index)');
+  }
+  if (await relationExists(client, 'discovery_passages')) {
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_discovery_embedding_hnsw ON semantic_qa.discovery_passages USING hnsw (embedding vector_cosine_ops)');
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_discovery_search_gin ON semantic_qa.discovery_passages USING gin (search_vector)');
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_discovery_text_trgm ON semantic_qa.discovery_passages USING gin (discovery_text gin_trgm_ops)');
+  }
+  if (await relationExists(client, 'source_aliases')) {
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_source_aliases_source_id ON semantic_qa.source_aliases (source_id)');
+  }
+}
+
+async function grantV5ReadAccess(client) {
+  await client.query(`
+    DO $grant$
+    DECLARE role_name text;
+    BEGIN
+      FOREACH role_name IN ARRAY ARRAY['spiritual_gpt_index_reader', 'semantic_qa_reader'] LOOP
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+          EXECUTE format('GRANT USAGE ON SCHEMA semantic_qa TO %I', role_name);
+          EXECUTE format('GRANT SELECT ON semantic_qa.corpus, semantic_qa.records, semantic_qa.passages, semantic_qa.answer_units, semantic_qa.discovery_passages, semantic_qa.source_aliases TO %I', role_name);
+        END IF;
+      END LOOP;
+    END $grant$
   `);
 }
 
@@ -390,9 +484,14 @@ async function initializeIndex(connection, { model, modelDigest = null, dimensio
       if (!(await passagesTableExists(client))) {
         await createPassagesTable(client, 'passages', dimension);
       }
+      if (!(await relationExists(client, 'answer_units'))) await createAnswerUnitsTable(client, 'answer_units');
+      if (!(await relationExists(client, 'discovery_passages'))) await createDiscoveryPassagesTable(client, 'discovery_passages', dimension);
+      if (!(await relationExists(client, 'source_aliases'))) await createSourceAliasesTable(client, 'source_aliases');
       await createHnswIndex(client);
       await createSearchIndex(client);
       await createPassageIndexes(client);
+      await createV5Indexes(client);
+      await grantV5ReadAccess(client);
       if (!existingCorpus) {
         const formatVersion = embeddingFormatForModel(model);
         await client.query(`
@@ -467,6 +566,9 @@ function stageNames(jobId) {
   return {
     stage: `records_stage_${suffix}`,
     passages: `passages_stage_${suffix}`,
+    answerUnits: `answer_units_stage_${suffix}`,
+    discovery: `discovery_stage_${suffix}`,
+    aliases: `aliases_stage_${suffix}`,
     seen: `records_seen_${suffix}`,
   };
 }
@@ -475,9 +577,15 @@ async function createSyncStage(client, jobId, dimension) {
   const names = stageNames(jobId);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.stage)}`);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.passages)}`);
+  await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.answerUnits)}`);
+  await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.discovery)}`);
+  await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.aliases)}`);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
   await createRecordsTable(client, names.stage, dimension, { unlogged: true });
   await createPassagesTable(client, names.passages, dimension, { unlogged: true });
+  await createAnswerUnitsTable(client, names.answerUnits, { unlogged: true });
+  await createDiscoveryPassagesTable(client, names.discovery, dimension, { unlogged: true });
+  await createSourceAliasesTable(client, names.aliases, { unlogged: true });
   await client.query(`CREATE UNLOGGED TABLE semantic_qa.${quoteIdentifier(names.seen)} (source_id text PRIMARY KEY)`);
   return names;
 }
@@ -486,6 +594,9 @@ async function dropSyncStage(client, names) {
   if (!names) return;
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.stage)}`);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.passages)}`);
+  if (names.answerUnits) await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.answerUnits)}`);
+  if (names.discovery) await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.discovery)}`);
+  if (names.aliases) await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.aliases)}`);
   await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
 }
 
@@ -543,22 +654,90 @@ async function insertStagePassages(client, tableName, rows) {
     params.push(
       row.sourceId,
       row.passageIndex,
+      row.answerUnitId,
       row.text,
       row.start,
       row.end,
+      row.citationStart,
+      row.citationEnd,
+      row.citationText,
+      row.author,
+      row.unitKind,
+      row.associatedQuestion || '',
+      Boolean(row.contextComplete),
+      Boolean(row.storyComplete),
       toVectorLiteral(row.embedding),
     );
-    return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5}, $${start + 6}::vector)`;
+    return `(${Array.from({ length: 14 }, (_, index) => `$${start + index + 1}`).join(', ')}, $${start + 15}::vector)`;
   });
   await client.query(`
     INSERT INTO semantic_qa.${quoteIdentifier(tableName)}
-      (source_id, passage_index, passage_text, start_offset, end_offset, embedding)
+      (source_id, passage_index, answer_unit_id, passage_text, start_offset, end_offset,
+       citation_start_offset, citation_end_offset, citation_text, author, unit_kind,
+       associated_question, context_complete, story_complete, embedding)
     VALUES ${tuples.join(',')}
     ON CONFLICT (source_id, passage_index) DO UPDATE SET
+      answer_unit_id = EXCLUDED.answer_unit_id,
       passage_text = EXCLUDED.passage_text,
       start_offset = EXCLUDED.start_offset,
       end_offset = EXCLUDED.end_offset,
+      citation_start_offset = EXCLUDED.citation_start_offset,
+      citation_end_offset = EXCLUDED.citation_end_offset,
+      citation_text = EXCLUDED.citation_text,
+      author = EXCLUDED.author,
+      unit_kind = EXCLUDED.unit_kind,
+      associated_question = EXCLUDED.associated_question,
+      context_complete = EXCLUDED.context_complete,
+      story_complete = EXCLUDED.story_complete,
       embedding = EXCLUDED.embedding
+  `, params);
+}
+
+async function insertStageAnswerUnits(client, tableName, rows) {
+  if (!rows.length) return;
+  const params = [];
+  const tuples = rows.map((row) => {
+    const start = params.length;
+    params.push(row.answerUnitId, row.sourceId, row.unitIndex, row.unitKind, row.author,
+      row.associatedQuestion || '', row.language || '', row.start, row.end, row.text,
+      row.contentHash, Boolean(row.contextComplete));
+    return Array.from({ length: 12 }, (_, index) => `$${start + index + 1}`).join(', ');
+  }).map((tuple) => `(${tuple})`);
+  await client.query(`
+    INSERT INTO semantic_qa.${quoteIdentifier(tableName)}
+      (answer_unit_id, source_id, unit_index, unit_kind, author, associated_question,
+       language, start_offset, end_offset, unit_text, content_hash, context_complete)
+    VALUES ${tuples.join(',')}
+  `, params);
+}
+
+async function insertStageDiscoveryPassages(client, tableName, rows) {
+  if (!rows.length) return;
+  const params = [];
+  const tuples = rows.map((row) => {
+    const start = params.length;
+    params.push(row.sourceId, row.discoveryIndex, row.text, toVectorLiteral(row.embedding));
+    return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}::vector)`;
+  });
+  await client.query(`
+    INSERT INTO semantic_qa.${quoteIdentifier(tableName)}
+      (source_id, discovery_index, discovery_text, embedding)
+    VALUES ${tuples.join(',')}
+  `, params);
+}
+
+async function insertStageAliases(client, tableName, rows) {
+  if (!rows.length) return;
+  const params = [];
+  const tuples = rows.map((row) => {
+    const start = params.length;
+    params.push(row.aliasId, row.sourceId, row.answerUnitId || null);
+    return `($${start + 1}, $${start + 2}, $${start + 3})`;
+  });
+  await client.query(`
+    INSERT INTO semantic_qa.${quoteIdentifier(tableName)} (alias_id, source_id, answer_unit_id)
+    VALUES ${tuples.join(',')} ON CONFLICT (alias_id) DO UPDATE SET
+      source_id = EXCLUDED.source_id, answer_unit_id = EXCLUDED.answer_unit_id
   `, params);
 }
 
@@ -606,11 +785,54 @@ async function commitIncremental(client, {
          OR NOT EXISTS (SELECT 1 FROM semantic_qa.records r WHERE r.source_id = p.source_id)
     `);
     await client.query(`
+      DELETE FROM semantic_qa.answer_units u
+      WHERE u.source_id IN (SELECT source_id FROM semantic_qa.${quoteIdentifier(names.stage)})
+         OR NOT EXISTS (SELECT 1 FROM semantic_qa.records r WHERE r.source_id = u.source_id)
+    `);
+    await client.query(`
+      DELETE FROM semantic_qa.discovery_passages d
+      WHERE d.source_id IN (SELECT source_id FROM semantic_qa.${quoteIdentifier(names.stage)})
+         OR NOT EXISTS (SELECT 1 FROM semantic_qa.records r WHERE r.source_id = d.source_id)
+    `);
+    await client.query(`
+      DELETE FROM semantic_qa.source_aliases a
+      WHERE a.source_id IN (SELECT source_id FROM semantic_qa.${quoteIdentifier(names.stage)})
+         OR NOT EXISTS (SELECT 1 FROM semantic_qa.records r WHERE r.source_id = a.source_id)
+    `);
+    await client.query(`
       INSERT INTO semantic_qa.passages
-        (source_id, passage_index, passage_text, start_offset, end_offset, embedding)
-      SELECT source_id, passage_index, passage_text, start_offset, end_offset, embedding
+        (source_id, passage_index, answer_unit_id, passage_text, start_offset, end_offset,
+         citation_start_offset, citation_end_offset, citation_text, author, unit_kind,
+         associated_question, context_complete, story_complete, embedding)
+      SELECT source_id, passage_index, answer_unit_id, passage_text, start_offset, end_offset,
+             citation_start_offset, citation_end_offset, citation_text, author, unit_kind,
+             associated_question, context_complete, story_complete, embedding
       FROM semantic_qa.${quoteIdentifier(names.passages)}
     `);
+    await client.query(`
+      INSERT INTO semantic_qa.answer_units
+        (answer_unit_id, source_id, unit_index, unit_kind, author, associated_question,
+         language, start_offset, end_offset, unit_text, content_hash, context_complete)
+      SELECT answer_unit_id, source_id, unit_index, unit_kind, author, associated_question,
+             language, start_offset, end_offset, unit_text, content_hash, context_complete
+      FROM semantic_qa.${quoteIdentifier(names.answerUnits)}
+    `);
+    await client.query(`
+      INSERT INTO semantic_qa.discovery_passages (source_id, discovery_index, discovery_text, embedding)
+      SELECT source_id, discovery_index, discovery_text, embedding
+      FROM semantic_qa.${quoteIdentifier(names.discovery)}
+    `);
+    await client.query(`
+      INSERT INTO semantic_qa.source_aliases (alias_id, source_id, answer_unit_id)
+      SELECT alias_id, source_id, answer_unit_id FROM semantic_qa.${quoteIdentifier(names.aliases)}
+    `);
+    const exactness = await client.query(`
+      SELECT count(*)::integer AS invalid
+      FROM semantic_qa.passages p JOIN semantic_qa.records r USING (source_id)
+      WHERE p.passage_text <> substring(r.answer FROM p.start_offset + 1 FOR p.end_offset - p.start_offset)
+         OR p.citation_text <> substring(r.answer FROM p.citation_start_offset + 1 FOR p.citation_end_offset - p.citation_start_offset)
+    `);
+    if (Number(exactness.rows[0]?.invalid)) throw new Error(`Verbatim offset validation failed for ${exactness.rows[0].invalid} passages`);
     await client.query(`
       UPDATE semantic_qa.corpus SET source_mapping = $1::jsonb, embedding_model = $2,
         embedding_model_digest = $3, embedding_dimension = $4, embedding_format_version = $5,
@@ -630,18 +852,55 @@ async function commitRebuild(client, {
 }) {
   await client.query('BEGIN');
   try {
-    await client.query('DROP TABLE IF EXISTS semantic_qa.records');
-    await client.query('DROP TABLE IF EXISTS semantic_qa.passages');
+    const previous = await client.query("SELECT retrieval_schema_version FROM semantic_qa.corpus WHERE id = 'default'");
+    const preserveV4 = previous.rows[0]?.retrieval_schema_version === 'passage-v4';
+    if (preserveV4 && !(await relationExists(client, 'records_v4_rollback'))) {
+      await client.query('ALTER TABLE semantic_qa.records RENAME TO records_v4_rollback');
+      await client.query('ALTER TABLE semantic_qa.passages RENAME TO passages_v4_rollback');
+      await client.query('ALTER TABLE semantic_qa.records_v4_rollback RENAME CONSTRAINT records_pkey TO records_v4_rollback_pkey');
+      await client.query('ALTER TABLE semantic_qa.passages_v4_rollback RENAME CONSTRAINT passages_pkey TO passages_v4_rollback_pkey');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_records_embedding_hnsw RENAME TO semantic_qa_records_embedding_hnsw_v4_rollback');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_records_search_gin RENAME TO semantic_qa_records_search_gin_v4_rollback');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_records_question_trgm RENAME TO semantic_qa_records_question_trgm_v4_rollback');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_passages_embedding_hnsw RENAME TO semantic_qa_passages_embedding_hnsw_v4_rollback');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_passages_search_gin RENAME TO semantic_qa_passages_search_gin_v4_rollback');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_passages_source_id RENAME TO semantic_qa_passages_source_id_v4_rollback');
+      await client.query('ALTER INDEX IF EXISTS semantic_qa.semantic_qa_passages_text_trgm RENAME TO semantic_qa_passages_text_trgm_v4_rollback');
+    } else {
+      await client.query('DROP TABLE IF EXISTS semantic_qa.records');
+      await client.query('DROP TABLE IF EXISTS semantic_qa.passages');
+    }
+    await client.query('DROP TABLE IF EXISTS semantic_qa.answer_units');
+    await client.query('DROP TABLE IF EXISTS semantic_qa.discovery_passages');
+    await client.query('DROP TABLE IF EXISTS semantic_qa.source_aliases');
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.stage)} SET LOGGED`);
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.stage)} RENAME TO records`);
     await client.query(`ALTER TABLE semantic_qa.records RENAME CONSTRAINT ${quoteIdentifier(`${names.stage}_pkey`)} TO records_pkey`);
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.passages)} SET LOGGED`);
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.passages)} RENAME TO passages`);
     await client.query(`ALTER TABLE semantic_qa.passages RENAME CONSTRAINT ${quoteIdentifier(`${names.passages}_pkey`)} TO passages_pkey`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.answerUnits)} SET LOGGED`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.answerUnits)} RENAME TO answer_units`);
+    await client.query(`ALTER TABLE semantic_qa.answer_units RENAME CONSTRAINT ${quoteIdentifier(`${names.answerUnits}_pkey`)} TO answer_units_pkey`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.discovery)} SET LOGGED`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.discovery)} RENAME TO discovery_passages`);
+    await client.query(`ALTER TABLE semantic_qa.discovery_passages RENAME CONSTRAINT ${quoteIdentifier(`${names.discovery}_pkey`)} TO discovery_passages_pkey`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.aliases)} SET LOGGED`);
+    await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.aliases)} RENAME TO source_aliases`);
+    await client.query(`ALTER TABLE semantic_qa.source_aliases RENAME CONSTRAINT ${quoteIdentifier(`${names.aliases}_pkey`)} TO source_aliases_pkey`);
     await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
     await createHnswIndex(client);
     await createSearchIndex(client);
     await createPassageIndexes(client);
+    await createV5Indexes(client);
+    await grantV5ReadAccess(client);
+    const exactness = await client.query(`
+      SELECT count(*)::integer AS invalid
+      FROM semantic_qa.passages p JOIN semantic_qa.records r USING (source_id)
+      WHERE p.passage_text <> substring(r.answer FROM p.start_offset + 1 FOR p.end_offset - p.start_offset)
+         OR p.citation_text <> substring(r.answer FROM p.citation_start_offset + 1 FOR p.citation_end_offset - p.citation_start_offset)
+    `);
+    if (Number(exactness.rows[0]?.invalid)) throw new Error(`Verbatim offset validation failed for ${exactness.rows[0].invalid} passages`);
     await client.query(`
       INSERT INTO semantic_qa.corpus
         (id, source_mapping, embedding_model, embedding_model_digest, embedding_dimension,
@@ -728,6 +987,19 @@ function groupExpansionPriority(row) {
     ? 1 - Math.exp(-6 * lexicalScore)
     : -Infinity;
   return Math.max(dense, lexical);
+}
+
+function passageMetadataColumns(corpus, alias = 'p') {
+  if (corpus?.retrievalSchemaVersion === RETRIEVAL_SCHEMA_VERSION) {
+    return `${alias}.answer_unit_id AS "answerUnitId", ${alias}.author, ${alias}.unit_kind AS "unitKind",
+            ${alias}.associated_question AS "associatedQuestion",
+            ${alias}.citation_start_offset AS "citationStart", ${alias}.citation_end_offset AS "citationEnd",
+            ${alias}.citation_text AS "citationText", ${alias}.context_complete AS "contextComplete",
+            ${alias}.story_complete AS "storyComplete"`;
+  }
+  return `NULL::text AS "answerUnitId", 'Swami'::text AS author, 'swami_teaching'::text AS "unitKind",
+          ''::text AS "associatedQuestion", ${alias}.start_offset AS "citationStart", ${alias}.end_offset AS "citationEnd",
+          ${alias}.passage_text AS "citationText", true AS "contextComplete", true AS "storyComplete"`;
 }
 
 function selectExpandableGroups(rows, limit) {
@@ -941,6 +1213,59 @@ async function searchIndex(connection, vector, queryText, limit) {
   });
 }
 
+async function searchDiscoveryCandidates(client, vectorLiteral, queryText, limit) {
+  if (!(await relationExists(client, 'discovery_passages'))) return [];
+  const boundedLimit = Math.max(1, Math.min(200, Number(limit) || 60));
+  const result = await client.query(`
+    WITH query AS MATERIALIZED (SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms),
+    dense AS MATERIALIZED (
+      SELECT source_id, max(1 - (embedding <=> $1::vector)) AS discovery_similarity
+      FROM (
+        SELECT source_id, embedding FROM semantic_qa.discovery_passages
+        ORDER BY embedding <=> $1::vector LIMIT $3 * 4
+      ) ranked GROUP BY source_id
+    ),
+    lexical AS MATERIALIZED (
+      SELECT d.source_id, max(ts_rank_cd(d.search_vector, q.terms)) AS discovery_lexical
+      FROM semantic_qa.discovery_passages d CROSS JOIN query q
+      WHERE q.terms::text <> '' AND d.search_vector @@ q.terms
+      GROUP BY d.source_id ORDER BY discovery_lexical DESC LIMIT $3 * 4
+    ),
+    sources AS MATERIALIZED (
+      SELECT coalesce(d.source_id, l.source_id) AS source_id,
+             coalesce(d.discovery_similarity, 0) AS discovery_similarity,
+             coalesce(l.discovery_lexical, 0) AS discovery_lexical
+      FROM dense d FULL JOIN lexical l USING (source_id)
+      ORDER BY greatest(coalesce(d.discovery_similarity, 0), 1 - exp(-6 * coalesce(l.discovery_lexical, 0))) DESC
+      LIMIT $3
+    )
+    SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
+           r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
+           p.passage_index AS "passageIndex", p.passage_text AS "passageText",
+           p.start_offset AS "passageStart", p.end_offset AS "passageEnd",
+           p.answer_unit_id AS "answerUnitId", p.author, p.unit_kind AS "unitKind",
+           p.associated_question AS "associatedQuestion",
+           p.citation_start_offset AS "citationStart", p.citation_end_offset AS "citationEnd",
+           p.citation_text AS "citationText", p.context_complete AS "contextComplete",
+           p.story_complete AS "storyComplete",
+           1 - (p.embedding <=> $1::vector) AS similarity,
+           ts_rank_cd(p.search_vector, q.terms) AS "lexicalScore",
+           s.discovery_similarity AS "discoverySimilarity",
+           s.discovery_lexical AS "discoveryLexicalScore",
+           ARRAY['discovery']::text[] AS "matchChannels"
+    FROM sources s
+    JOIN semantic_qa.records r USING (source_id)
+    JOIN LATERAL (
+      SELECT * FROM semantic_qa.passages candidate
+      WHERE candidate.source_id = s.source_id
+      ORDER BY candidate.embedding <=> $1::vector, candidate.passage_index
+      LIMIT 3
+    ) p ON true
+    CROSS JOIN query q
+  `, [vectorLiteral, queryText, boundedLimit]);
+  return result.rows;
+}
+
 async function searchPassages(client, corpus, vector, queryText, limit) {
   const vectorLiteral = toVectorLiteral(vector);
   const limits = searchLimits(limit);
@@ -998,6 +1323,7 @@ async function searchPassages(client, corpus, vector, queryText, limit) {
              r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
              p.passage_index AS "passageIndex", p.passage_text AS "passageText",
              p.start_offset AS "passageStart", p.end_offset AS "passageEnd",
+             ${passageMetadataColumns(corpus, 'p')},
              1 - (p.embedding <=> $1::vector) AS similarity,
              ts_rank_cd(p.search_vector, q.terms) AS "lexicalScore"
       FROM candidates c
@@ -1005,8 +1331,22 @@ async function searchPassages(client, corpus, vector, queryText, limit) {
       JOIN semantic_qa.records r USING (source_id)
       CROSS JOIN query q
     `, [vectorLiteral, queryText, limits.candidateLimit, limits.rawCandidateLimit]);
+    const discoveryRows = corpus.retrievalSchemaVersion === RETRIEVAL_SCHEMA_VERSION
+      ? await searchDiscoveryCandidates(client, vectorLiteral, queryText, limits.candidateLimit)
+      : [];
     await client.query('COMMIT');
-    return { corpus, rows: result.rows, hybrid: true, unit: 'answer_passage' };
+    const rows = new Map();
+    for (const row of [...result.rows, ...discoveryRows]) {
+      const key = `${row.sourceId}:${row.passageIndex}`;
+      const existing = rows.get(key);
+      rows.set(key, existing ? {
+        ...existing,
+        discoverySimilarity: row.discoverySimilarity ?? existing.discoverySimilarity,
+        discoveryLexicalScore: row.discoveryLexicalScore ?? existing.discoveryLexicalScore,
+        matchChannels: [...new Set([...(existing.matchChannels || []), ...(row.matchChannels || [])])],
+      } : row);
+    }
+    return { corpus, rows: [...rows.values()], hybrid: true, unit: 'answer_passage' };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
@@ -1029,9 +1369,10 @@ async function searchPassageIndex(connection, vector, queryText, limit) {
   });
 }
 
-async function searchAllPassages(client, corpus, vector, queryText, minimumSimilarity = 0.25) {
+async function searchAllPassages(client, corpus, vector, queryText, minimumSimilarity = 0.25, maximumRows = 180) {
   const vectorLiteral = toVectorLiteral(vector);
   const similarityFloor = Math.max(-1, Math.min(1, Number(minimumSimilarity) || 0.25));
+  const resultLimit = Math.max(1, Math.min(MAX_RAW_CANDIDATES, Math.trunc(Number(maximumRows)) || 180));
   const result = await client.query(`
     WITH query AS MATERIALIZED (
       SELECT websearch_to_tsquery('simple'::regconfig, $2) AS terms
@@ -1057,18 +1398,35 @@ async function searchAllPassages(client, corpus, vector, queryText, minimumSimil
            r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
            e.passage_index AS "passageIndex", e.passage_text AS "passageText",
            e.start_offset AS "passageStart", e.end_offset AS "passageEnd",
+           ${passageMetadataColumns(corpus, 'p')},
            e.similarity, e.lexical_score AS "lexicalScore",
            stats.passage_count AS "scannedPassages"
     FROM eligible e
+    JOIN semantic_qa.passages p USING (source_id, passage_index)
     JOIN semantic_qa.records r USING (source_id)
     CROSS JOIN corpus_stats stats
     WHERE e.source_rank <= 3
     ORDER BY e.similarity DESC, e.lexical_score DESC, r.source_id, e.passage_index
-  `, [vectorLiteral, queryText, similarityFloor]);
+    LIMIT $4
+  `, [vectorLiteral, queryText, similarityFloor, resultLimit]);
+  const discoveryRows = corpus.retrievalSchemaVersion === RETRIEVAL_SCHEMA_VERSION
+    ? await searchDiscoveryCandidates(client, vectorLiteral, queryText, Math.min(resultLimit, 120))
+    : [];
+  const fusedRows = new Map();
+  for (const row of [...result.rows, ...discoveryRows]) {
+    const key = `${row.sourceId}:${row.passageIndex}`;
+    const existing = fusedRows.get(key);
+    fusedRows.set(key, existing ? {
+      ...existing,
+      discoverySimilarity: row.discoverySimilarity ?? existing.discoverySimilarity,
+      discoveryLexicalScore: row.discoveryLexicalScore ?? existing.discoveryLexicalScore,
+      matchChannels: [...new Set([...(existing.matchChannels || []), ...(row.matchChannels || [])])],
+    } : row);
+  }
   const scannedPassages = Number(result.rows[0]?.scannedPassages || 0);
   return {
     corpus,
-    rows: result.rows.map(({ scannedPassages: _scannedPassages, ...row }) => row),
+    rows: [...fusedRows.values()].slice(0, resultLimit).map(({ scannedPassages: _scannedPassages, ...row }) => row),
     hybrid: true,
     exhaustive: true,
     scannedPassages,
@@ -1076,7 +1434,7 @@ async function searchAllPassages(client, corpus, vector, queryText, minimumSimil
   };
 }
 
-async function searchAllPassageIndex(connection, vector, queryText, minimumSimilarity) {
+async function searchAllPassageIndex(connection, vector, queryText, minimumSimilarity, maximumRows) {
   return withPool(connection, async (pool) => {
     const client = await pool.connect();
     try {
@@ -1085,7 +1443,7 @@ async function searchAllPassageIndex(connection, vector, queryText, minimumSimil
       if (!corpus || !(await recordsTableExists(client)) || !(await passagesTableExists(client))) {
         return { corpus, rows: [], hybrid: true, exhaustive: true, scannedPassages: 0, unit: 'answer_passage' };
       }
-      return await searchAllPassages(client, corpus, vector, queryText, minimumSimilarity);
+      return await searchAllPassages(client, corpus, vector, queryText, minimumSimilarity, maximumRows);
     } finally {
       client.release();
     }
@@ -1096,6 +1454,58 @@ async function searchTextRecords(client, corpus, queryText, limit) {
   const query = String(queryText || '').trim();
   if (!query) return { corpus, rows: [], hybrid: true, unit: 'text_passage' };
   const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+  const hasDiscovery = corpus.retrievalSchemaVersion === RETRIEVAL_SCHEMA_VERSION && await relationExists(client, 'discovery_passages');
+  const discoveryPrimaryCtes = hasDiscovery ? `
+      exact_discovery AS MATERIALIZED (
+        SELECT d.source_id, min(p.passage_index) AS passage_index,
+               row_number() OVER (ORDER BY max(matched.phrase_length) DESC, d.source_id) AS rank,
+               'exact discovery'::text AS channel, 3.0::float8 AS weight
+        FROM semantic_qa.discovery_passages d CROSS JOIN input q
+        CROSS JOIN LATERAL (
+          SELECT max(length(phrase)) AS phrase_length FROM unnest(q.phrases) AS phrase
+          WHERE position(lower(phrase) in lower(d.discovery_text)) > 0
+        ) matched
+        JOIN semantic_qa.passages p USING (source_id)
+        WHERE matched.phrase_length IS NOT NULL
+        GROUP BY d.source_id
+        ORDER BY max(matched.phrase_length) DESC, d.source_id
+        LIMIT $2 * 4
+      ),
+      full_text_discovery AS MATERIALIZED (
+        SELECT d.source_id, min(p.passage_index) AS passage_index,
+               row_number() OVER (ORDER BY max(ts_rank_cd(d.search_vector, q.terms)) DESC, d.source_id) AS rank,
+               'discovery full text'::text AS channel, 1.9::float8 AS weight
+        FROM semantic_qa.discovery_passages d CROSS JOIN input q
+        JOIN semantic_qa.passages p USING (source_id)
+        WHERE q.terms::text <> '' AND d.search_vector @@ q.terms
+        GROUP BY d.source_id
+        ORDER BY max(ts_rank_cd(d.search_vector, q.terms)) DESC, d.source_id
+        LIMIT $2 * 5
+      ),` : `
+      exact_discovery AS MATERIALIZED (
+        SELECT NULL::text AS source_id, NULL::integer AS passage_index, NULL::bigint AS rank,
+               NULL::text AS channel, NULL::float8 AS weight WHERE false
+      ),
+      full_text_discovery AS MATERIALIZED (
+        SELECT NULL::text AS source_id, NULL::integer AS passage_index, NULL::bigint AS rank,
+               NULL::text AS channel, NULL::float8 AS weight WHERE false
+      ),`;
+  const discoveryFuzzyCte = hasDiscovery ? `
+      fuzzy_discovery AS MATERIALIZED (
+        SELECT d.source_id, min(p.passage_index) AS passage_index,
+               row_number() OVER (ORDER BY max(word_similarity(q.text, d.discovery_text)) DESC, d.source_id) AS rank,
+               'fuzzy discovery'::text AS channel, 1.1::float8 AS weight
+        FROM semantic_qa.discovery_passages d CROSS JOIN input q CROSS JOIN primary_source_count c
+        JOIN semantic_qa.passages p USING (source_id)
+        WHERE c.count < $2 AND q.text <% d.discovery_text
+        GROUP BY d.source_id
+        ORDER BY max(word_similarity(q.text, d.discovery_text)) DESC, d.source_id
+        LIMIT $2 * 4
+      ),` : `
+      fuzzy_discovery AS MATERIALIZED (
+        SELECT NULL::text AS source_id, NULL::integer AS passage_index, NULL::bigint AS rank,
+               NULL::text AS channel, NULL::float8 AS weight WHERE false
+      ),`;
   await client.query('BEGIN');
   try {
     await client.query(`SET LOCAL pg_trgm.word_similarity_threshold = 0.22`);
@@ -1155,9 +1565,11 @@ async function searchTextRecords(client, corpus, queryText, limit) {
         ORDER BY ts_rank_cd(to_tsvector('simple'::regconfig, r.question), q.terms) DESC, r.source_id
         LIMIT $2 * 5
       ),
+      ${discoveryPrimaryCtes}
       primary_candidates AS MATERIALIZED (
         SELECT * FROM exact_passage UNION ALL SELECT * FROM full_text_passage
         UNION ALL SELECT * FROM exact_title UNION ALL SELECT * FROM full_text_title
+        UNION ALL SELECT * FROM exact_discovery UNION ALL SELECT * FROM full_text_discovery
       ),
       primary_source_count AS MATERIALIZED (
         SELECT count(DISTINCT source_id) AS count FROM primary_candidates
@@ -1183,9 +1595,10 @@ async function searchTextRecords(client, corpus, queryText, limit) {
         ORDER BY word_similarity(q.text, r.question) DESC, r.source_id
         LIMIT $2 * 4
       ),
+      ${discoveryFuzzyCte}
       candidates AS MATERIALIZED (
         SELECT * FROM primary_candidates UNION ALL SELECT * FROM fuzzy_passage
-        UNION ALL SELECT * FROM fuzzy_title
+        UNION ALL SELECT * FROM fuzzy_title UNION ALL SELECT * FROM fuzzy_discovery
       ),
       fused AS MATERIALIZED (
         SELECT source_id, passage_index,
@@ -1202,6 +1615,7 @@ async function searchTextRecords(client, corpus, queryText, limit) {
              r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
              p.passage_index AS "passageIndex", p.passage_text AS "passageText",
              p.start_offset AS "passageStart", p.end_offset AS "passageEnd",
+             ${passageMetadataColumns(corpus, 'p')},
              least(1, ranked.rrf_score / 0.10) AS "searchScore",
              ranked.channels AS "matchChannels",
              ts_rank_cd(p.search_vector, q.terms) AS "lexicalScore",
@@ -1423,12 +1837,19 @@ async function listDocuments(connection, { query = '', page = 1, pageSize = 50 }
 
 async function getDocumentRecords(connection, reference) {
   return withPool(connection, async (pool) => {
+    const hasAliases = await relationExists(pool, 'source_aliases');
     const result = await pool.query(`
-      WITH selected AS (
+      WITH requested AS (
+        SELECT $1::text AS reference
+      ), resolved AS (
+        SELECT coalesce(a.source_id, requested.reference) AS source_id
+        FROM requested
+        ${hasAliases ? 'LEFT JOIN semantic_qa.source_aliases a ON a.alias_id = requested.reference' : ''}
+      ), selected AS (
         SELECT coalesce(source_group, source_id) AS source_group
-        FROM semantic_qa.records
-        WHERE source_id = $1 OR source_group = $1
-        ORDER BY CASE WHEN source_id = $1 THEN 0 ELSE 1 END
+        FROM semantic_qa.records CROSS JOIN resolved
+        WHERE records.source_id = resolved.source_id OR source_group = resolved.source_id
+        ORDER BY CASE WHEN records.source_id = resolved.source_id THEN 0 ELSE 1 END
         LIMIT 1
       )
       SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
@@ -1438,6 +1859,35 @@ async function getDocumentRecords(connection, reference) {
                     THEN (r.metadata->>'chunk_index')::integer ELSE 2147483647 END,
                r.source_id
     `, [String(reference || '')]);
+    return result.rows;
+  });
+}
+
+async function getAnswerUnits(connection, references) {
+  const requested = [...new Set((Array.isArray(references) ? references : [references]).map(String).filter(Boolean))];
+  if (!requested.length) return [];
+  return withPool(connection, async (pool) => {
+    if (!(await relationExists(pool, 'answer_units'))) return [];
+    const result = await pool.query(`
+      WITH requested(reference) AS (SELECT unnest($1::text[])),
+      resolved AS (
+        SELECT requested.reference, coalesce(a.source_id, requested.reference) AS source_id,
+               a.answer_unit_id
+        FROM requested LEFT JOIN semantic_qa.source_aliases a ON a.alias_id = requested.reference
+      )
+      SELECT resolved.reference AS "requestedReference", u.answer_unit_id AS "answerUnitId",
+             u.source_id AS "sourceId", r.question AS title, r.metadata,
+             u.unit_index AS "unitIndex", u.unit_kind AS "unitKind", u.author,
+             u.associated_question AS "associatedQuestion", u.language,
+             u.start_offset AS start, u.end_offset AS "end", u.unit_text AS text,
+             r.answer AS "displayText",
+             u.content_hash AS "contentHash", u.context_complete AS "contextComplete"
+      FROM resolved
+      JOIN semantic_qa.answer_units u ON u.source_id = resolved.source_id
+        AND (resolved.answer_unit_id IS NULL OR u.answer_unit_id = resolved.answer_unit_id)
+      JOIN semantic_qa.records r ON r.source_id = u.source_id
+      ORDER BY array_position($1::text[], resolved.reference), u.unit_index
+    `, [requested]);
     return result.rows;
   });
 }
@@ -1464,6 +1914,9 @@ module.exports = {
   getExistingHashes,
   insertStageRecords,
   insertStagePassages,
+  insertStageAnswerUnits,
+  insertStageDiscoveryPassages,
+  insertStageAliases,
   createSyncRun,
   updateSyncRun,
   commitIncremental,
@@ -1478,4 +1931,5 @@ module.exports = {
   searchTextIndex,
   listDocuments,
   getDocumentRecords,
+  getAnswerUnits,
 };
