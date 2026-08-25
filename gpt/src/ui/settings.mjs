@@ -1,7 +1,7 @@
 export const CHAT_MODELS = ['qwen3:14b-q4_K_M', 'qwen3:14b-q8_0'];
 export const CONTEXT_OPTIONS = [8192, 12288, 16384];
 export const TEMPERATURE_PRESETS = [
-  { value: 0.1, label: 'Faithful · 0.1', description: 'Stays close to the source wording' },
+  { value: 0.1, label: 'Verbatim · 0.1', description: 'Exact corpus wording only — no paraphrasing' },
   { value: 0.3, label: 'Balanced · 0.3', description: 'Clear synthesis with conservative paraphrasing' },
   { value: 0.5, label: 'Natural · 0.5', description: 'More fluent and meaningful paraphrasing' },
   { value: 0.7, label: 'Interpretive · 0.7', description: 'Most expressive cross-source synthesis' },
@@ -14,6 +14,13 @@ export const DEFAULT_SETTINGS = {
   contextTokens: 8192, responseTemperature: 0.3, hardwarePreference: 'auto', unloadAfterTurn: true,
 };
 
+function migrateLegacyIndexConnection(connection) {
+  if (connection.database === 'universal_qa_source' && connection.user === 'semantic_qa_reader') {
+    return { ...connection, database: 'universal_qa_index', user: 'spiritual_gpt_index_reader', password: '', connectionString: '' };
+  }
+  return connection;
+}
+
 export function mergeSettings(value = {}, current = DEFAULT_SETTINGS) {
   const requestedContext = Number(value.contextTokens ?? current.contextTokens);
   return {
@@ -22,7 +29,7 @@ export function mergeSettings(value = {}, current = DEFAULT_SETTINGS) {
     responseTemperature: TEMPERATURE_PRESETS.some((preset) => preset.value === Number(value.responseTemperature ?? current.responseTemperature))
       ? Number(value.responseTemperature ?? current.responseTemperature) : DEFAULT_SETTINGS.responseTemperature,
     unloadAfterTurn: value.unloadAfterTurn == null ? Boolean(current.unloadAfterTurn) : Boolean(value.unloadAfterTurn),
-    indexConnection: { ...DEFAULT_SETTINGS.indexConnection, ...(current.indexConnection || {}), ...(value.indexConnection || {}) },
+    indexConnection: migrateLegacyIndexConnection({ ...DEFAULT_SETTINGS.indexConnection, ...(current.indexConnection || {}), ...(value.indexConnection || {}) }),
     chatConnection: { ...DEFAULT_SETTINGS.chatConnection, ...(current.chatConnection || {}), ...(value.chatConnection || {}) },
   };
 }

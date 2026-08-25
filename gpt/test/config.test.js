@@ -37,3 +37,12 @@ test('setup remains incomplete until an allowed model is explicitly selected', (
   assert.equal(configured(settings), false);
   assert.equal(configured(mergeSettings({ chatModel: 'qwen3:14b-q8_0' }, settings)), true);
 });
+
+test('the stale source-database GPT configuration migrates to the read-only vector index', () => {
+  const settings = mergeSettings({ indexConnection: {
+    host: '127.0.0.1', port: 5433, database: 'universal_qa_source', user: 'semantic_qa_reader', password: 'stale',
+  } });
+  assert.equal(settings.indexConnection.database, 'universal_qa_index');
+  assert.equal(settings.indexConnection.user, 'spiritual_gpt_index_reader');
+  assert.equal(settings.indexConnection.password, '');
+});

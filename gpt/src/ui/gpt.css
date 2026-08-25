@@ -29,6 +29,10 @@
 .gpt-chat-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gpt-eyebrow { color: #a78bfa; font-size: 10px; font-weight: 900; letter-spacing: .11em; text-transform: uppercase; }
 .gpt-accuracy { padding: 7px 10px; border: 1px solid rgba(52,211,153,.2); border-radius: 999px; background: rgba(16,185,129,.07); color: #a7f3d0; font-size: 11px; font-weight: 750; }
+.gpt-chat-head-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.gpt-export-chat { padding: 7px 10px; border: 1px solid rgba(96,165,250,.26); border-radius: 9px; background: rgba(37,99,235,.09); color: #bfdbfe; cursor: pointer; font-size: 10px; font-weight: 750; }
+.gpt-export-chat:hover { border-color: rgba(96,165,250,.55); background: rgba(37,99,235,.18); color: white; }
+.gpt-export-chat:disabled { opacity: .4; cursor: not-allowed; }
 .gpt-transcript { flex: 1; min-width: 0; min-height: 0; padding: 14px 0 180px; overflow-x: auto; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
 .gpt-welcome { max-width: 680px; margin: 74px auto 20px; padding: 0 26px; text-align: center; }
 .gpt-welcome-mark { display: inline-flex; width: 58px; height: 58px; align-items: center; justify-content: center; border: 1px solid rgba(167,139,250,.48); border-radius: 18px; background: linear-gradient(135deg, #7c3aed, #2563eb); box-shadow: 0 18px 48px rgba(76,29,149,.4); font-size: 25px; font-weight: 900; }
@@ -82,7 +86,7 @@
 .gpt-pulse { width: 9px; height: 9px; border-radius: 50%; background: #a78bfa; box-shadow: 0 0 0 0 rgba(167,139,250,.5); animation: gpt-pulse 1.5s infinite; }
 @keyframes gpt-pulse { 70% { box-shadow: 0 0 0 9px rgba(167,139,250,0); } 100% { box-shadow: 0 0 0 0 rgba(167,139,250,0); } }
 .gpt-chat-error { max-width: 760px; margin: 12px auto; }
-.gpt-composer-wrap { position: absolute; right: 0; bottom: 0; left: 278px; z-index: 5; padding: 24px max(22px, calc((100% - 1040px) / 2)) 16px; background: linear-gradient(180deg, transparent, rgba(10,13,22,.98) 34%); }
+.gpt-composer-wrap { position: absolute; right: 0; bottom: 0; left: 0; z-index: 5; padding: 24px max(22px, calc((100% - 1040px) / 2)) 16px; background: linear-gradient(180deg, transparent, rgba(10,13,22,.98) 34%); }
 .gpt-runtime-controls { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0 5px 8px; }
 .gpt-runtime-controls label { display: flex; min-width: 0; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(15,19,32,.92); }
 .gpt-runtime-controls label > span { color: rgba(238,242,255,.45); font-size: 9px; font-weight: 750; }
@@ -103,6 +107,7 @@
 .gpt-icon-button { width: 34px; height: 34px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(255,255,255,.05); color: white; cursor: pointer; font-size: 20px; }
 .gpt-source-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0; }
 .gpt-source-meta span { padding: 5px 8px; border-radius: 999px; background: rgba(255,255,255,.06); color: var(--muted); font-size: 10px; }
+.gpt-source-excerpt-label { margin: 4px 0 7px; color: #93c5fd; font-size: 9px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .gpt-source-drawer blockquote { margin: 16px 0 24px; padding: 16px; border: 1px solid rgba(96,165,250,.2); border-left: 3px solid #60a5fa; border-radius: 10px; background: rgba(37,99,235,.07); font-size: 13px; line-height: 1.7; }
 .gpt-source-loading { color: var(--muted); font-size: 12px; }
 .gpt-full-source h4 { margin: 0 0 12px; }
@@ -195,5 +200,6 @@
   .gpt-runtime-controls select { min-width: 92px; }
   .gpt-runtime-controls > small { width: 100%; min-width: 0; flex-basis: 100%; text-align: left; }
   .gpt-accuracy { display: none; }
+  .gpt-export-chat { padding: 7px 8px; white-space: nowrap; }
   .gpt-onboarding-head { align-items: flex-start; flex-direction: column; }
 }

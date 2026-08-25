@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, streamApi } from './api.js';
-import { exportAnswer } from './export.mjs';
+import { exportAnswer, exportConversationPdf, questionForMessage } from './export.mjs';
 import { CHAT_MODELS, CONTEXT_OPTIONS, TEMPERATURE_PRESETS, DEFAULT_SETTINGS, mergeSettings, stripSecrets } from './settings.mjs';
 import './gpt.css';
 
@@ -94,7 +94,7 @@ function ExportMenu({ title, message }) {
   </details>;
 }
 
-function Message({ message, conversationTitle, onSource, onRegenerate, isLatestAssistant }) {
+function Message({ message, question, onSource, onRegenerate, isLatestAssistant }) {
   const assistant = message.role === 'assistant';
   return <article className={`gpt-message ${message.role}`}>
     <div className="gpt-avatar" aria-hidden="true">{assistant ? 'G' : 'Y'}</div>
@@ -103,7 +103,7 @@ function Message({ message, conversationTitle, onSource, onRegenerate, isLatestA
       <div className="gpt-message-content"><MarkdownContent content={message.content} sources={message.sources} onSource={onSource} /></div>
       {assistant ? <div className="gpt-message-actions">
         <button type="button" onClick={() => navigator.clipboard.writeText(message.content)}>Copy</button>
-        <ExportMenu title={conversationTitle} message={message} />
+        <ExportMenu title={question || 'GPT corpus answer'} message={message} />
         {isLatestAssistant ? <button type="button" onClick={() => onRegenerate(message.turnId)}>Regenerate</button> : null}
         {message.sources?.length ? <span>{message.sources.length} verified {message.sources.length === 1 ? 'source' : 'sources'}</span> : null}
       </div> : null}
@@ -139,6 +139,7 @@ function researchStatusDetail(stage, elapsed) {
     searching: 'Embedding the query and searching the read-only corpus',
     comparing: 'Rejecting merely topical matches and retaining useful support',
     reading: 'Adding nearby passages so quotations are not taken out of context',
+    extracting: 'Selecting and validating exact answer spans word for word',
     drafting: 'Synthesizing a detailed answer across the accepted passages',
     verifying: 'Removing or narrowing anything the cited excerpts do not support',
   }[stage] || 'Working against the local corpus';
@@ -300,7 +301,7 @@ function Setup({ runtime, settings, setSettings, health, busy, error, onSave, on
         </select><span className="field-hint">Both quantizations remain available. No default is assumed before local evaluation.</span></label>
         <label className="field"><span className="field-label">Processor preference</span><select value={settings.hardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, hardwarePreference: event.target.value }))}><option value="auto">Auto</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select></label>
         <label className="field"><span className="field-label">Context memory budget</span><select value={settings.contextTokens} onChange={(event) => setSettings((current) => ({ ...current, contextTokens: Number(event.target.value) }))}>{CONTEXT_OPTIONS.map((tokens) => <option key={tokens} value={tokens}>{tokens === 8192 ? '8K · Memory safe (recommended)' : tokens === 12288 ? '12K · Larger comparisons' : '16K · Highest memory use'}</option>)}</select></label>
-        <label className="field"><span className="field-label">Answer temperature</span><select value={settings.responseTemperature} onChange={(event) => setSettings((current) => ({ ...current, responseTemperature: Number(event.target.value) }))}>{TEMPERATURE_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label} · {preset.description}</option>)}</select><span className="field-hint">Low stays close to corpus wording. High gives more meaningful paraphrasing; every claim is still verified.</span></label>
+        <label className="field"><span className="field-label">Answer temperature</span><select value={settings.responseTemperature} onChange={(event) => setSettings((current) => ({ ...current, responseTemperature: Number(event.target.value) }))}>{TEMPERATURE_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label} · {preset.description}</option>)}</select><span className="field-hint">At 0.1 the answer is copied word for word from corpus sources. Higher settings permit progressively more paraphrasing.</span></label>
         <label className="field"><span className="field-label">After each answer</span><select value={settings.unloadAfterTurn ? 'unload' : 'keep'} onChange={(event) => setSettings((current) => ({ ...current, unloadAfterTurn: event.target.value === 'unload' }))}><option value="unload">Unload Qwen and release RAM</option><option value="keep">Keep Qwen warm for 5 minutes</option></select></label>
       </div>
       <div className="gpt-model-status">
@@ -323,7 +324,8 @@ function SourceDrawer({ source, runtime, onClose }) {
   useEffect(() => {
     setDocument(null); setError('');
     if (!source) return;
-    api(runtime, `/sources/${encodeURIComponent(source.sourceId)}?passageIndex=${source.passageIndex}`)
+    const query = new URLSearchParams({ passageIndex: String(source.passageIndex), start: String(source.start), end: String(source.end) });
+    api(runtime, `/sources/${encodeURIComponent(source.sourceId)}?${query}`)
       .then((payload) => setDocument(payload.source)).catch((reason) => setError(reason.message));
   }, [source, runtime]);
   if (!source) return null;
@@ -331,6 +333,7 @@ function SourceDrawer({ source, runtime, onClose }) {
   return <aside className="gpt-source-drawer">
     <div className="gpt-source-head"><div><span className="gpt-eyebrow">Source {source.citationNumber}</span><h3>{source.title || source.sourceId}</h3></div><button type="button" className="gpt-icon-button" onClick={onClose} aria-label="Close source">×</button></div>
     <div className="gpt-source-meta"><span>{metadata.source_type || 'Corpus source'}</span><span>{metadata.record_date || 'Date unavailable'}</span><span>{source.sourceId}</span></div>
+    <div className="gpt-source-excerpt-label">{source.adjudication?.verbatim ? 'Exact answer from corpus' : 'Exact cited source span'}</div>
     <blockquote>{source.excerpt}</blockquote>
     {error ? <div className="alert error">{error}</div> : null}
     {!document && !error ? <div className="gpt-source-loading">Opening full source…</div> : null}
@@ -368,6 +371,7 @@ export default function GptTool({ runtime = STANDALONE_RUNTIME }) {
   const transcriptRef = useRef(null);
 
   const ready = Boolean(health?.ready);
+  const messages = conversation?.messages || [];
   const latestAssistant = useMemo(() => [...(conversation?.messages || [])].reverse().find((message) => message.role === 'assistant'), [conversation]);
 
   async function refreshHealth() {
@@ -455,7 +459,7 @@ export default function GptTool({ runtime = STANDALONE_RUNTIME }) {
 
   async function sendMessage(forcedQuestion = null, regenerateTurnId = null) {
     const question = String(forcedQuestion ?? input).trim();
-    if (!question || busy) return;
+    if ((!question && !regenerateTurnId) || busy) return;
     setBusy(true); setError(''); setStatus({ stage: 'starting', message: 'Starting local research' }); setActiveTurnId(null);
     const controller = new AbortController(); abortRef.current = controller;
     try {
@@ -503,16 +507,16 @@ export default function GptTool({ runtime = STANDALONE_RUNTIME }) {
       </aside>
       {sidebarOpen ? <button type="button" className="gpt-mobile-scrim" aria-label="Close chats" onClick={() => setSidebarOpen(false)} /> : null}
       <main className="gpt-chat">
-        <header className="gpt-chat-head"><button type="button" className="gpt-mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open chats">☰</button><div className="gpt-chat-title"><span className="gpt-eyebrow">Corpus-only researcher</span><h2>{conversation?.title || 'New conversation'}</h2></div><span className="gpt-accuracy">Accuracy first · {settings.chatModel.replace('qwen3:14b-', '')}</span></header>
+        <header className="gpt-chat-head"><button type="button" className="gpt-mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open chats">☰</button><div className="gpt-chat-title"><span className="gpt-eyebrow">Corpus-only researcher</span><h2>{conversation?.title || 'New conversation'}</h2></div><div className="gpt-chat-head-actions"><button type="button" className="gpt-export-chat" disabled={!messages.length || busy} onClick={() => exportConversationPdf({ title: conversation?.title, messages })}>Export chat PDF</button><span className="gpt-accuracy">Accuracy first · {settings.chatModel.replace('qwen3:14b-', '')}</span></div></header>
         <div className="gpt-transcript" ref={transcriptRef}>
           {!conversation?.messages?.length ? <div className="gpt-welcome"><div className="gpt-welcome-mark">G</div><h2>Research the spiritual corpus</h2><p>Ask a question, compare teachings, trace a relationship, or examine an apparent contradiction. GPT will search, check, and cite only the local corpus.</p><div className="gpt-suggestions">{['Compare two teachings about the nature of the world', 'Explain an apparent contradiction across discourses', 'What does the corpus say about unanswered prayer?'].map((text) => <button type="button" key={text} onClick={() => setInput(text)}>{text}</button>)}</div></div> : null}
-          {(conversation?.messages || []).map((message) => <Message key={message.id} message={message} conversationTitle={conversation?.title} onSource={setSource} onRegenerate={(turnId) => sendMessage('', turnId)} isLatestAssistant={message.id === latestAssistant?.id} />)}
+          {messages.map((message, messageIndex) => <Message key={message.id} message={message} question={message.role === 'assistant' ? questionForMessage(messages, messageIndex) : ''} onSource={setSource} onRegenerate={(turnId) => sendMessage('', turnId)} isLatestAssistant={message.id === latestAssistant?.id} />)}
           {busy ? <div className="gpt-research-status"><span className="gpt-pulse" /><div><strong>{status?.message || 'Working locally'}</strong><small>{researchStatusDetail(status?.stage, elapsed)}</small></div></div> : null}
           {error ? <div className="alert error gpt-chat-error">{error}</div> : null}
         </div>
         <div className="gpt-composer-wrap"><div className="gpt-runtime-controls">
           <label title="Higher context can help large comparisons but uses more RAM"><span>Context</span><select aria-label="Context budget" value={settings.contextTokens} disabled={busy || runtimeSaving} onChange={(event) => updateRuntimePreference({ contextTokens: Number(event.target.value) })}>{CONTEXT_OPTIONS.map((tokens) => <option key={tokens} value={tokens}>{tokens / 1024}K{tokens === 8192 ? ' · memory safe' : tokens === 12288 ? ' · broader' : ' · maximum'}</option>)}</select></label>
-          <label title="Low temperature stays close to sources; high temperature paraphrases and synthesizes more"><span>Temperature</span><select aria-label="Answer temperature" value={settings.responseTemperature} disabled={busy || runtimeSaving} onChange={(event) => updateRuntimePreference({ responseTemperature: Number(event.target.value) })}>{TEMPERATURE_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}</select></label>
+          <label title="At 0.1 answers are copied word for word; higher temperatures paraphrase and synthesize more"><span>Temperature</span><select aria-label="Answer temperature" value={settings.responseTemperature} disabled={busy || runtimeSaving} onChange={(event) => updateRuntimePreference({ responseTemperature: Number(event.target.value) })}>{TEMPERATURE_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}</select></label>
           <small>{runtimeSaving ? 'Saving…' : TEMPERATURE_PRESETS.find((preset) => preset.value === settings.responseTemperature)?.description}</small>
         </div><div className="gpt-composer"><textarea rows="1" value={input} disabled={busy} placeholder="Ask the corpus…" onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} />
           {busy ? <button type="button" className="gpt-send stop" onClick={stop} aria-label="Stop">■</button> : <button type="button" className="gpt-send" disabled={!input.trim()} onClick={() => sendMessage()} aria-label="Send">↑</button>}

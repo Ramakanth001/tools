@@ -217,8 +217,12 @@ function extractJson(content) {
   }
   const first = value.indexOf('{');
   const last = value.lastIndexOf('}');
-  if (first >= 0 && last > first) return JSON.parse(value.slice(first, last + 1));
-  throw new Error('Ollama returned invalid structured output');
+  if (first >= 0 && last > first) {
+    try { return JSON.parse(value.slice(first, last + 1)); } catch { /* Report a stable error below. */ }
+  }
+  const error = new Error('Ollama returned invalid structured output');
+  error.code = 'OLLAMA_INVALID_JSON';
+  throw error;
 }
 
 async function chat({ baseUrl, model, messages, schema, tools, think = false, options = {},
@@ -256,17 +260,35 @@ async function chat({ baseUrl, model, messages, schema, tools, think = false, op
 }
 
 async function chatJson(options) {
-  let lastError;
+  let attemptOptions = options;
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await chat(attemptOptions);
     try {
-      const result = await chat(options);
-      return { value: extractJson(result.content), metrics: result.metrics };
+      return { value: extractJson(result.content), metrics: { ...result.metrics, structuredRetries: attempt } };
     } catch (error) {
-      lastError = error;
-      if (error?.name === 'AbortError' || !/structured|JSON/iu.test(String(error.message))) throw error;
+      if (error?.code !== 'OLLAMA_INVALID_JSON') throw error;
+      if (attempt === 1) break;
+
+      const originalOptions = options.options || {};
+      const originalPredictionBudget = Math.max(256, Number(originalOptions.num_predict) || (options.think ? 3200 : 1800));
+      attemptOptions = {
+        ...options,
+        messages: [
+          ...(options.messages || []),
+          { role: 'system', content: 'Your previous response was malformed or incomplete JSON. Regenerate the complete answer from the same evidence. Return exactly one valid JSON object matching the supplied schema, with no Markdown fences or text outside the object.' },
+        ],
+        options: {
+          ...originalOptions,
+          num_predict: Math.min(4096, Math.max(originalPredictionBudget + 512, Math.ceil(originalPredictionBudget * 1.5))),
+          temperature: Math.min(0.2, Number(originalOptions.temperature ?? (options.think ? 0.6 : 0.2))),
+          top_p: Math.min(0.75, Number(originalOptions.top_p ?? 0.8)),
+        },
+      };
     }
   }
-  throw lastError;
+  const error = new Error('The local model could not complete a valid answer structure after an automatic retry. Please regenerate the answer.');
+  error.code = 'OLLAMA_INVALID_JSON';
+  throw error;
 }
 
 async function unload({ baseUrl, model }) {

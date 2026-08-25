@@ -36,6 +36,68 @@ function contractFingerprint(contract) {
 
 function sameFingerprint(left, right) { return JSON.stringify(contractFingerprint(left)) === JSON.stringify(contractFingerprint(right)); }
 
+const REPLY_MARKER = /(?:^|\n)\s*(?:Swami\s+Replied|Answer|Reply)(?:\s*:\s*-?|\s+-)\s*/iu;
+
+function replyMarkerEnd(value) {
+  const match = String(value || '').match(REPLY_MARKER);
+  return match ? Number(match.index) + match[0].length : -1;
+}
+
+function sharedBoundaryLength(previous, next, maximum = 1800) {
+  const left = String(previous || '');
+  const right = String(next || '');
+  const limit = Math.min(maximum, left.length, right.length);
+  for (let length = limit; length >= 24; length -= 1) {
+    if (left.slice(-length) === right.slice(0, length)) return length;
+  }
+  return 0;
+}
+
+function completeAnswerUnit(records, seed = {}) {
+  const ordered = [...(records || [])].sort((left, right) =>
+    Number(left.metadata?.chunk_index || left.sourceOrder || 0) - Number(right.metadata?.chunk_index || right.sourceOrder || 0) ||
+    String(left.sourceId).localeCompare(String(right.sourceId)));
+  const markerRecordIndex = ordered.findIndex((record) => replyMarkerEnd(record.answer) >= 0);
+  const explicitReply = markerRecordIndex >= 0;
+  const segments = [];
+  let assembled = '';
+  for (let index = explicitReply ? markerRecordIndex : 0; index < ordered.length; index += 1) {
+    const record = ordered[index];
+    const answer = String(record.answer || '');
+    let start = explicitReply && index === markerRecordIndex ? replyMarkerEnd(answer) : 0;
+    if (start < 0) start = 0;
+    let excerpt = answer.slice(start);
+    const overlap = assembled ? sharedBoundaryLength(assembled, excerpt) : 0;
+    start += overlap;
+    excerpt = excerpt.slice(overlap).replace(/^\s+/u, '');
+    start += answer.slice(start).length - answer.slice(start).replace(/^\s+/u, '').length;
+    if (!excerpt.trim()) continue;
+    const end = start + excerpt.length;
+    const segment = {
+      ...seed,
+      sourceId: record.sourceId,
+      sourceGroup: record.sourceGroup || record.sourceId,
+      sourceOrder: record.sourceOrder,
+      title: record.title || seed.title,
+      metadata: record.metadata || seed.metadata || {},
+      passageIndex: 0,
+      start,
+      end,
+      excerpt,
+      answerBoundary: explicitReply ? 'explicit_reply' : 'document',
+    };
+    segments.push(segment);
+    assembled = assembled ? `${assembled}\n\n${excerpt}` : excerpt;
+  }
+  return {
+    sourceGroup: seed.sourceGroup || ordered[0]?.sourceGroup || ordered[0]?.sourceId,
+    title: seed.title || ordered[0]?.title || '',
+    answerBoundary: explicitReply ? 'explicit_reply' : 'document',
+    completeAnswer: assembled,
+    segments,
+  };
+}
+
 class CorpusReader {
   constructor() {
     this.holder = new ConfigurablePool({ readOnly: true, applicationName: 'local-corpus-gpt-index-reader' });
@@ -54,17 +116,26 @@ class CorpusReader {
              to_regclass('semantic_qa.corpus') IS NOT NULL AS "hasCorpus",
              to_regclass('semantic_qa.records') IS NOT NULL AS "hasRecords",
              to_regclass('semantic_qa.passages') IS NOT NULL AS "hasPassages",
+             to_regclass('semantic_qa.answer_units') IS NOT NULL AS "hasAnswerUnits",
+             to_regclass('semantic_qa.discovery_passages') IS NOT NULL AS "hasDiscoveryPassages",
+             to_regclass('semantic_qa.source_aliases') IS NOT NULL AS "hasSourceAliases",
              has_schema_privilege(current_user, 'semantic_qa', 'USAGE') AS "schemaUsage",
              CASE WHEN to_regclass('semantic_qa.records') IS NULL THEN false
                   ELSE has_table_privilege(current_user, 'semantic_qa.records', 'SELECT') END AS "recordsSelect",
              CASE WHEN to_regclass('semantic_qa.passages') IS NULL THEN false
-                  ELSE has_table_privilege(current_user, 'semantic_qa.passages', 'SELECT') END AS "passagesSelect"
+                  ELSE has_table_privilege(current_user, 'semantic_qa.passages', 'SELECT') END AS "passagesSelect",
+             CASE WHEN to_regclass('semantic_qa.answer_units') IS NULL THEN false
+                  ELSE has_table_privilege(current_user, 'semantic_qa.answer_units', 'SELECT') END AS "answerUnitsSelect",
+             CASE WHEN to_regclass('semantic_qa.discovery_passages') IS NULL THEN false
+                  ELSE has_table_privilege(current_user, 'semantic_qa.discovery_passages', 'SELECT') END AS "discoveryPassagesSelect",
+             CASE WHEN to_regclass('semantic_qa.source_aliases') IS NULL THEN false
+                  ELSE has_table_privilege(current_user, 'semantic_qa.source_aliases', 'SELECT') END AS "sourceAliasesSelect"
     `);
     const status = result.rows[0];
-    if (!status.hasCorpus || !status.hasRecords || !status.hasPassages) {
-      throw Object.assign(new Error('The corpus index is incomplete; semantic_qa.corpus, records, and passages are required.'), { statusCode: 409 });
+    if (!status.hasCorpus || !status.hasRecords || !status.hasPassages || !status.hasAnswerUnits || !status.hasDiscoveryPassages || !status.hasSourceAliases) {
+      throw Object.assign(new Error('The v5 corpus index is incomplete; corpus, records, passages, answer_units, discovery_passages, and source_aliases are required.'), { statusCode: 409 });
     }
-    if (!status.schemaUsage || !status.recordsSelect || !status.passagesSelect) {
+    if (!status.schemaUsage || !status.recordsSelect || !status.passagesSelect || !status.answerUnitsSelect || !status.discoveryPassagesSelect || !status.sourceAliasesSelect) {
       throw Object.assign(new Error('The configured corpus account needs read-only SELECT access to the semantic_qa index tables.'), { statusCode: 403 });
     }
     const corpus = await pool.query(`
@@ -158,6 +229,30 @@ class CorpusReader {
                      ts_rank_cd(candidate.search_vector, i.terms) DESC, candidate.passage_index LIMIT 1
           ) p ON true
         ),
+        discovery_dense AS MATERIALIZED (
+          SELECT d.source_id, p.passage_index,
+                 row_number() OVER (ORDER BY d.embedding <=> i.embedding, d.source_id, d.discovery_index) AS rank,
+                 'question_discovery_dense'::text AS channel, 0.45::float8 AS weight
+          FROM semantic_qa.discovery_passages d CROSS JOIN input i
+          JOIN LATERAL (
+            SELECT candidate.passage_index FROM semantic_qa.passages candidate
+            WHERE candidate.source_id = d.source_id
+            ORDER BY candidate.embedding <=> i.embedding, candidate.passage_index LIMIT 1
+          ) p ON true
+          ORDER BY d.embedding <=> i.embedding, d.source_id, d.discovery_index LIMIT $3
+        ),
+        discovery_lexical AS MATERIALIZED (
+          SELECT d.source_id, p.passage_index,
+                 row_number() OVER (ORDER BY ts_rank_cd(d.search_vector, i.terms) DESC, d.source_id, d.discovery_index) AS rank,
+                 'question_discovery_lexical'::text AS channel, 0.5::float8 AS weight
+          FROM semantic_qa.discovery_passages d CROSS JOIN input i
+          JOIN LATERAL (
+            SELECT candidate.passage_index FROM semantic_qa.passages candidate
+            WHERE candidate.source_id = d.source_id ORDER BY candidate.passage_index LIMIT 1
+          ) p ON true
+          WHERE i.terms::text <> '' AND d.search_vector @@ i.terms
+          ORDER BY ts_rank_cd(d.search_vector, i.terms) DESC, d.source_id, d.discovery_index LIMIT $3
+        ),
         fuzzy AS MATERIALIZED (
           SELECT p.source_id, p.passage_index,
                  row_number() OVER (ORDER BY word_similarity(i.text, p.passage_text) DESC, p.source_id, p.passage_index) AS rank,
@@ -168,7 +263,8 @@ class CorpusReader {
         ),
         channel_rows AS (
           SELECT * FROM dense UNION ALL SELECT * FROM passage_lexical UNION ALL SELECT * FROM exact_phrase
-          UNION ALL SELECT * FROM title_discovery UNION ALL SELECT * FROM fuzzy
+          UNION ALL SELECT * FROM title_discovery UNION ALL SELECT * FROM discovery_dense
+          UNION ALL SELECT * FROM discovery_lexical UNION ALL SELECT * FROM fuzzy
         ),
         fused AS MATERIALIZED (
           SELECT source_id, passage_index, sum(weight / (60.0 + rank)) AS score,
@@ -178,14 +274,18 @@ class CorpusReader {
         )
         SELECT r.source_id AS "sourceId", r.source_group AS "sourceGroup", r.source_order AS "sourceOrder",
                r.question AS title, r.metadata, p.passage_index AS "passageIndex", p.passage_text AS excerpt,
+               p.citation_text AS "citationText", p.citation_start_offset AS "citationStart",
+               p.citation_end_offset AS "citationEnd", p.answer_unit_id AS "answerUnitId",
+               p.author, p.unit_kind AS "unitKind", p.context_complete AS "contextComplete",
+               p.story_complete AS "storyComplete",
                p.start_offset AS start, p.end_offset AS "end", f.score, f.channels,
                1 - (p.embedding <=> i.embedding) AS similarity,
                ts_rank_cd(p.search_vector, i.terms) AS "lexicalScore"
         FROM fused f JOIN semantic_qa.passages p USING (source_id, passage_index)
         JOIN semantic_qa.records r USING (source_id) CROSS JOIN input i
         ORDER BY f.score DESC, similarity DESC, r.source_id, p.passage_index
-      `, [toVectorLiteral(vector), String(query), Math.max(5, Math.min(60, channelLimit)), phrases,
-        Math.max(10, Math.min(100, resultLimit)), allowFuzzy]);
+      `, [toVectorLiteral(vector), String(query), Math.max(5, Math.min(120, channelLimit)), phrases,
+        Math.max(10, Math.min(320, resultLimit)), allowFuzzy]);
       await client.query('COMMIT');
       return result.rows;
     } catch (error) {
@@ -226,7 +326,8 @@ class CorpusReader {
   async expandEvidence(item, window = 1) {
     const result = await this.pool().query(`
       WITH selected AS (
-        SELECT p.source_id, p.passage_index, p.passage_text, p.start_offset, p.end_offset,
+        SELECT p.source_id, p.passage_index, p.citation_text AS passage_text,
+               p.citation_start_offset AS start_offset, p.citation_end_offset AS end_offset,
                r.question, r.answer, r.metadata, r.source_group, r.source_order
         FROM semantic_qa.passages p JOIN semantic_qa.records r USING (source_id)
         WHERE p.source_id = $1 AND p.passage_index
@@ -289,9 +390,78 @@ class CorpusReader {
     }))];
   }
 
-  async getSource(sourceId, passageIndex = null) {
-    const selected = await this.pool().query(`SELECT source_id AS "sourceId", source_group AS "sourceGroup",
-      question AS title, metadata FROM semantic_qa.records WHERE source_id = $1`, [sourceId]);
+  async readCompleteAnswers(items) {
+    const seeds = [];
+    const seen = new Set();
+    for (const item of items || []) {
+      const identity = String(item.sourceId || item.sourceGroup || '');
+      if (!identity || seen.has(identity)) continue;
+      seen.add(identity);
+      seeds.push(item);
+    }
+    if (!seeds.length) return [];
+    const references = seeds.map((item) => String(item.sourceId));
+    const result = await this.pool().query(`
+      WITH requested(reference, rank) AS (
+        SELECT reference, ordinality::integer FROM unnest($1::text[]) WITH ORDINALITY AS input(reference, ordinality)
+      ), resolved AS (
+        SELECT requested.reference, requested.rank, coalesce(a.source_id, requested.reference) AS source_id,
+               a.answer_unit_id
+        FROM requested LEFT JOIN semantic_qa.source_aliases a ON a.alias_id = requested.reference
+      )
+      SELECT resolved.reference, resolved.rank, u.answer_unit_id AS "answerUnitId",
+             u.source_id AS "sourceId", r.source_group AS "sourceGroup", r.question AS title,
+             r.metadata, u.unit_index AS "unitIndex", u.unit_kind AS "unitKind", u.author,
+             u.associated_question AS "associatedQuestion", u.start_offset AS start,
+             u.end_offset AS "end", u.unit_text AS excerpt, u.content_hash AS "contentHash",
+             u.context_complete AS "contextComplete"
+      FROM resolved
+      JOIN semantic_qa.answer_units u ON u.source_id = resolved.source_id
+        AND (resolved.answer_unit_id IS NULL OR u.answer_unit_id = resolved.answer_unit_id)
+      JOIN semantic_qa.records r ON r.source_id = u.source_id
+      ORDER BY resolved.rank, u.unit_index
+    `, [references]);
+    const seedBySource = new Map(seeds.map((item) => [String(item.sourceId), item]));
+    return result.rows.map((row) => {
+      const seed = seedBySource.get(String(row.reference)) || {};
+      const segment = {
+        ...seed,
+        sourceId: row.sourceId,
+        sourceGroup: row.sourceGroup || row.sourceId,
+        title: row.title,
+        metadata: row.metadata || {},
+        passageIndex: seed.passageIndex ?? 0,
+        start: Number(row.start),
+        end: Number(row.end),
+        excerpt: row.excerpt,
+        answerUnitId: row.answerUnitId,
+        author: row.author,
+        unitKind: row.unitKind,
+        associatedQuestion: row.associatedQuestion,
+        contentHash: row.contentHash,
+        contextComplete: row.contextComplete,
+        answerBoundary: row.unitKind === 'swami_reply' ? 'explicit_reply' : 'swami_teaching',
+      };
+      return {
+        sourceGroup: row.sourceGroup || row.sourceId,
+        answerUnitId: row.answerUnitId,
+        title: row.title,
+        answerBoundary: segment.answerBoundary,
+        completeAnswer: row.excerpt,
+        segments: [segment],
+      };
+    });
+  }
+
+  async getSource(sourceId, passageIndex = null, exactStart = null, exactEnd = null) {
+    const selected = await this.pool().query(`
+      WITH resolved AS (
+        SELECT coalesce((SELECT source_id FROM semantic_qa.source_aliases WHERE alias_id = $1), $1) AS source_id
+      )
+      SELECT records.source_id AS "sourceId", source_group AS "sourceGroup",
+             question AS title, metadata
+      FROM semantic_qa.records records JOIN resolved USING (source_id)
+    `, [sourceId]);
     if (!selected.rows[0]) throw Object.assign(new Error('Source not found'), { statusCode: 404 });
     const group = selected.rows[0].sourceGroup;
     const records = await this.pool().query(`
@@ -299,11 +469,18 @@ class CorpusReader {
       FROM semantic_qa.records WHERE ($2::text IS NOT NULL AND source_group = $2) OR ($2::text IS NULL AND source_id = $1)
       ORDER BY CASE WHEN coalesce(metadata->>'chunk_index','') ~ '^[0-9]+$' THEN (metadata->>'chunk_index')::integer END NULLS LAST,
                source_order NULLS LAST, source_id
-    `, [sourceId, group]);
+    `, [selected.rows[0].sourceId, group]);
     let highlight = null;
-    if (passageIndex != null) {
-      const passage = await this.pool().query(`SELECT passage_index AS "passageIndex", passage_text AS excerpt,
-        start_offset AS start, end_offset AS "end" FROM semantic_qa.passages WHERE source_id = $1 AND passage_index = $2`,
+    const requestedStart = Number(exactStart);
+    const requestedEnd = Number(exactEnd);
+    const selectedRecord = records.rows.find((record) => record.sourceId === sourceId);
+    const selectedAnswer = String(selectedRecord?.answer || '');
+    if (Number.isInteger(requestedStart) && Number.isInteger(requestedEnd) && requestedStart >= 0 && requestedEnd > requestedStart && requestedEnd <= selectedAnswer.length) {
+      highlight = { passageIndex: passageIndex == null ? null : Number(passageIndex), start: requestedStart, end: requestedEnd,
+        excerpt: selectedAnswer.slice(requestedStart, requestedEnd), exactAnswerSpan: true };
+    } else if (passageIndex != null) {
+      const passage = await this.pool().query(`SELECT passage_index AS "passageIndex", citation_text AS excerpt,
+        citation_start_offset AS start, citation_end_offset AS "end" FROM semantic_qa.passages WHERE source_id = $1 AND passage_index = $2`,
       [sourceId, Number(passageIndex)]);
       highlight = passage.rows[0] || null;
     }
@@ -332,4 +509,7 @@ class CorpusReader {
   async close() { await this.holder.close(); }
 }
 
-module.exports = { CorpusReader, quotedPhrases, toVectorLiteral, contractFingerprint, sameFingerprint };
+module.exports = {
+  CorpusReader, quotedPhrases, toVectorLiteral, contractFingerprint, sameFingerprint,
+  replyMarkerEnd, sharedBoundaryLength, completeAnswerUnit,
+};

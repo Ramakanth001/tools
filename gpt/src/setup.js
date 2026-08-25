@@ -8,7 +8,8 @@ const INDEX_READER_ROLE = 'spiritual_gpt_index_reader';
 const CHAT_ROLE = 'spiritual_gpt_app';
 const CHAT_DATABASE = 'spiritual_gpt';
 const CHAT_SCHEMA = 'gpt';
-const REQUIRED_INDEX_TABLES = ['corpus', 'records', 'passages'];
+const REQUIRED_INDEX_TABLES = ['corpus', 'records', 'passages', 'answer_units', 'discovery_passages', 'source_aliases'];
+const REQUIRED_RETRIEVAL_VERSION = 'answer-unit-v5';
 
 function isLoopback(host) {
   return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(String(host || '').trim().toLocaleLowerCase());
@@ -63,9 +64,16 @@ async function provisionDatabases({ adminConnection, indexDatabase, indexRolePas
     if (!indexExists.rows[0].exists) throw Object.assign(new Error(`The Search Engine index database ${targetIndex} does not exist.`), { statusCode: 409 });
     index = await connect(ClientClass, clientConfig(adminConnection, targetIndex));
     const contract = await index.query(`SELECT to_regclass('semantic_qa.corpus') AS corpus,
-      to_regclass('semantic_qa.records') AS records, to_regclass('semantic_qa.passages') AS passages`);
+      to_regclass('semantic_qa.records') AS records, to_regclass('semantic_qa.passages') AS passages,
+      to_regclass('semantic_qa.answer_units') AS answer_units,
+      to_regclass('semantic_qa.discovery_passages') AS discovery_passages,
+      to_regclass('semantic_qa.source_aliases') AS source_aliases`);
     const missing = REQUIRED_INDEX_TABLES.filter((table) => !contract.rows[0]?.[table]);
     if (missing.length) throw Object.assign(new Error(`The selected index is missing semantic_qa.${missing.join(', semantic_qa.')}.`), { statusCode: 409 });
+    const version = await index.query("SELECT retrieval_schema_version AS version FROM semantic_qa.corpus WHERE id = 'default'");
+    if (version.rows[0]?.version !== REQUIRED_RETRIEVAL_VERSION) {
+      throw Object.assign(new Error(`The selected index must be ${REQUIRED_RETRIEVAL_VERSION}; it reports ${version.rows[0]?.version || 'no active version'}. Complete the Search Engine v5 rebuild first.`), { statusCode: 409 });
+    }
 
     await ensureRole(admin, INDEX_READER_ROLE);
     await ensureRole(admin, CHAT_ROLE);
@@ -80,7 +88,7 @@ async function provisionDatabases({ adminConnection, indexDatabase, indexRolePas
 
     await index.query(`GRANT CONNECT ON DATABASE ${identifier(targetIndex)} TO ${identifier(INDEX_READER_ROLE)}`);
     await index.query(`GRANT USAGE ON SCHEMA semantic_qa TO ${identifier(INDEX_READER_ROLE)}`);
-    await index.query(`GRANT SELECT ON semantic_qa.corpus, semantic_qa.records, semantic_qa.passages TO ${identifier(INDEX_READER_ROLE)}`);
+    await index.query(`GRANT SELECT ON ${REQUIRED_INDEX_TABLES.map((table) => `semantic_qa.${table}`).join(', ')} TO ${identifier(INDEX_READER_ROLE)}`);
     const owners = await index.query(`SELECT DISTINCT tableowner FROM pg_tables
       WHERE schemaname = 'semantic_qa' AND tablename = ANY($1::text[])`, [REQUIRED_INDEX_TABLES]);
     for (const row of owners.rows) {

@@ -43,6 +43,10 @@ function quoteMarkdown(value) {
   return clean(value).split('\n').map((line) => `> ${line}`).join('\n');
 }
 
+function excerptLabel(source = {}) {
+  return source.adjudication?.verbatim ? 'Exact answer from corpus' : 'Exact cited excerpt';
+}
+
 function inlineHtml(value) {
   return escapeHtml(value)
     .replace(/\*\*([^*\n]+)\*\*/gu, '<strong>$1</strong>')
@@ -90,7 +94,7 @@ function citationHtml(source, index) {
   return `<article class="source">
     <h3><span class="source-number">[${number}]</span> ${escapeHtml(source.title) || 'Corpus source'}</h3>
     ${details.length ? `<ul class="metadata">${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join('')}</ul>` : ''}
-    <div class="excerpt-label">Exact cited excerpt</div>
+    <div class="excerpt-label">${excerptLabel(source)}</div>
     <blockquote>${escapeHtml(source.excerpt).replace(/\n/gu, '<br>')}</blockquote>
   </article>`;
 }
@@ -111,6 +115,14 @@ function documentCss() {
     code { padding: 1px 4px; border-radius: 3px; background: #f1effa; }
     .citation { color: #3b5ccc; font-size: 8.5pt; font-weight: 700; }
     .citation-note { margin: 0 0 18px; color: #687083; font-size: 9.5pt; }
+    .chat-turn { margin: 0 0 32px; padding: 0 0 24px; border-bottom: 1px solid #d9deea; }
+    .chat-turn:last-child { border-bottom: 0; }
+    .turn-number { margin-bottom: 6px; color: #6046c7; font-size: 9pt; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .question { margin: 0 0 18px; padding: 12px 14px; break-inside: avoid; border-radius: 6px; background: #f1effa; }
+    .question h2, .answer-block h2 { margin-top: 0; }
+    .answer-block + .answer-block { margin-top: 28px; padding-top: 22px; border-top: 1px dashed #c8cfdd; }
+    .answer-version { margin: -6px 0 12px; color: #687083; font-size: 9pt; }
+    .answer-citations { margin-top: 20px; }
     .source { margin: 0 0 20px; padding: 14px 15px; break-inside: avoid; border: 1px solid #d9deea; border-left: 4px solid #5b75d6; border-radius: 5px; }
     .source-number { color: #3b5ccc; }
     .metadata { display: block; margin: 0 0 10px; padding: 0; color: #5d6678; font-size: 8.5pt; list-style: none; }
@@ -120,6 +132,32 @@ function documentCss() {
     blockquote { margin: 0; padding: 10px 12px; background: #f7f8fc; color: #30394b; white-space: normal; }
     @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
   `;
+}
+
+export function questionForMessage(messages, messageIndex) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let index = Math.min(Number(messageIndex) - 1, list.length - 1); index >= 0; index -= 1) {
+    if (list[index]?.role === 'user' && clean(list[index]?.content)) return clean(list[index].content);
+  }
+  return '';
+}
+
+export function conversationTurns(messages) {
+  const turns = [];
+  let currentTurn = null;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (message?.role === 'user') {
+      currentTurn = { question: clean(message.content), userMessage: message, answers: [] };
+      turns.push(currentTurn);
+    } else if (message?.role === 'assistant') {
+      if (!currentTurn) {
+        currentTurn = { question: '', userMessage: null, answers: [] };
+        turns.push(currentTurn);
+      }
+      currentTurn.answers.push(message);
+    }
+  }
+  return turns.filter((turn) => turn.question || turn.answers.length);
 }
 
 export function answerExportMarkdown({ title, message }) {
@@ -133,7 +171,7 @@ export function answerExportMarkdown({ title, message }) {
       const details = sourceDetails(source);
       sections.push('', `### [${number}] ${clean(source.title) || 'Corpus source'}`);
       if (details.length) sections.push('', details.map((detail) => `- ${detail}`).join('\n'));
-      sections.push('', '**Exact cited excerpt**', '', quoteMarkdown(source.excerpt));
+      sections.push('', `**${excerptLabel(source)}**`, '', quoteMarkdown(source.excerpt));
     });
   }
   return `${sections.join('\n')}\n`;
@@ -148,7 +186,7 @@ export function answerExportText({ title, message }) {
     sources.forEach((source, index) => {
       const number = Number(source.citationNumber) || index + 1;
       const details = sourceDetails(source);
-      sections.push('', `[${number}] ${clean(source.title) || 'Corpus source'}`, ...details, 'Exact cited excerpt:', clean(source.excerpt));
+      sections.push('', `[${number}] ${clean(source.title) || 'Corpus source'}`, ...details, `${excerptLabel(source)}:`, clean(source.excerpt));
     });
   }
   return `${sections.join('\n')}\n`;
@@ -162,6 +200,25 @@ export function answerExportHtml({ title, message, wordCompatible = false }) {
 <html lang="en"${wordCompatible ? ' xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"' : ''}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(heading)}</title>${wordCompatible ? '<meta name="ProgId" content="Word.Document">' : ''}<style>${documentCss()}</style></head>
 <body><main><header><div class="kicker">Local Corpus GPT</div><h1>${escapeHtml(heading)}</h1></header><section class="answer"><h2>Answer</h2>${markdownBlocksHtml(message?.content)}</section>${sourceSection}</main></body>
+</html>`;
+}
+
+export function conversationExportHtml({ title, messages }) {
+  const heading = clean(title) || 'GPT corpus conversation';
+  const turns = conversationTurns(messages);
+  const turnSections = turns.map((turn, turnIndex) => {
+    const answers = turn.answers.map((message, answerIndex) => {
+      const sources = exportSources(message);
+      const citations = sources.length ? `<section class="answer-citations"><h3>Citations for this answer</h3><p class="citation-note">Only the exact excerpts used to support this answer are included below.</p>${sources.map(citationHtml).join('\n')}</section>` : '';
+      const version = turn.answers.length > 1 ? `<div class="answer-version">Answer ${answerIndex + 1} of ${turn.answers.length}</div>` : '';
+      return `<section class="answer-block"><h2>Answer</h2>${version}${markdownBlocksHtml(message.content)}${citations}</section>`;
+    }).join('\n');
+    return `<section class="chat-turn"><div class="turn-number">Conversation turn ${turnIndex + 1}</div><section class="question"><h2>Question</h2><p>${escapeHtml(turn.question || 'Question unavailable').replace(/\n/gu, '<br>')}</p></section>${answers || '<p class="citation-note">No answer was recorded for this question.</p>'}</section>`;
+  }).join('\n');
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(heading)}</title><style>${documentCss()}</style></head>
+<body><main><header><div class="kicker">Local Corpus GPT - Complete Chat</div><h1>${escapeHtml(heading)}</h1></header>${turnSections || '<p>No messages have been recorded in this chat.</p>'}</main></body>
 </html>`;
 }
 
@@ -183,6 +240,10 @@ function downloadBlob(content, type, filename) {
 }
 
 export function printAnswerPdf({ title, message }) {
+  printHtmlPdf({ title, html: answerExportHtml({ title, message }) });
+}
+
+function printHtmlPdf({ title, html }) {
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.style.position = 'fixed';
@@ -190,7 +251,7 @@ export function printAnswerPdf({ title, message }) {
   document.body.appendChild(frame);
   const frameDocument = frame.contentDocument;
   frameDocument.open();
-  frameDocument.write(answerExportHtml({ title, message }));
+  frameDocument.write(html);
   frameDocument.close();
   const printWindow = frame.contentWindow;
   const remove = () => { if (frame.isConnected) frame.remove(); };
@@ -201,6 +262,15 @@ export function printAnswerPdf({ title, message }) {
     printWindow.print();
   }, 100);
   window.setTimeout(remove, 60000);
+}
+
+export function printConversationPdf({ title, messages }) {
+  printHtmlPdf({ title, html: conversationExportHtml({ title, messages }) });
+}
+
+export function exportConversationPdf({ title, messages }) {
+  const heading = clean(title) || 'GPT corpus conversation';
+  printHtmlPdf({ title: `${heading} - complete chat`, html: conversationExportHtml({ title: heading, messages }) });
 }
 
 export function exportAnswer({ format, title, message }) {

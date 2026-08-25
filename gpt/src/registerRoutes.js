@@ -289,7 +289,9 @@ function registerGptRoutes(app, { basePath = '/api/tools/gpt', deps = {} } = {})
   router.get('/sources/:sourceId', requireReady, asyncRoute(async (req, res) => {
     await corpus.configure(settings.indexConnection);
     const passageIndex = req.query.passageIndex == null ? null : Number(req.query.passageIndex);
-    res.json({ ok: true, source: await corpus.getSource(req.params.sourceId, passageIndex) });
+    const start = req.query.start == null ? null : Number(req.query.start);
+    const end = req.query.end == null ? null : Number(req.query.end);
+    res.json({ ok: true, source: await corpus.getSource(req.params.sourceId, passageIndex, start, end) });
   }));
 
   router.get('/benchmarks', requireReady, asyncRoute(async (_req, res) => {
