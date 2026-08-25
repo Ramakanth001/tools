@@ -1,0 +1,741 @@
+CONTEXT-FAITHFUL SEARCH: END-TO-END DATA ENGINEERING FLOW
+Audit date: 2026-08-22 (Asia/Kolkata)
+Workspace: /Users/ramakanth/pers/website/tools
+
+======================================================================
+1. EXECUTIVE ANSWER: HOW MANY DATABASES ARE INVOLVED?
+======================================================================
+
+There are FOUR operational data stores in the intended production flow:
+
+  1. MySQL source database
+     The editorial/source-of-truth database containing tblQA and
+     tblDiscourse.
+
+  2. PostgreSQL database: universal_qa_source
+     A faithful, queryable projection of the MySQL source. The Search
+     Engine reads it but does not treat it as the vector index.
+
+  3. PostgreSQL database: universal_qa_index
+     The search index. pgvector vectors live inside this PostgreSQL
+     database; there is NOT a fifth, separate "vector database" server.
+
+  4. PostgreSQL database: spiritual_gpt
+     GPT conversations, turns, evidence references, settings, and
+     benchmark history. It does not contain the corpus or vectors.
+
+Application dependency view:
+
+  Search Engine uses:
+    MySQL -> universal_qa_source -> universal_qa_index -> Search results
+
+  GPT uses:
+    universal_qa_index (read only) -> GPT research/answers
+    spiritual_gpt (read/write)     -> conversations and audit history
+
+  Shared database:
+    universal_qa_index is the only production data database shared by
+    Search Engine and GPT. Search Engine builds it. GPT only reads it.
+
+Other databases found on the local PostgreSQL server are not additional
+production-flow dependencies:
+
+  - postgres: administrator/maintenance connection used during guided
+    setup. It holds no corpus application data.
+  - template1: PostgreSQL system template.
+  - semantic_qa_source and semantic_qa_index: local demo databases.
+
+The PostgreSQL server currently has seven databases in total:
+postgres, semantic_qa_index, semantic_qa_source, spiritual_gpt,
+template1, universal_qa_index, and universal_qa_source. Only the three
+"universal/spiritual" PostgreSQL data databases are in the production
+application flow.
+
+MySQL was stopped during this audit. Its exact active source database
+name therefore could not be confirmed by SQL. On-disk names suggest
+"universal" and another encoded universal variant, but an on-disk folder
+name is not sufficient evidence to choose one. The importer now discovers
+the one database containing BOTH tblQA and tblDiscourse. If more than one
+matches, it stops and requires UNIVERSAL_MYSQL_DATABASE to be set.
+
+======================================================================
+2. CURRENT LIVE STATE (IMPORTANT BEFORE REBUILDING)
+======================================================================
+
+MySQL
+
+  Status during audit: stopped; 127.0.0.1:3306 refused connections.
+  Consequence: validation/import cannot run until MySQL starts.
+  Source database name: unresolved until the server starts and the two
+  authoritative tables can be inspected.
+
+universal_qa_source
+
+  Server: PostgreSQL 127.0.0.1:5433
+  Schema: public
+  Current tables: qa_records only
+  Current rows: 19,777
+  Current approximate database/table footprint observed: 45 MB
+  Missing required v5 table: public.corpus_documents
+
+  This means the faithful one-row-per-original-document import has NOT yet
+  been loaded into the live source projection. qa_records is the legacy
+  chunk projection and must not be selected for a v5 rebuild.
+
+universal_qa_index
+
+  Server: PostgreSQL 127.0.0.1:5433
+  Schema: semantic_qa
+  Current active retrieval contract: passage-v4
+  Current records: 19,777
+  Current passages: 186,982
+  Approximate database size observed: 1,964 MB
+  Current tables: corpus, records, passages, sync_runs
+  Missing v5 tables: answer_units, discovery_passages, source_aliases
+
+  Ordinary v4 search remains available. Role-aware v5 Deep Search is not
+  ready until a successful full v5 rebuild is atomically promoted.
+
+spiritual_gpt
+
+  Server: PostgreSQL 127.0.0.1:5433
+  Schema: gpt
+  Approximate database size observed: 8,734 kB
+  Tables: benchmark_runs, conversations, evidence, messages, settings,
+  turns
+  Rows observed: 4 conversations, 10 messages, 5 turns, 31 evidence rows
+
+  This database is healthy as a chat/audit store. It does not compensate
+  for the currently incomplete v5 corpus index.
+
+Bottom line:
+
+  DO NOT trigger the role-aware rebuild from qa_records. First start MySQL,
+  validate/import corpus_documents, then perform the first full v5 rebuild.
+
+======================================================================
+3. DATABASES, SCHEMAS, TABLES, AND PURPOSES
+======================================================================
+
+3.1 MySQL source database (authoritative editorial source)
+
+Authoritative tables:
+
+  tblQA
+    - qaId: stable source identity
+    - masterId / masterLanguage: source/language lineage
+    - title: discovery title
+    - briefQuestion and questionBk: optional question context
+    - answerBySwami: complete unchanged answer source field
+    - recordDate / multimediaFilename: provenance metadata
+    - activeStatus: only activeStatus = 1 is imported
+
+  tblDiscourse
+    - dcId: stable source identity
+    - masterId / masterLanguage: source/language lineage
+    - title: topic/discovery title
+    - summary: optional discovery context
+    - textDC: complete unchanged discourse source field
+    - recordDate / multimediaFilename: provenance metadata
+    - activeStatus: only activeStatus = 1 is imported
+
+Rules for adding content:
+
+  - Q&A goes into tblQA. Put the complete answer in answerBySwami.
+  - Standalone preaching goes into tblDiscourse. Put the complete teaching
+    in textDC.
+  - A blank/missing author defaults to Swami.
+  - A discourse with a title and no explicit speaker marker is Swami's
+    teaching, even when the title looks like a question.
+  - Never add permanent source material directly to PostgreSQL. A later
+    import projects MySQL again and would replace such manual additions.
+
+3.2 PostgreSQL universal_qa_source (faithful projection)
+
+Schema: public
+
+Required v5 source table:
+
+  corpus_documents
+    One row per original tblQA or tblDiscourse row, not one row per small
+    character chunk.
+
+    Main fields:
+      document_id             canonical ID such as qa:54/discourse:2296
+      source_type             qa or discourse
+      original_record_id      qaId or dcId
+      source_group            stable document grouping identity
+      master_id               MySQL master lineage
+      title                   faithful rendered title
+      question_context        discovery-only question/summary context
+      raw_content             exact original MySQL source field
+      display_text            deterministic faithful text rendering
+      raw_content_hash        SHA-256 of raw_content
+      display_text_hash       SHA-256 of display_text
+      author                  defaults to Swami when not supplied
+      default_unit_kind       swami_reply or swami_teaching
+      language/date/media     provenance
+      answer_unit_count       parser audit result
+      ambiguous               true when speaker boundary is unsafe
+      parser_report           structured role-parsing diagnostics
+      legacy_aliases          old chunk IDs that must still resolve
+      imported_at             projection timestamp
+
+Compatibility table:
+
+  qa_records
+    Legacy character chunks retained only for old callers/citations during
+    migration. It is not a valid source for the role-aware v5 rebuild.
+
+3.3 PostgreSQL universal_qa_index (search/vector index)
+
+Schema: semantic_qa
+Extensions: vector (pgvector) and pg_trgm
+
+v5 tables:
+
+  corpus
+    One active index contract row. Records the source mapping, embedding
+    model and immutable model digest, vector dimension, embedding format,
+    retrieval schema version, source count, and sync timestamps.
+
+  records
+    One row per corpus document. Contains title/question, complete faithful
+    display answer, metadata, source grouping/order, content hash, a vector,
+    and a PostgreSQL full-text search vector.
+
+  answer_units
+    Complete, citable Swami reply/teaching units only. Stores author,
+    unit_kind, associated question, language, exact document start/end
+    offsets, exact unit_text, SHA-256 content hash, and completeness state.
+
+  passages
+    Search windows derived only from citable Swami answer units. Each row
+    stores its retrieval text/vector plus exact citation offsets/text,
+    answer_unit_id, role, context-completeness, and story-completeness.
+    Retrieval windows may overlap; displayed citations always expand to an
+    exact complete logical source unit.
+
+  discovery_passages
+    Non-citable title/question/context text with vectors and lexical index.
+    It can discover the relevant source but cannot itself be quoted as
+    Swami's teaching.
+
+  source_aliases
+    Resolves legacy chunk IDs to canonical source and answer-unit IDs.
+
+  sync_runs
+    Audit/status records for rebuilds and incremental synchronizations.
+
+Vector indexes:
+
+  - HNSW cosine indexes on record, answer-passage, and discovery vectors.
+  - GIN full-text indexes for lexical retrieval.
+  - trigram indexes for fuzzy phrase/text retrieval.
+
+There is no data export from PostgreSQL into a separate vector product.
+EmbeddingGemma returns numeric vectors to the Search Engine, and those
+vectors are inserted into pgvector columns inside universal_qa_index.
+
+3.4 PostgreSQL spiritual_gpt (conversation and audit store)
+
+Schema: gpt
+
+  conversations
+    Conversation identity, title, compact memory, model tag, timestamps.
+
+  messages
+    User/assistant message rows linked to conversations and turns.
+
+  turns
+    Research job state, user objective, probes, model/options, corpus
+    fingerprint, statistics, errors, and start/finish timestamps.
+
+  evidence
+    Exact cited source IDs, passage/unit locators, offsets, excerpts,
+    retrieval channels/scores, adjudication, and citation state.
+
+  settings
+    Non-secret application settings.
+
+  benchmark_runs
+    Model benchmark inputs, metrics, status, and recommendation.
+
+GPT reasoning traces are neither exposed nor stored. GPT evidence rows are
+references/copies for auditing; they do not become corpus content.
+
+======================================================================
+4. USERS, OWNERSHIP, PERMISSIONS, AND DATABASE LINKS
+======================================================================
+
+Administrative/import identity
+
+  ramakanth
+    PostgreSQL superuser/login with database and role creation rights.
+    Used for local provisioning and the MySQL-to-PostgreSQL import. It is
+    not the normal runtime identity for corpus reads.
+
+Search Engine identities
+
+  semantic_qa_reader
+    CONNECT to universal_qa_source
+    USAGE on public
+    SELECT on corpus_documents and compatibility qa_records
+    No source writes
+
+  semantic_qa_indexer
+    Owns/writes universal_qa_index and semantic_qa index tables
+    Builds staging tables, vectors, indexes, and atomically promotes them
+
+GPT identities
+
+  spiritual_gpt_index_reader
+    CONNECT to universal_qa_index
+    USAGE on semantic_qa
+    SELECT on corpus, records, passages, answer_units,
+    discovery_passages, and source_aliases
+    Role setting default_transaction_read_only = on
+    No index writes
+
+  spiritual_gpt_app
+    CONNECT to spiritual_gpt
+    Owns/uses schema gpt
+    Reads and writes only GPT conversation/audit tables
+    No corpus-index write access
+
+Linkage diagram:
+
+  MySQL source (editorial write)
+        |
+        | importer, administrative credentials
+        v
+  universal_qa_source.public.corpus_documents
+        |
+        | semantic_qa_reader: SELECT only
+        | semantic_qa_indexer: writes resulting index
+        v
+  universal_qa_index.semantic_qa.*
+        |                         |
+        | Search Engine           | spiritual_gpt_index_reader: SELECT only
+        v                         v
+  Search responses          GPT research/answers
+                                  |
+                                  | spiritual_gpt_app: read/write
+                                  v
+                          spiritual_gpt.gpt.*
+
+The GPT tool must be configured with:
+
+  Read-only corpus index:
+    Database: universal_qa_index
+    User: spiritual_gpt_index_reader
+
+  Conversation database:
+    Database: spiritual_gpt
+    User: spiritual_gpt_app
+
+The screenshot configuration that used universal_qa_source with
+semantic_qa_reader in GPT was wrong: that points GPT at the source
+projection, not the vector index. Exact stale instances of that pairing
+are now migrated automatically to the correct index database/role.
+
+======================================================================
+5. TRANSFORMATION FLOW: MYSQL TO POSTGRESQL SOURCE
+======================================================================
+
+Step 1: Read active source rows
+
+  The importer connects to MySQL and discovers the single database that
+  contains both tblQA and tblDiscourse. It reads activeStatus = 1 rows in
+  stable ID order.
+
+Step 2: Preserve immutable source
+
+  For tblQA, raw_content is answerBySwami exactly as stored.
+  For tblDiscourse, raw_content is textDC exactly as stored.
+  SHA-256 is calculated before any rendering.
+
+Step 3: Produce faithful display_text
+
+  Only deterministic rendering cleanup occurs:
+
+  - remove script/style markup
+  - convert structural HTML breaks/blocks into line breaks
+  - remove remaining HTML tags
+  - decode HTML entities
+  - repair known encoding/mojibake damage
+  - normalize layout whitespace/newlines
+
+  It does NOT perform spelling correction, grammar correction, translation,
+  summarization, paraphrasing, or wording substitution. raw_content always
+  remains available with its independent hash. Displayed teachings later
+  must be exact display_text slices.
+
+Step 4: Build document identity and provenance
+
+  IDs, source type, source group, title, discovery question context,
+  language, dates, media, author/default role, parser diagnostics, and old
+  citation aliases are attached. Missing author defaults to Swami.
+
+Step 5: Validate before writing
+
+  Validation reports the proposed document/Q&A/discourse/chunk counts,
+  empty required fields, duplicate identities, ambiguous speaker
+  boundaries, citable answer-unit count, and hashes. Validation performs no
+  PostgreSQL writes.
+
+Step 6: Atomic projection refresh
+
+  The importer currently performs a FULL source projection refresh, not an
+  incremental MySQL-to-PostgreSQL merge. In one PostgreSQL transaction it:
+
+  - creates qa_records_next and corpus_documents_next
+  - bulk-inserts the validated projection
+  - replaces old projection tables by renaming the next tables
+  - creates indexes and read grants
+  - validates counts and hashes
+  - commits
+
+  If it fails before commit, the live projection is not partially replaced.
+
+Important distinction:
+
+  MySQL -> universal_qa_source is a full atomic projection refresh.
+  universal_qa_source -> universal_qa_index supports hash-based incremental
+  synchronization.
+
+======================================================================
+6. TRANSFORMATION FLOW: POSTGRESQL SOURCE TO VECTOR INDEX
+======================================================================
+
+Step 1: Open a consistent read-only source snapshot
+
+  Search Engine reads public.corpus_documents under a repeatable-read
+  snapshot. The mapping is:
+
+    id              document_id
+    question/title  title
+    answer           display_text
+    group            source_group
+    metadata         provenance, hashes, role defaults, parser report,
+                     question context, aliases, and ambiguity
+
+Step 2: Compute a deterministic document content hash
+
+  The hash covers mapped question/title, answer/display text, metadata,
+  grouping, and ordering. It is compared with semantic_qa.records.
+
+Step 3: Incremental decision
+
+  Unchanged hash:
+    Keep the existing record, answer units, passages, discovery rows, and
+    embeddings. No Ollama embedding call is made.
+
+  New or changed hash:
+    Rebuild the entire document: record, all role units, all answer
+    passages, all discovery passages, and all aliases.
+
+  Missing from current source snapshot:
+    Delete the record and every dependent unit/passage/alias from the index
+    within the synchronization transaction.
+
+Step 4: Parse speaker roles and complete answer units
+
+  Universal rules:
+
+  - tblQA answerBySwami becomes a citable swami_reply.
+  - Title, briefQuestion, questionBk, and devotee questions are discovery
+    context only.
+  - Explicit asked/replied pairs in a discourse become devotee_question and
+    swami_reply units.
+  - Unmarked preaching defaults to a citable swami_teaching, including when
+    no speaker name exists or the title resembles a question.
+  - English, Malayalam, and Telugu speaker labels are recognized.
+  - Rhetorical questions remain inside Swami's teaching unless an explicit
+    speaker transition exists.
+  - Translator notes, headings, and identified non-Swami speech are not
+    citable.
+  - Truly ambiguous speaker transitions are reported/excluded, not guessed.
+
+Step 5: Build citable logical passages
+
+  Paragraphs, sentences, stanzas, and list items are used as logical
+  boundaries. Long material can have overlapping retrieval windows, but
+  each citation carries exact complete-unit start/end offsets and text.
+  Stories are marked incomplete unless consequence/lesson context exists.
+
+Step 6: Build separate discovery passages
+
+  Titles and devotee questions are embedded separately. They help locate an
+  answer-bearing source but are never returned as citable teaching text.
+
+Step 7: Create embeddings
+
+  Embedding model: EmbeddingGemma through local Ollama.
+  Indexed documents use the model's document prompt format.
+  User searches use its asymmetric query prompt format.
+  Model name, immutable model digest, vector dimension, and format version
+  must match the active corpus contract. A digest/format mismatch requires
+  a full rebuild; it is not silently mixed into the old vector space.
+
+Step 8: Stage all changed index data
+
+  New records, units, passages, discovery rows, aliases, and vectors go to
+  temporary unlogged staging tables first. The live index remains readable.
+
+Step 9: Commit
+
+  Incremental sync:
+    One transaction upserts changed records, replaces all children of each
+    changed document, removes deleted documents, validates, and updates the
+    corpus/sync audit rows. Unchanged vectors remain intact.
+
+  First/full v5 rebuild:
+    Builds complete staging tables and indexes, validates offsets/hashes,
+    then atomically renames/promotes them. The current v4 tables are retained
+    temporarily as rollback tables on first promotion. A failed or cancelled
+    rebuild drops staging and leaves v4 live.
+
+======================================================================
+7. SEARCH ENGINE QUERY FLOW
+======================================================================
+
+Ordinary Search
+
+  1. Receives the unchanged user question.
+  2. Runs dense, exact phrase, PostgreSQL full-text, and fuzzy channels.
+  3. Uses discovery passages only to locate possible sources.
+  4. Fuses/reranks answer-bearing passage results.
+  5. Deterministic code selects exact stored teaching slices.
+  6. Returns direct, related_teachings, or insufficient as appropriate.
+
+Deep Search
+
+  1. Preserves the question and creates focused probes.
+  2. Searches citable answers and non-citable discovery context separately.
+  3. Loads complete Swami answer/teaching units for shortlisted sources.
+  4. Uses two independent Qwen adjudications; a third resolves disagreement.
+  5. Classifies evidence as direct, governing principle, qualification,
+     illustration, counter-teaching, or irrelevant.
+  6. Can discard evidence at every stage and may abstain.
+  7. Verifies speaker, relationship, completeness, offsets, and hashes.
+  8. Server code inserts exact stored text; Qwen never authors the displayed
+     teaching.
+
+Qwen requirements:
+
+  - qwen3:14b-q8_0 by default; qwen3:14b-q4_K_M by explicit choice
+  - thinking capability required; no silent gemma3:4b fallback
+  - reasoning trace discarded and not persisted
+  - one active Qwen generation at a time
+
+======================================================================
+8. GPT QUERY AND STORAGE FLOW
+======================================================================
+
+GPT does not call the Search Engine API and does not import Search Engine
+implementation code. It independently reads the shared v5 database contract.
+
+At setup/runtime:
+
+  1. Connect to universal_qa_index as spiritual_gpt_index_reader.
+  2. Require corpus, records, passages, answer_units, discovery_passages,
+     and source_aliases.
+  3. Require retrieval_schema_version = answer-unit-v5 and a supported
+     EmbeddingGemma format.
+  4. Verify read-only SELECT privileges.
+
+For each question:
+
+  1. Store a pending turn/message in spiritual_gpt.
+  2. Plan or deterministically create multiple probes.
+  3. Embed each query with EmbeddingGemma query format.
+  4. Retrieve dense, lexical, exact phrase, fuzzy, title, and discovery
+     candidates directly from universal_qa_index.
+  5. Fuse and semantically adjudicate answer-bearing candidates.
+  6. Resolve legacy IDs through source_aliases.
+  7. Read complete answer_units before selection/drafting.
+  8. Validate the corpus fingerprint again so a mid-turn index replacement
+     cannot silently mix evidence versions.
+  9. At verbatim temperature, accept only exact stored corpus substrings.
+ 10. Validate evidence offsets and citations.
+ 11. Transactionally store the final message, turn statistics, and evidence
+     locators in spiritual_gpt.
+
+GPT never writes to universal_qa_index. Chat/evidence rows in spiritual_gpt
+never feed back into corpus retrieval or embeddings.
+
+======================================================================
+9. AUDIT FINDINGS AND FIXES APPLIED
+======================================================================
+
+Finding 1: Wrong/assumed MySQL database default
+
+  Problem:
+    The importer silently defaulted to universal_vector_source, while the
+    stopped machine's on-disk MySQL names do not confirm that database.
+
+  Fix:
+    The importer now connects without assuming a database and discovers the
+    single database containing tblQA and tblDiscourse. An explicit configured
+    database is verified. Zero/multiple matches stop with a clear error.
+    Validation output includes sourceMysqlDatabase.
+
+Finding 2: Catalog discovery could erase the Universal preset
+
+  Problem:
+    Clicking "Test and discover catalog" could replace the deliberately
+    selected title/display_text mapping with generic guessed fields and clear
+    metadata.
+
+  Fix:
+    Discovery now preserves every valid selected column. Fallback detection
+    prefers title and display_text, and keeps valid metadata/group/order.
+
+Finding 3: Legacy qa_records could be sent into a v5 rebuild
+
+  Problem:
+    This recreates the exact fragment/speaker-loss problem, evidenced by IDs
+    such as discourse:1000:001 being treated as independent source rows.
+
+  Fix:
+    A v5 synchronization against
+    universal_qa_source.public.qa_records is now rejected before any job or
+    embedding work begins. It explicitly requires public.corpus_documents.
+
+Finding 4: GPT was visibly pointed at the source database
+
+  Problem:
+    universal_qa_source + semantic_qa_reader is not a corpus-index connection.
+
+  Fix:
+    That exact stale pairing now migrates to universal_qa_index +
+    spiritual_gpt_index_reader in both browser and server settings.
+
+Finding 5: GPT setup could appear successful against v4
+
+  Problem:
+    Guided setup checked/granted only corpus, records, and passages, while
+    actual v5 research also requires answer_units, discovery_passages, and
+    source_aliases.
+
+  Fix:
+    Setup now requires and grants all six v5 tables and verifies the active
+    answer-unit-v5 version. Runtime corpus inspection also checks discovery
+    table existence/SELECT privilege.
+
+Verification after fixes:
+
+  Search Engine: 112 tests passed, 1 environment-gated test skipped.
+  GPT:            78 tests passed, 0 skipped.
+  The skipped Search test is explicitly gated on live PostgreSQL/pgvector/
+  Ollama connectivity; it is not a failed assertion.
+
+These are code-level fixes. They do not claim that live data has already
+been migrated. The live source/index remain qa_records + passage-v4 until
+the operator sequence below completes.
+
+======================================================================
+10. SAFE OPERATOR SEQUENCE FROM THE CURRENT STATE
+======================================================================
+
+1. Start the local XAMPP MySQL service.
+
+2. Validate the projection without writing:
+
+     cd /Users/ramakanth/pers/website/tools/semantic-qa
+     npm run import:universal:check
+
+   Read sourceMysqlDatabase in the report. If the command reports multiple
+   matching databases, set UNIVERSAL_MYSQL_DATABASE to the correct one and
+   run validation again. Do not guess from folder names.
+
+3. Review at minimum:
+
+   - proposedDocumentCount
+   - proposedQaCount and proposedDiscourseCount
+   - emptyFields
+   - duplicateIdentities
+   - ambiguousSpeakerBoundaries
+   - citableAnswerUnits
+   - sourceMysqlDatabase
+
+4. Only when validation is acceptable, run the projection import:
+
+     npm run import:universal
+
+5. Open Search Engine -> Settings and load the Universal corpus preset.
+   Verify:
+
+   Source PostgreSQL:
+     Database: universal_qa_source
+     User: semantic_qa_reader
+
+   Corpus mapping:
+     Schema: public
+     Table: corpus_documents
+     ID: document_id
+     Question/title: title
+     Answer: display_text
+     Group: source_group
+
+   "Test and discover catalog" should now preserve this mapping.
+
+6. Verify the separate index connection:
+
+     Database: universal_qa_index
+     User: semantic_qa_indexer
+
+7. Run FULL REBUILD for the first v5 promotion. Do not choose incremental
+   while the active index contract is passage-v4.
+
+8. Wait for completion. Confirm the active contract reports answer-unit-v5
+   and the v5 tables/counts are present. Run promotion evaluation and a live
+   Q8 Deep Search replay before depending on it.
+
+9. Open GPT Setup only after the Search Engine v5 rebuild succeeds. Refresh
+   status and verify:
+
+   Read-only corpus index:
+     universal_qa_index / spiritual_gpt_index_reader
+
+   Conversation database:
+     spiritual_gpt / spiritual_gpt_app
+
+10. For later source updates, use:
+
+      Update MySQL
+        -> import:universal:check
+        -> import:universal
+        -> Search Engine Incremental sync
+        -> review changed/deleted document report
+        -> run relevant retrieval checks
+
+The source projection import is full/atomic each time. The expensive vector
+step is incremental: unchanged document hashes retain their existing vectors.
+
+======================================================================
+11. INTEGRITY AND FAILURE GUARANTEES
+======================================================================
+
+  - MySQL is the only editorial source of truth.
+  - raw_content and SHA-256 preserve the exact original answer field.
+  - No model can supply displayed teaching prose.
+  - Every displayed teaching must equal
+    display_text.slice(start_offset, end_offset).
+  - Citations can come only from Swami answer/teaching units.
+  - Questions/titles are discovery-only.
+  - Missing speaker/author defaults to Swami teaching/answer as specified.
+  - Ambiguous explicit speaker transitions are withheld for review.
+  - Changed documents are rebuilt as complete units, never as isolated old
+    character chunks.
+  - Unchanged document embeddings are retained during incremental sync.
+  - Model digest/format mismatch cannot mix incompatible vectors.
+  - Full rebuild stages and validates before atomic promotion.
+  - Failure/cancellation leaves the previous live index available.
+  - GPT index access is read-only and isolated from chat writes.
+  - Reasoning traces are not stored.
+  - Database passwords/connection strings are not persisted in browser
+    settings by these tools.
+
+END OF AUDIT AND DATA FLOW

@@ -4,12 +4,12 @@ This guide explains Search Engine (internal compatibility ID: `semantic-qa`) for
 
 ## 1. The Short Version
 
-The tool retrieves evidence from answer text that already exists in the database. An optional second local model may then paraphrase and combine only the accepted evidence into a short answer.
+The tool retrieves teachings that already exist in the database. It never asks a model to author Swami's displayed words. Qwen can plan probes, classify complete answer units, reject evidence, and assign neutral cluster labels; deterministic server code alone inserts exact stored source spans.
 
 It works in two phases:
 
-1. **Offline indexing:** each stored answer is split into bounded two-to-three-sentence passages. Every answer passage is converted into a vector by EmbeddingGemma and stored in PostgreSQL with pgvector.
-2. **Online search:** the new user question becomes a vector, PostgreSQL searches answer passages, and deterministic code pools them back to source records. The optional Gemma 3 summary model receives only threshold-passing passages.
+1. **Offline indexing:** MySQL is projected into one PostgreSQL row per original document with immutable raw content and faithful display text. Explicit speaker boundaries become complete answer units. Swami units produce citable logical passages; titles and devotee questions produce separate non-citable discovery passages.
+2. **Online search:** focused queries search both channels. Shortlisted sources are reconstructed as complete Swami replies/teachings, independently adjudicated by reasoning-capable Qwen, clustered, and verified. The UI receives only exact stored teaching spans plus neutral labels/status.
 
 The most important distinction is:
 
@@ -25,19 +25,20 @@ EmbeddingGemma is already trained. This application does not fine-tune it, updat
 | Standalone UI/API | `http://localhost:8790` |
 | Ollama | `http://127.0.0.1:11434` |
 | Embedding model | `embeddinggemma` |
-| Grounded summary model | `gemma3:4b` |
-| Model context limit | 2,048 tokens in the current Ollama installation |
+| Deep Search model | `qwen3:14b-q8_0` by default; explicit Q4 optional |
+| Deep Search context | 32K, `think: true`, one active generation |
 | Vector dimension | 768 floating-point values |
 | Source PostgreSQL | `127.0.0.1:5433/universal_qa_source` |
 | Index PostgreSQL | `127.0.0.1:5433/universal_qa_index` |
 | Vector extension | pgvector 0.8.5 |
-| Source snapshot records | 19,777 |
-| Indexed answer passages | 186,982 |
+| Original source documents | 6,010 |
+| Previous v4 compatibility chunks | 19,777 |
+| Previous v4 answer passages | 186,982 |
 | Original active records | 419 Q&As and 5,591 discourses |
 | Languages in the imported corpus | English, Malayalam, and Telugu |
 | Universal-corpus match threshold | 0.49 |
 
-The current local `ollama show embeddinggemma` output reports a 307.58-million-parameter Gemma architecture, BF16 quantization, a 2,048-token context, and 768-dimensional embeddings. These details belong to the installed model tag and could change if that tag is replaced later.
+EmbeddingGemma produces 768-dimensional retrieval vectors in the current installation. The corpus row stores the immutable model digest and format so replacement weights cannot silently share an incompatible vector space.
 
 ## 3. System Architecture
 
@@ -48,9 +49,9 @@ flowchart LR
         MYSQL["MySQL: universal_vector_source"]
     end
 
-    subgraph Source["Read-only searchable source"]
-        IMPORT["Import and cleanup script"]
-        PG_SOURCE["PostgreSQL: universal_qa_source\npublic.qa_records"]
+    subgraph Source["Read-only source projection"]
+        IMPORT["Validate + faithful projection"]
+        PG_SOURCE["PostgreSQL: universal_qa_source\npublic.corpus_documents"]
     end
 
     subgraph App["semantic-qa application"]
@@ -61,14 +62,14 @@ flowchart LR
 
     subgraph Embeddings["Local embedding runtime"]
         OLLAMA["Ollama"]
-        MODEL["EmbeddingGemma\n768 dimensions"]
+        MODEL["EmbeddingGemma + Qwen3 14B"]
     end
 
     subgraph Index["Vector index database"]
         PGVECTOR["PostgreSQL + pgvector"]
-        RECORDS["semantic_qa.records"]
+        RECORDS["records + answer_units\npassages + discovery_passages\nsource_aliases"]
         HNSW["HNSW cosine index"]
-        GIN["GIN full-text index"]
+        GIN["Lexical / exact / fuzzy indexes"]
     end
 
     SQL --> MYSQL
@@ -123,51 +124,28 @@ The legacy dump is first imported into MySQL as `universal_vector_source`. The a
 | `masterLanguage` | Language metadata |
 | `masterId`, `recordDate` | Source metadata |
 
-`tblDiscourse` does not consistently contain one explicit database row per question and answer. The importer therefore does not invent Q&A boundaries. It treats the title as the question/title and divides the existing discourse text into ordered answer chunks.
+`tblDiscourse` may contain several explicit asked/replied pairs or one unmarked teaching. The role parser recognizes English, Malayalam, and Telugu ask/reply and speaker labels. Explicit transitions create separate `devotee_question` and `swami_reply` units. Without an explicit transition, the body is Swami teaching even when its title is written as a question. Rhetorical questions stay inside the current Swami unit. A speaker-marked document whose boundaries cannot be resolved is excluded from citations and reported for review.
 
 ### Cleanup
 
 The importer:
 
 - includes active records only;
-- requires a non-empty title/question and answer/document body;
-- removes legacy HTML tags;
-- decodes named and numeric HTML entities;
-- normalizes layout whitespace;
-- preserves Unicode text;
-- does not summarize, translate, or generate new prose.
+- validates empty fields and duplicate stable identities;
+- preserves the original answer/document field byte-for-byte as `raw_content` and stores its SHA-256 hash;
+- creates `display_text` only through deterministic HTML rendering, entity decoding, encoding repair, and layout cleanup;
+- preserves Unicode wording and stores a separate display hash;
+- never performs spelling, grammar, translation, summarization, or wording edits;
+- defaults missing authors to `Swami`;
+- stores the role-parse report and legacy aliases.
 
-“Verbatim answer” in the search application means verbatim from this normalized PostgreSQL source projection. The raw MySQL HTML is deliberately converted to readable plain text before it becomes the searchable source.
+“Verbatim teaching” means an exact slice of `display_text`. `raw_content` is retained independently so the projection can always be audited back to the unchanged MySQL source field.
 
-### Chunking
+### Logical units and retrieval windows
 
-Embedding models have a finite context window. The current model accepts at most 2,048 tokens, and the API explicitly sends `truncate: false`. Oversized text therefore causes a visible synchronization failure instead of silent data loss.
+The source projection is not chunked: it has exactly one row per original Q&A or discourse. The index parser records exact document offsets for every role unit. Citable passages align to complete paragraphs, stanzas, list items, or complete sentences. Oversized logical material may create overlapping embedding windows, but every citation expands back to the complete original logical span.
 
-The importer uses conservative character limits:
-
-| Record type | Language | Maximum answer characters per chunk |
-| --- | --- | ---: |
-| `tblQA` | All | 1,800 |
-| `tblDiscourse` | English | 3,600 |
-| `tblDiscourse` | Malayalam or Telugu | 1,400 |
-
-These are character limits, not token limits. Malayalam and Telugu use smaller limits because their tokenizer-to-character ratio can be higher than English.
-
-The chunker prefers paragraph boundaries. If one paragraph is still too large, it cuts at a nearby whitespace boundary. Adjacent chunks repeat a bounded contiguous source passage—300 characters for English discourses and 140 for Malayalam/Telugu—so an answer crossing a boundary remains retrievable. The repeated text is copied verbatim rather than generated. Every chunk contains:
-
-- a stable `source_id` such as `qa:52:001` or `discourse:533:005`;
-- a `source_group` pointing to the original Q&A or discourse;
-- `chunk_index` and `chunk_count`;
-- the original record ID and source type;
-- language and source metadata.
-
-Current output:
-
-| Source | Original active records | Search chunks |
-| --- | ---: | ---: |
-| `tblQA` | 419 | 956 |
-| `tblDiscourse` | 5,591 | 18,821 |
-| **Total** | **6,010** | **19,777** |
+The previous 19,777 v4 chunk IDs remain only as aliases during migration. They resolve to the v5 document and, when unambiguous, its answer unit so existing citations and stored GPT conversations keep working.
 
 ## 5. What Ollama Does
 
@@ -281,23 +259,35 @@ One row describes the live corpus:
 
 ### `semantic_qa.records`
 
-Each searchable chunk stores:
+Each original source document stores:
 
 | Column | Purpose |
 | --- | --- |
-| `source_id` | Stable unique source/chunk ID |
+| `source_id` | Stable original document ID |
 | `question` | Exact synchronized question/title |
-| `answer` | Exact synchronized normalized answer chunk |
-| `metadata` | JSON source type, IDs, language, date, and chunk information |
-| `source_group` | Original Q&A/discourse group |
-| `source_order` | Chunk ordering value |
+| `answer` | Faithful complete `display_text` |
+| `metadata` | Raw/display hashes, source provenance, language, role report, aliases |
+| `source_group` | Original Q&A/discourse identity |
+| `source_order` | Optional deterministic source ordering |
 | `content_hash` | SHA-256 change detector |
 | `embedding` | Valid placeholder vector; v4 never searches this record-level field |
 | `updated_at` | Index update time |
 
+### `semantic_qa.answer_units`
+
+One row represents one complete citable Swami reply or unmarked teaching section. It stores author, unit kind, associated devotee question, language, exact document offsets, exact text, completeness, and SHA-256 hash.
+
 ### `semantic_qa.passages`
 
-Every bounded answer passage stores its parent `source_id`, stable passage index, exact text and answer offsets, a `vector(768)` embedding, and a generated full-text search vector. HNSW searches these passage embeddings directly; the stored question/title is not part of the vector or acceptance score.
+Citable retrieval windows are derived only from Swami answer units. Every row stores retrieval-window text plus the complete logical citation text, both offset ranges, role/kind, context and story completeness, and an embedding. Database constraints and final server checks require the citation to equal the corresponding `records.answer` slice.
+
+### `semantic_qa.discovery_passages`
+
+Titles, devotee questions, source context, headings, and other non-citable context live here. Dense and lexical matches can nominate their source; this table can never supply displayed evidence.
+
+### `semantic_qa.source_aliases`
+
+Legacy v4 chunk/citation IDs resolve to canonical v5 documents and optional answer units. Search Engine and GPT use this table independently.
 
 ### `semantic_qa.sync_runs`
 
@@ -308,7 +298,7 @@ This table preserves recent synchronization outcomes and counters. Live SSE job 
 Each synchronization run creates tool-owned unlogged tables:
 
 - a staging records table for changed source snapshots;
-- a staging passage table for changed answer passages and vectors;
+- staging tables for answer units, citable passages, discovery passages, and aliases;
 - a “seen IDs” table containing the complete current source identity set.
 
 They are temporary working structures used to protect the live index.
@@ -432,9 +422,10 @@ sequenceDiagram
     API->>Source: Validate IDs/questions/answers
     loop Source pages and embedding batches
         API->>Source: Read next batch
-        API->>Ollama: Embed labeled question + answer texts
+        API->>API: Parse roles and exact logical spans
+        API->>Ollama: Embed citable and discovery passages separately
         Ollama-->>API: 768-dimensional vectors
-        API->>Index: Insert text, metadata, hashes, vectors into staging
+        API->>Index: Stage documents, units, passages, aliases, hashes, vectors
     end
     API->>Index: Atomic table swap and HNSW creation
     API->>Index: Update corpus metadata
@@ -448,11 +439,10 @@ Detailed behavior:
 3. Preflight rejects null/duplicate IDs and empty questions or answers.
 4. Source records are read in pages of 25–1,000 rows.
 5. Embedding requests contain batches of 1–64 texts.
-6. Every vector and exact text snapshot is written into an unlogged staging table.
-7. If any record fails embedding, the tool retries records individually to identify offending source IDs.
-8. Only after every source record succeeds does one transaction replace the live records table, create the HNSW index, and update corpus metadata.
-
-The earlier 18,154-record legacy-format rebuild took approximately 61 minutes. The completed retrieval-v2 rebuild indexed 19,777 overlapped chunks in approximately 21 minutes 35 seconds on the current machine; Ollama model warm-up, input mix, and other local load can make full-build timing vary substantially. The final database swap and index creation takes only seconds.
+6. Every exact unit and passage is checked against its `display_text` offsets before embedding or staging.
+7. Every vector and exact snapshot is written into versioned unlogged staging tables. Ambiguous speaker documents remain searchable as context but have no citable rows.
+8. Embedding failures use bounded retries and identify offending source IDs without altering the live index.
+9. Only after all source documents succeed does one transaction activate the v5 tables and update corpus metadata. A v4 live set is renamed to rollback tables during first promotion.
 
 Cancellation, an Ollama error, a database error, or oversized input drops staging and leaves the previous live index searchable.
 
@@ -460,7 +450,7 @@ Cancellation, an Ollama error, a database error, or oversized input drops stagin
 
 Incremental synchronization still scans the complete source so it can detect deletions. It avoids re-embedding unchanged records.
 
-For every source record, the tool computes a SHA-256 hash over:
+For every source document, the tool computes a SHA-256 hash over:
 
 - source ID;
 - question;
@@ -475,7 +465,7 @@ The algorithm is:
 scan every source ID
     compute content hash
     compare it with live index hash
-    if new or changed -> embed and stage it
+    if new or changed -> rebuild every role unit, citable passage, discovery passage, and alias
     if unchanged -> do not call Ollama
 
 after successful complete scan
@@ -484,9 +474,7 @@ after successful complete scan
     commit once
 ```
 
-After the retrieval-v2 rebuild, an unchanged incremental run scanned all 19,777 records in approximately four seconds and wrote zero embeddings.
-
-If chunk boundaries change, source chunk IDs can also change. Incremental sync treats those as new IDs and deletes the obsolete chunk IDs only after the successful complete scan.
+Unchanged documents retain all existing embeddings. A changed discourse is rebuilt as a whole so a speaker transition cannot be separated from the text it governs. Deletions and replacements commit only after the complete source scan succeeds.
 
 ## 13. Online Search Internals
 
@@ -495,45 +483,45 @@ sequenceDiagram
     participant User
     participant UI
     participant API
-    participant Ollama
+    participant Embed as EmbeddingGemma
+    participant Qwen as Qwen3 14B
     participant PG as PostgreSQL + pgvector
 
     User->>UI: Enter one question
     UI->>API: POST /search
     API->>PG: Read live corpus model/dimension/digest/formats
-    API->>Ollama: Verify configured model digest
-    API->>Ollama: Embed task-formatted user question
-    Ollama-->>API: Query vector(768)
-    API->>PG: Score every answer passage + passage GIN recall
-    PG-->>API: Relevance-qualified passages joined to stored records
-    API->>API: Pool passages and deduplicate explicit document chunks
-    API->>API: Independently admit up to 15 relevant records
-    API->>Ollama: Generate from accepted passages only
-    Ollama-->>API: Synthesized answer + evidence numbers
-    API->>API: Validate cited passages against accepted records
-    API-->>UI: Grounded synthesis, one stored answer, and inspection-only neighbors
+    API->>Qwen: Check approved model + thinking capability
+    API->>Qwen: Plan practical/principle/qualification/counter probes
+    loop Every probe
+        API->>Embed: Embed task-formatted probe
+        API->>PG: Search citable answers and discovery separately
+    end
+    API->>PG: Read complete shortlisted Swami answer units
+    API->>Qwen: Independent adjudication 1
+    API->>Qwen: Independent adjudication 2
+    opt Decisions disagree
+        API->>Qwen: Tie-breaking adjudication 3
+    end
+    API->>API: Cluster, discard, verify roles/hashes/offsets
+    API-->>UI: Neutral outcome + exact stored teaching spans
 ```
 
 Step by step:
 
 1. The API reads the model name, immutable digest, dimension, and format versions recorded with the live corpus.
 2. It rejects stale formats or a configured Ollama model whose current digest differs from the indexed digest.
-3. Ollama embeds the new question using the query format recorded with that model and live corpus.
-4. The API rejects the query if the returned dimension differs from the indexed dimension.
-5. pgvector computes the query cosine against every indexed answer passage. PostgreSQL full-text matches widen recall, but lexical rank cannot independently accept evidence. The former bounded HNSW pool remains only as a compatibility fallback.
-6. Passage hits are pooled by `source_id`. The best passage cosine is primary; only additional semantically supporting passages provide a small bonus.
-7. Stored questions, titles, detailed-question context, metadata, and structured-Q&A type have zero weight in passage acceptance.
-8. When the question contains a quotation, exact occurrences of that quotation are preferred over passages containing similar words in a different order or relationship.
-9. Explicit multi-chunk documents are deduplicated by source group; categories remain independent.
-10. The top passage relevance score is compared with the configured threshold.
-11. The API returns one accepted stored source when the threshold passes plus nearest records for diagnostics.
-12. If synthesis is enabled, the same threshold and dense floor independently admit an internal pool of up to 15 records. Inspection-only neighbors cannot enter it.
-13. The summary model receives only indexed passages from those accepted records. Corpus passages are explicitly treated as quoted data rather than instructions.
-14. The model may paraphrase and combine evidence, but it must return evidence numbers and explicitly compare the requested relationship or purpose with the relationship or purpose supported by the evidence. A mismatch withholds the synthesis and converts the public result to the normal no-match state.
-15. “How” questions receive a second, narrowly scoped adequacy check: describing the problem, its prevalence, or its difficulty does not count as supplying a method or guidance.
-16. The API validates every cited number and exact source passage before returning the synthesis. The UI presents it first, retains the primary stored answer, and keeps all unused neighbors in the collapsed inspection-only panel.
+3. Verbatim Selection uses the initial retrieval and deterministic exact passage selection without a generation call.
+4. Deep Search rejects any model except the approved Qwen3 14B Q8/Q4 tags and requires Ollama's `thinking` capability. It never falls back silently.
+5. Qwen preserves the question's meaning and produces focused probes. Every probe searches answer and discovery channels independently using dense, lexical, exact-phrase, and fuzzy signals.
+6. Discovery passages may add a source to the shortlist but are never transferred into evidence.
+7. Every shortlisted complete Swami reply or teaching section is reconstructed and read. The model does not adjudicate 720-character fragments.
+8. Two independent passes classify each unit as direct answer, governing principle, qualification, illustration, counter-teaching, or irrelevant. A third pass runs only for disagreements.
+9. Personal experiences and success anecdotes are rejected unless the user explicitly requests examples. Stories require their consequence and Swami's explicit lesson.
+10. Accepted units are grouped into distinct teaching clusters. Evidence can still be discarded; no preservation rule makes a mistaken candidate mandatory.
+11. Final server code checks author, kind, context/story completeness, unit hash, passage hash, document bounds, and exact `display_text` equality.
+12. The result is `direct`, `related_teachings`, or `insufficient`. Up to two primary exact passages are shown per cluster; extras remain expandable evidence.
 
-Each question is independent. The tool has no conversational memory or generative query expansion. The summary model is forbidden from filling evidence gaps; generation failure never hides an accepted stored answer.
+Each question is independent. The tool has no conversational memory. Qwen's thinking trace is discarded and never stored or exposed. Progress reports the actual operation and elapsed time with no speculative ETA.
 
 ## 14. Multilingual Handling
 
@@ -595,23 +583,24 @@ The executable regression set in `eval/relevance-cases.json` records reviewed qu
 
 ### Retrieval grounding
 
-- The primary stored answer always comes from the synchronized source snapshot.
+- Every displayed teaching equals an exact synchronized `display_text` slice.
+- Citable rows can only be derived from `swami_reply` or `swami_teaching` units.
+- Titles, devotee questions, translator notes, and ambiguous speakers are discovery context only.
 - A weak match produces the exact no-match message and closest source records.
-- Summary evidence is restricted to independently threshold-passing records.
-- The summary model receives only exact accepted passages and treats them as quoted data, not instructions.
-- Summary prose may paraphrase, but every returned citation is validated against an exact substring of its accepted stored answer.
-- A structured answerability check rejects evidence that is topically similar but answers a different relationship or purpose.
-- An additional adequacy check rejects fluent “how” summaries that never provide guidance.
-- Below-threshold neighbors remain inspection-only and are never sent to the summary model.
+- Verbatim Selection performs no generation.
+- Deep Search uses complete answer units for judgment and exact logical passages for display.
+- Independent adjudications can reject evidence at every stage and abstain.
+- Models never copy, compose, correct, summarize, translate, or join teaching text.
+- Raw/display hashes and offsets are verified before any evidence is returned.
 
 ## 17. API and UI Responsibilities
 
 ### UI screens
 
 - **Setup:** diagnostics and local presets.
-- **Settings:** source/index connections, embedding and summary models, field mapping, result count, threshold, and synthesis limits.
+- **Settings:** source/index connections, embedding model, approved Deep Search model, field mapping, result count, and threshold.
 - **Index:** initialization, status, full rebuild, incremental sync, progress, cancellation, and errors.
-- **Search:** independent passage-semantic queries, grounded synthesized answers, and plain-text source cards.
+- **Search:** independent semantic/text queries, exact teaching clusters, and plain-text source cards.
 
 ### Main API operations
 
@@ -624,7 +613,7 @@ The executable regression set in `eval/relevance-cases.json` records reviewed qu
 | `/sync` | Start full or incremental synchronization |
 | `/sync/:jobId/events` | Stream progress using server-sent events |
 | `/sync/:jobId/cancel` | Request safe cancellation |
-| `/search` | Embed one question, retrieve answer passages, pool records, and optionally synthesize from accepted evidence |
+| `/search` | Retrieve passages and optionally run Verbatim Selection or six-stage Deep Search |
 
 Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-qa`.
 
@@ -634,12 +623,15 @@ Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-
 | --- | --- |
 | `src/server.js` | Standalone Express server and static UI hosting |
 | `src/registerRoutes.js` | Request schemas and public API routes |
-| `src/ollama.js` | Local model identity, passage embedding, structured chat generation, and grounded prompt validation |
+| `src/ollama.js` | Model identity, embeddings, thinking-capability enforcement, probe planning, and adjudication |
+| `src/corpusStructure.js` | Multilingual speaker parsing, answer units, exact citation spans, hashes, and story completeness |
 | `src/core.js` | Model-aware formats, hashing, passage pooling/scoring, document deduplication, threshold response |
-| `src/semanticSummary.js` | Unicode passage segmentation, relevant-record admission, evidence selection, and cited synthesis orchestration |
-| `src/database.js` | PostgreSQL snapshots, atomic record/passage staging, commits, and passage HNSW/GIN search |
+| `src/semanticSummary.js` | Fast deterministic verbatim teaching selection |
+| `src/deepSummaryManager.js` | Six-stage Deep Search, bounded retries/deadlines, clustering, exact final verification |
+| `src/database.js` | v5 tables, atomic staging/promotion, aliases, answer/discovery retrieval, exact slice checks |
 | `src/syncManager.js` | Job lifecycle, batching, cancellation, SSE, full/incremental orchestration |
-| `scripts/importUniversalQa.js` | MySQL Q&A/discourse cleanup, chunking, and PostgreSQL source projection |
+| `scripts/importUniversalQa.js` | Read-only validation and faithful one-document MySQL projection |
+| `scripts/evaluateV5Promotion.js` | Mandatory live Q8 promotion replay and exactness gate |
 | `scripts/evaluateRetrieval.js` | Live retrieval, answer-record, confidence, and false-accept regression runner |
 | `scripts/evaluateCorpusQueries.js` | Broad live replay of structured-Q&A detailed source questions |
 | `eval/relevance-cases.json` | Reviewed positive answer judgments and unanswerable negative cases |
@@ -651,23 +643,30 @@ Standalone routes use `/api`; the shared toolkit host uses `/api/tools/semantic-
 ### First index build
 
 ```text
-Import/refresh MySQL data
+Update MySQL source rows
+-> run import:universal:check
+-> review role/ambiguity/hash counts
 -> run import:universal
 -> load universal preset
 -> run diagnostics
 -> initialize index
 -> full rebuild
--> search
+-> run retrieval evaluations
+-> run mandatory eval:promotion:v5 live Q8 replay
 ```
 
 ### Source data changed
 
 ```text
-refresh MySQL source
+update MySQL source
+-> run import:universal:check
 -> run import:universal
 -> incremental sync
--> unchanged records reuse their vectors
+-> review changed-document report
+-> unchanged documents reuse their vectors
 ```
+
+The first `passage-v4` to `answer-unit-v5` migration is a full rebuild. Incremental sync is used only after v5 has been activated; it intentionally rejects a v4 index instead of attempting a partial format migration.
 
 ### Embedding model changed
 
@@ -685,9 +684,11 @@ Changing only the model name is not enough. Every stored vector must be regenera
 Think of the system as a semantic library:
 
 - PostgreSQL source rows are the books.
-- The import process cleans and divides large books into labeled sections.
+- The import process preserves each book and identifies explicit speaker sections.
 - EmbeddingGemma assigns each section a semantic coordinate.
-- pgvector stores the coordinates next to exact section text.
+- pgvector stores coordinates for citable Swami passages and separate discovery context.
+- Qwen judges complete shortlisted replies but never writes the displayed teaching.
+- deterministic code returns exact stored source spans.
 - HNSW is a map of nearby semantic neighborhoods.
 - A user question receives its own coordinate.
 - Search follows the HNSW map to nearby sections.

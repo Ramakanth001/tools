@@ -1,6 +1,8 @@
 # Search Engine
 
-Search Engine (internally still identified as `semantic-qa` for route and settings compatibility) is a retrieval-first question-answer tool. It divides every stored answer into bounded passages, embeds those passages with a local Ollama embedding model, and stores the vectors plus an exact text snapshot in a separate PostgreSQL database. It offers meaning-first Semantic Search, conventional text Search, grounded summaries, and complete source-document viewing.
+Search Engine (internally still identified as `semantic-qa` for route and settings compatibility) is a context-faithful semantic teaching search. MySQL remains the source of truth. A PostgreSQL source projection keeps one row per original document, and a separate pgvector database indexes role-aware Swami answer units plus exact logical passages. Titles and devotee questions can discover a source, but can never be cited as Swami's teaching.
+
+Every displayed teaching is inserted by deterministic server code from an exact stored `display_text.slice(start, end)`. Models may plan queries, judge relevance, classify, and group teachings. They may not compose, correct, translate, or rewrite Swami's words.
 
 The tool includes a 20-record sample corpus and local-demo preset. It still requires running PostgreSQL and Ollama services. The **Setup** screen checks each dependency and shows what is missing.
 
@@ -12,23 +14,28 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 - Selectable ID, question, answer, metadata, group, and source-order columns
 - Local Ollama embeddings through `POST /api/embed`
 - pgvector storage with an HNSW cosine index
-- Passage-level semantic retrieval across answer text, with PostgreSQL full-text used only to widen recall
+- One-row-per-document source projection with immutable `raw_content`, faithful `display_text`, and SHA-256 hashes
+- English, Malayalam, and Telugu parsing of explicit devotee-question and Swami-reply boundaries
+- Citable `swami_reply` and `swami_teaching` units; separate non-citable title/question discovery passages
+- Complete paragraph, stanza, and list-item citation spans with bounded overlapping retrieval windows
+- Passage-level semantic retrieval across Swami answer text, with lexical, exact-phrase, and fuzzy discovery channels
 - Conventional Search that fuses exact phrases, PostgreSQL full-text rank, and trigram word-distance rank with reciprocal-rank fusion
 - Zero question/title weight in passage acceptance, plus document-group deduplication
 - Exact quoted-phrase identity checks, so nearby statements with reversed relationships do not outrank the requested quotation
 - Atomic full rebuilds and content-hash-based incremental synchronization
 - Deletion reconciliation after a successful source scan
-- Verbatim stored answers with source IDs and metadata
-- Meaning-based evidence pooling across as many as 15 independently relevant records
-- Grounded generative summaries that may paraphrase and pool cited evidence across relevant records
-- Verified Deep Summary jobs that score the complete answer-passage corpus, validate relevant expansions, hierarchically pool grounded claims, and produce publishable cited prose
+- Verbatim stored teachings with source IDs, answer-unit IDs, roles, kinds, hashes, and document offsets
+- Fast Verbatim Selection mode with no text-generation call
+- Six-stage Deep Search with multi-query retrieval, complete-answer reading, two independent Qwen adjudications, disagreement resolution, teaching clustering, and final exact-span verification
+- Honest `direct`, `related_teachings`, and `insufficient` outcomes
+- Dedicated reasoning-capable Qwen model enforcement with no silent Gemma fallback
 - A searchable catalog of all synchronized discourses
 - Clickable source citations that reconstruct the full ordered discourse and highlight the cited answer passage
-- Deep Summary export to Markdown and browser Print / Save PDF
+- Deep Search export to Markdown and browser Print / Save PDF
 - Configurable result count and clear-match threshold
 - Standalone and shared-workspace operation
 
-Standard Summary never sees retrieval neighbors that failed the clear-match threshold. Deep Summary may inspect those neighbors, but semantic neighbors outside the existing gate and every conventional-search candidate must pass an independent answerability verifier before claim extraction. Both modes treat evidence as quoted data and require resolvable citations. If local summary generation fails, stored results remain available.
+Verbatim Selection returns exact accepted source spans. Deep Search can discard evidence at every stage and abstains when no responsibly relevant Swami teaching survives. Personal experiences and success anecdotes are excluded unless the question explicitly asks for examples. A story is citable only when its consequence and Swami's stated lesson are present.
 
 ## Prerequisites
 
@@ -176,21 +183,24 @@ Verify the demo directly:
 
 The expected results are `20` source records and pgvector `0.8.5` (or a newer installed version).
 
-## Importing the Legacy `universal.sql` Corpus
+## Importing and Extending the Universal Corpus
 
-The importer at `scripts/importUniversalQa.js` converts the legacy `tblQA` and `tblDiscourse` tables into one clean PostgreSQL source projection suitable for embeddings. It does not modify the dump or the imported MySQL tables.
+The importer at `scripts/importUniversalQa.js` creates a PostgreSQL projection from `tblQA` and `tblDiscourse`. It never modifies MySQL, which remains the source of truth. Do not add permanent corpus content directly to PostgreSQL because the next import replaces that projection.
 
 Import behavior:
 
-- includes active, complete rows only (`activeStatus = 1`);
-- uses `tblQA.title` / `answerBySwami` for Q&A records;
-- uses `tblDiscourse.title` / `textDC` for discourse records;
-- converts legacy HTML markup and entities to readable plain text without summarizing or generating content;
-- retains the source type, original record ID, master ID, language, date, and chunk position as metadata;
-- divides long content at whitespace/paragraph boundaries, using language-aware limits and bounded adjacent-chunk overlap;
-- groups chunks by their original Q&A or discourse record and returns them in source order.
+- writes one `public.corpus_documents` row per original active source document;
+- preserves the original field as immutable `raw_content` with a SHA-256 hash;
+- creates `display_text` only by deterministic HTML rendering, entity decoding, encoding repair, and layout cleanup;
+- never changes spelling, grammar, wording, language, or meaning;
+- treats `tblQA.answerBySwami` as one complete `swami_reply`; the title and optional detailed-question fields are discovery context only;
+- parses explicit asked/replied pairs in discourses into separate role units;
+- treats unmarked discourse preaching as Swami teaching, including when its title looks like a question;
+- defaults a missing author to `Swami`;
+- reports ambiguous speaker boundaries for review instead of guessing;
+- retains legacy chunk aliases so old citations and GPT conversations continue to resolve.
 
-For the current dump at `/Applications/XAMPP/xamppfiles/htdocs/universal.sql`, the import includes 419 active Q&As and 5,591 active discourses. With retrieval overlap they produce 19,777 indexed chunks: 956 from `tblQA` and 18,821 from `tblDiscourse`. Inactive records and unrelated Joomla tables are not indexed.
+The current corpus contains 419 active Q&As and 5,591 active discourses, for 6,010 original documents. The former v4 projection also keeps its 19,777 chunk aliases temporarily for compatibility and rollback; they are not the primary v5 document structure.
 
 The isolated local configuration is:
 
@@ -199,15 +209,33 @@ The isolated local configuration is:
 | Imported source | `127.0.0.1` | `5433` | `universal_qa_source` | `semantic_qa_reader` | empty | `disable` |
 | Imported vector index | `127.0.0.1` | `5433` | `universal_qa_index` | `semantic_qa_indexer` | empty | `disable` |
 
-Run the repeatable MySQL-to-PostgreSQL projection after importing the dump into the local MySQL database `universal_vector_source`:
+First run the read-only validation. It reports empty fields, duplicate identities, parsed roles, ambiguous boundaries, hashes, citable units, and proposed document count without writing:
+
+```bash
+npm --prefix ./semantic-qa run import:universal:check
+```
+
+Then run the repeatable projection:
 
 ```bash
 npm --prefix ./semantic-qa run import:universal
 ```
 
-The optional environment variables are `UNIVERSAL_MYSQL_HOST`, `UNIVERSAL_MYSQL_PORT`, `UNIVERSAL_MYSQL_USER`, `UNIVERSAL_MYSQL_PASSWORD`, `UNIVERSAL_MYSQL_DATABASE`, `UNIVERSAL_PG_HOST`, `UNIVERSAL_PG_PORT`, `UNIVERSAL_PG_USER`, `UNIVERSAL_PG_PASSWORD`, `UNIVERSAL_PG_DATABASE`, `UNIVERSAL_QA_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_CHUNK_CHARS`, `UNIVERSAL_DISCOURSE_EN_OVERLAP_CHARS`, `UNIVERSAL_DISCOURSE_OTHER_OVERLAP_CHARS`, and `UNIVERSAL_INCLUDE_DISCOURSE`.
+The optional connection environment variables are `UNIVERSAL_MYSQL_HOST`, `UNIVERSAL_MYSQL_PORT`, `UNIVERSAL_MYSQL_USER`, `UNIVERSAL_MYSQL_PASSWORD`, `UNIVERSAL_MYSQL_DATABASE`, `UNIVERSAL_PG_HOST`, `UNIVERSAL_PG_PORT`, `UNIVERSAL_PG_USER`, `UNIVERSAL_PG_PASSWORD`, `UNIVERSAL_PG_DATABASE`, and `UNIVERSAL_INCLUDE_DISCOURSE`.
 
-In the UI, open **Setup**, click **Load universal Q&A**, and run diagnostics. The preset includes the correct source/index connections, mapping, and a corpus-calibrated `0.49` clear-match threshold. After importing changed MySQL data, rerun the projection and use **Incremental sync**.
+To add a Q&A, create an active `tblQA` row with a stable ID, `title`, optional `briefQuestion`/`questionBk`, and the complete unchanged answer in `answerBySwami`. To add standalone preaching, create an active `tblDiscourse` row with the topic in `title` and the complete unchanged teaching in `textDC`. Supply `masterId`, `masterLanguage`, date, author, and media metadata where available; a blank author means Swami.
+
+The operational flow is:
+
+```text
+Update MySQL
+-> import:universal:check
+-> import:universal
+-> Incremental sync
+-> review the changed-document and ambiguity report
+```
+
+The one-time migration from `passage-v4` to `answer-unit-v5` must use **Full rebuild** because the index structure changed. After v5 is active, Incremental sync rebuilds every answer unit, citable passage, discovery passage, and alias for a changed document while retaining embeddings for unchanged documents. No document has a passage-count cutoff; long discourses are indexed completely.
 
 ## Run the Tool
 
@@ -260,9 +288,10 @@ After a retrieval change or full rebuild, run the checked-in relevance regressio
 ```bash
 npm --prefix ./semantic-qa run eval:universal
 npm --prefix ./semantic-qa run eval:corpus
+npm --prefix ./semantic-qa run eval:promotion:v5
 ```
 
-The reviewed suite reports source-group and source-record ranks, Recall@5, top-one accuracy, mean reciprocal rank, and the false-accept rate for unanswerable questions. The broader corpus suite replays every available structured-Q&A `source_context` against its own source group and gates top-one recall, top-five recall, and confident wrong answers. Add representative production questions and expected answer records to `semantic-qa/eval/relevance-cases.json`; a relevance threshold alone is not a substitute for these evaluations.
+The final command is the mandatory live Q8 promotion replay. It requires an activated v5 index and running Search Engine API. It verifies the `related_teachings` outcome, required sources, excluded fragments/experiences, complete story handling, Swami roles, hashes, and exact offsets. Do not activate a staged v5 rebuild unless it passes.
 
 ## Connection Settings
 
@@ -279,8 +308,8 @@ Passwords and complete connection strings remain in browser memory only. They ar
 
 The Search screen has two independent retrieval modes:
 
-- **Semantic Search** compares the meaning and intent of the user question with every indexed answer passage. Stored questions and titles do not contribute to semantic acceptance.
-- **Search** performs conventional exact-phrase, full-text, and typo-tolerant trigram retrieval over answer passages and titles. Weighted reciprocal-rank fusion combines the independent ranks; exact answer passages receive the strongest weight. It does not call the embedding model.
+- **Semantic Search** compares the meaning and intent of the user question with citable Swami answer passages. Dense, lexical, exact-phrase, and fuzzy ranks are fused without allowing discovery-only text to become evidence.
+- **Search** performs conventional exact-phrase, full-text, and typo-tolerant retrieval. It does not call the embedding model.
 
 With EmbeddingGemma, each bounded answer passage is embedded using the model's asymmetric document format without the stored question/title:
 
@@ -294,17 +323,19 @@ The user question is embedded as:
 task: question answering | query: <user question>
 ```
 
-Retrieval v4 scores every indexed answer passage for each Semantic Search and unions relevance-qualified cosine results with full-text passage matches for recall. Acceptance is driven by answer-passage cosine meaning; lexical rank, word overlap, the stored question, and the title all have zero acceptance weight. Only additional semantically supporting passages can add a small bonus. Results are pooled back to their stored source records, and explicit multi-chunk documents are deduplicated. The HNSW path remains as a compatibility fallback when the exhaustive scorer is unavailable.
+Retrieval v5 stores `records` one per document, `answer_units` for complete Swami replies/teachings, `passages` for citable complete logical spans, `discovery_passages` for titles and devotee questions, and `source_aliases` for legacy citations. Discovery hits may nominate a source, after which only that source's Swami answer passages can be cited.
 
 The default clear-match threshold is `0.60`; the universal preset uses `0.49`. Final ordering and clear-match status use the passage relevance score. The API exposes at most one `acceptedMatch`; the UI presents only that record as the best stored source.
 
-With **Standard Summary**, search internally considers up to 15 passage-ranked records independently. In Semantic Search, a record may enter `relevantMatches` only when it passes the same clear-match threshold and a dense-semantic floor. Only indexed passages from accepted records are sent to the local summary model; rejected neighbors, stored questions, titles, metadata, and source context are excluded.
+With **Verbatim Selection**, deterministic code selects exact stored passages from independently accepted sources. It does not call a generation model and cannot create connective prose.
 
-With **Deep Summary**, semantic mode performs an exact corpus-wide scoring pass over every indexed answer passage instead of stopping at an HNSW candidate cap. Existing threshold-passing semantic evidence remains governed by the same “show relevant only” gate. Lower-scoring but plausible semantic records are separately validated against the exact requested relationship before they can be used. Accepted passages become individually cited claims; large claim sets are hierarchically pooled without dropping their original evidence mappings. The final writer produces one connected, publishable explanation in coherent paragraphs, and the UI places the complete evidence appendix after the prose.
+With **Deep Search**, Qwen first plans focused probes for the practical request, governing principle, qualifications, and counter-teachings. Each probe searches citable answer passages and non-citable discovery passages separately. Deep Search then reconstructs every shortlisted complete Swami unit, runs two independent adjudications, uses a third only on disagreements, groups distinct teachings, and verifies role, context, story completeness, hashes, and offsets. Evidence may be rejected at any phase.
 
-Clicking any result source or evidence citation opens the original discourse reconstructed from every available ordered chunk. Importer overlap is removed at chunk boundaries and the cited chunk-relative offsets are translated into highlights in the reconstructed document. The **Discourses** tab lists all synchronized discourse groups independently of retrieval.
+Deep Search uses `qwen3:14b-q8_0` by default and permits `qwen3:14b-q4_K_M` only by explicit choice. Ollama must report the `thinking` capability. Calls use `think: true`, a 32K context, one active generation, a ten-minute per-call limit, and a 45-minute job limit. Reasoning traces are discarded and never returned or persisted. There is no silent fallback to `gemma3:4b`.
 
-The model may paraphrase and combine the evidence, but every returned citation is validated against an exact passage from an accepted stored answer. It must also state whether the evidence answers the requested relationship or purpose; a related passage about a different use is rejected through the same “show relevant only” result. “How” answers receive an additional adequacy check so a description of the problem cannot masquerade as guidance. If no passage passes semantic admission—or generation fails—the accepted stored answer remains available without a summary.
+Deep results use three honest outcomes: `direct`, `related_teachings`, or `insufficient`. Neutral status and cluster labels may be generated; teaching text may not. Up to two exact primary passages are shown per teaching cluster, with additional verified passages in the evidence section.
+
+Clicking any result source or evidence citation opens the original document and highlights the exact stored offsets. The **Discourses** tab lists synchronized documents independently of retrieval.
 
 When no result meets the threshold, the response begins with:
 
@@ -338,10 +369,10 @@ Shared-host base path: `/api/tools/semantic-qa`
 | `GET` | `/sync/:jobId` | Read an in-memory job status |
 | `GET` | `/sync/:jobId/events` | Stream job progress with SSE |
 | `POST` | `/sync/:jobId/cancel` | Request cancellation |
-| `POST` | `/search` | Run semantic or conventional retrieval and optionally start Standard or Deep Summary |
-| `GET` | `/deep-summary/:jobId` | Read a Deep Summary job and final report |
-| `GET` | `/deep-summary/:jobId/events` | Stream Deep Summary progress with SSE |
-| `POST` | `/deep-summary/:jobId/cancel` | Request Deep Summary cancellation |
+| `POST` | `/search` | Run semantic or conventional retrieval and optionally start Verbatim Selection or Deep Search |
+| `GET` | `/deep-summary/:jobId` | Read a Deep Search job and final report (legacy-compatible route name) |
+| `GET` | `/deep-summary/:jobId/events` | Stream Deep Search operation and elapsed progress with SSE |
+| `POST` | `/deep-summary/:jobId/cancel` | Request Deep Search cancellation |
 
 All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection.
 
@@ -349,7 +380,7 @@ All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `Cannot reach Ollama` | Install/start Ollama, verify port `11434`, then pull both configured models (defaults: `embeddinggemma` and `gemma3:4b`). |
+| `Cannot reach Ollama` | Install/start Ollama, verify port `11434`, then pull `embeddinggemma` and `qwen3:14b-q8_0` (or explicitly choose the supported Q4 model). |
 | `model ... not found` | Pull the exact model configured in Settings. |
 | PostgreSQL `connection refused` or `no response` | Start the database server or correct its host/port. Installing `psql` alone does not start PostgreSQL. |
 | `server does not support SSL` | Choose SSL mode `disable` for a local database. |
@@ -387,4 +418,4 @@ export SEMANTIC_QA_TEST_MODEL='embeddinggemma' # optional
 - Manual full/incremental synchronization
 - Loopback Ollama only
 - No conversational memory
-- Running sync and Deep Summary jobs are tracked in memory; persisted sync metadata remains in the index database
+- Running sync and Deep Search jobs are tracked in memory; persisted sync metadata remains in the index database
