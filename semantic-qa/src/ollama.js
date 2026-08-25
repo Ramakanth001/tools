@@ -28,10 +28,13 @@ function applyHardwarePreference(options, preference) {
   return { ...(options || {}) };
 }
 
-async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000) {
+async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000, signal = null) {
   const normalizedBaseUrl = normalizeOllamaBaseUrl(baseUrl);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abortFromCaller();
+  else signal?.addEventListener('abort', abortFromCaller, { once: true });
   try {
     const response = await fetch(`${normalizedBaseUrl}${path}`, {
       method: 'POST',
@@ -43,6 +46,12 @@ async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000) {
     if (!response.ok) throw new Error(payload.error || `Ollama returned HTTP ${response.status}`);
     return payload;
   } catch (error) {
+    if (signal?.aborted) {
+      if (signal.reason instanceof Error) throw signal.reason;
+      const cancelled = new Error('Ollama request cancelled');
+      cancelled.code = 'OLLAMA_REQUEST_CANCELLED';
+      throw cancelled;
+    }
     if (error?.name === 'AbortError') throw new Error('Ollama request timed out');
     if (error instanceof TypeError || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(error?.message || ''))) {
       throw new Error(`Cannot reach Ollama at ${normalizedBaseUrl}. Install/start Ollama and pull the configured embedding model.`);
@@ -50,6 +59,7 @@ async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000) {
     throw error;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
@@ -218,22 +228,136 @@ async function embedTexts({ baseUrl, model, texts, timeoutMs }) {
   return payload.embeddings;
 }
 
-async function chat({ baseUrl, model, messages, format, options, hardwarePreference = 'auto', timeoutMs = 180000 }) {
+async function chat({ baseUrl, model, messages, format, options, think = false, hardwarePreference = 'auto', timeoutMs = 180000, signal = null }) {
   const payload = await ollamaRequest(baseUrl, '/api/chat', {
     model: String(model),
     messages,
     stream: false,
+    ...(think ? { think: true } : {}),
     ...(format ? { format } : {}),
     options: applyHardwarePreference({
       temperature: 0.1,
       ...(options || {}),
     }, hardwarePreference),
-  }, timeoutMs);
+  }, timeoutMs, signal);
   const content = payload?.message?.content;
   if (typeof content !== 'string' || !content.trim()) {
     throw new Error('Ollama returned an empty chat response');
   }
   return content.trim();
+}
+
+const DEEP_SUMMARY_MODELS = new Set(['qwen3:14b-q8_0', 'qwen3:14b-q4_k_m']);
+
+async function getModelDetails({ baseUrl, model, timeoutMs = 30000 }) {
+  return ollamaRequest(baseUrl, '/api/show', { model: String(model || '') }, timeoutMs);
+}
+
+async function requireThinkingModel({ baseUrl, model, timeoutMs = 30000 }) {
+  const normalized = String(model || '').trim().toLocaleLowerCase();
+  if (!DEEP_SUMMARY_MODELS.has(normalized)) {
+    const error = new Error('Deep Search requires qwen3:14b-q8_0 or qwen3:14b-q4_K_M; it will not fall back to a smaller model.');
+    error.code = 'OLLAMA_MODEL_NOT_ALLOWED';
+    throw error;
+  }
+  const details = await getModelDetails({ baseUrl, model, timeoutMs });
+  const capabilities = Array.isArray(details?.capabilities) ? details.capabilities.map((value) => String(value).toLowerCase()) : [];
+  if (!capabilities.includes('thinking')) {
+    const error = new Error(`Deep Search model ${model} does not report the required thinking capability.`);
+    error.code = 'OLLAMA_THINKING_REQUIRED';
+    throw error;
+  }
+  return { model: String(model), capabilities, details: { family: details?.details?.family || null, parameterSize: details?.details?.parameter_size || null } };
+}
+
+async function planDeepSearchProbes({ baseUrl, model, question, hardwarePreference = 'auto', timeoutMs = 600000, signal = null }) {
+  const format = {
+    type: 'object',
+    properties: {
+      probes: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string' } },
+    },
+    required: ['probes'],
+  };
+  const content = await chat({
+    baseUrl, model, hardwarePreference, timeoutMs, signal, think: true, format,
+    options: { temperature: 0, num_predict: 500, num_ctx: 32768 },
+    messages: [
+      { role: 'system', content: 'Preserve the user question exactly in meaning. Produce short semantic-search probes covering: the practical request, the governing principle, qualifications or limits, and possible counter-teachings. Do not answer the question. Return JSON only.' },
+      { role: 'user', content: `Question:\n${String(question).trim()}` },
+    ],
+  });
+  const parsed = parseStructuredJson(content, 'deep search probe planning');
+  const probes = [...new Set([String(question).trim(), ...(Array.isArray(parsed?.probes) ? parsed.probes : [])]
+    .map((value) => String(value || '').trim()).filter(Boolean))].slice(0, 6);
+  return probes;
+}
+
+async function adjudicateTeachingUnits({ baseUrl, model, question, units, reviewer = 1, hardwarePreference = 'auto', timeoutMs = 600000, signal = null }) {
+  const examplesRequested = /\b(?:example|examples|experience|experiences|story|stories|anecdote|anecdotes|case study|case studies)\b/iu.test(String(question || ''));
+  const items = (Array.isArray(units) ? units : []).map((unit, index) => ({
+    number: index + 1,
+    answerUnitId: unit.answerUnitId,
+    author: unit.author,
+    unitKind: unit.unitKind,
+    associatedQuestion: unit.associatedQuestion || '',
+    text: String(unit.text || ''),
+  }));
+  if (!items.length) return [];
+  const classifications = ['direct_answer', 'governing_principle', 'qualification', 'illustration', 'counter_teaching', 'irrelevant'];
+  const format = {
+    type: 'object',
+    properties: {
+      decisions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            number: { type: 'integer', minimum: 1, maximum: items.length },
+            classification: { type: 'string', enum: classifications },
+            cluster: { type: 'string' },
+            relationship: { type: 'string' },
+            context_complete: { type: 'boolean' },
+            story_complete: { type: 'boolean' },
+          },
+          required: ['number', 'classification', 'cluster', 'relationship', 'context_complete', 'story_complete'],
+        },
+      },
+    },
+    required: ['decisions'],
+  };
+  const content = await chat({
+    baseUrl, model, hardwarePreference, timeoutMs, signal, think: true, format,
+    options: { temperature: reviewer === 1 ? 0 : 0.05, num_predict: 1800, num_ctx: 32768 },
+    messages: [
+      {
+        role: 'system',
+        content: [
+          `You are independent reviewer ${reviewer} for a semantic teaching search.`,
+          'Literal wording is not required. A governing principle can be meaningfully relevant when it responsibly governs or illuminates the user’s situation.',
+          'Classify each complete Swami unit as direct_answer, governing_principle, qualification, illustration, counter_teaching, or irrelevant.',
+          'Reject merely similar wording, a devotee question, non-Swami speech, incomplete clauses, and stories missing their consequence or Swami’s explicit lesson.',
+          `Personal experiences and success anecdotes are ${examplesRequested ? 'allowed because the user explicitly requested examples' : 'irrelevant because the user did not request examples'}.`,
+          'Use a short neutral cluster label only to group distinct teachings. Do not rewrite or summarize teaching text.',
+          'Return JSON only.',
+        ].join(' '),
+      },
+      { role: 'user', content: `Question:\n${String(question).trim()}\n\nComplete candidate units:\n${JSON.stringify(items)}` },
+    ],
+  });
+  const parsed = parseStructuredJson(content, 'deep teaching adjudication');
+  const decisions = new Map((Array.isArray(parsed?.decisions) ? parsed.decisions : []).map((decision) => [Number(decision.number), decision]));
+  return items.map((item) => {
+    const decision = decisions.get(item.number) || {};
+    const classification = classifications.includes(decision.classification) ? decision.classification : 'irrelevant';
+    return {
+      answerUnitId: item.answerUnitId,
+      classification,
+      cluster: String(decision.cluster || classification.replace(/_/gu, ' ')).trim().slice(0, 120),
+      relationship: String(decision.relationship || '').trim().slice(0, 500),
+      contextComplete: decision.context_complete === true,
+      storyComplete: decision.story_complete === true,
+    };
+  });
 }
 
 async function testChatModel(config) {
@@ -429,7 +553,7 @@ async function generateGroundedAnswer({ baseUrl, model, question, evidence, maxS
   return { answerable: true, answer, evidenceNumbers };
 }
 
-async function validateEvidenceBatch({ baseUrl, model, question, evidence, hardwarePreference = 'auto', timeoutMs = 180000 }) {
+async function validateEvidenceBatch({ baseUrl, model, question, evidence, hardwarePreference = 'auto', timeoutMs = 180000, signal = null }) {
   const items = (Array.isArray(evidence) ? evidence : []).map((item, index) => `[${index + 1}] ${String(item.text || '').slice(0, 1800)}`);
   if (!items.length) return [];
   const format = {
@@ -441,7 +565,7 @@ async function validateEvidenceBatch({ baseUrl, model, question, evidence, hardw
     required: ['accepted_numbers', 'rejected_numbers'],
   };
   const content = await chat({
-    baseUrl, model, hardwarePreference, timeoutMs, format,
+    baseUrl, model, hardwarePreference, timeoutMs, signal, format,
     options: { temperature: 0, num_predict: 160, num_ctx: 8192 },
     messages: [{
       role: 'system',
@@ -456,7 +580,7 @@ async function validateEvidenceBatch({ baseUrl, model, question, evidence, hardw
     .map(Number).filter((number) => Number.isInteger(number) && number >= 1 && number <= items.length))];
 }
 
-async function extractGroundedClaims({ baseUrl, model, question, evidence, hardwarePreference = 'auto', timeoutMs = 180000 }) {
+async function extractGroundedClaims({ baseUrl, model, question, evidence, hardwarePreference = 'auto', timeoutMs = 180000, signal = null }) {
   const items = (Array.isArray(evidence) ? evidence : []).map((item, index) => `[${index + 1}] ${String(item.text || '').slice(0, 1800)}`);
   if (!items.length) return [];
   const format = {
@@ -464,7 +588,7 @@ async function extractGroundedClaims({ baseUrl, model, question, evidence, hardw
     properties: {
       claims: {
         type: 'array',
-        maxItems: 12,
+        maxItems: Math.min(8, items.length),
         items: {
           type: 'object',
           properties: {
@@ -477,14 +601,14 @@ async function extractGroundedClaims({ baseUrl, model, question, evidence, hardw
     },
     required: ['claims'],
   };
-  const systemPrompt = 'Extract up to 12 materially distinct points that answer the question using only the numbered evidence. Preserve the evidence wording whenever it is already clear. Copy a complete source sentence or make only the smallest grammatical edit needed to join overlapping evidence. Do not replace simple source words with abstract, academic, dramatic, or sophisticated alternatives. Do not infer a cause, consequence, metaphor, or interpretation that the evidence does not explicitly state. Keep useful definitions, steps, conditions, examples, qualifications, and disagreements instead of compressing them away. Every point must cite at least one evidence number. Put citations only in evidence_numbers and return valid JSON matching the schema.';
+  const systemPrompt = `Extract no more than ${Math.min(8, items.length)} materially distinct grounded points that answer the question using only the numbered evidence. Never return more points than evidence passages. Combine overlapping passages into one point instead of producing multiple phrasings of the same fact. Preserve the evidence wording whenever it is already clear. Copy a complete source sentence or make only the smallest grammatical edit needed to join overlapping evidence. Do not replace simple source words with abstract, academic, dramatic, or sophisticated alternatives. Do not infer a cause, consequence, metaphor, or interpretation that the evidence does not explicitly state. Keep useful definitions, steps, conditions, examples, qualifications, and disagreements instead of compressing them away. Every point must cite at least one evidence number. Put citations only in evidence_numbers and return valid JSON matching the schema.`;
   const userMessage = {
     role: 'user',
     content: `Question:\n${String(question).trim()}\n\nEvidence:\n${items.join('\n\n')}`,
   };
   let content = await chat({
-    baseUrl, model, hardwarePreference, timeoutMs, format,
-    options: { temperature: 0, num_predict: 1400, num_ctx: 16384 },
+    baseUrl, model, hardwarePreference, timeoutMs, signal, format,
+    options: { temperature: 0, num_predict: 900, num_ctx: 16384 },
     messages: [{
       role: 'system',
       content: systemPrompt,
@@ -495,8 +619,8 @@ async function extractGroundedClaims({ baseUrl, model, question, evidence, hardw
     parsed = parseStructuredJson(content, 'deep claim extraction');
   } catch {
     content = await chat({
-      baseUrl, model, hardwarePreference, timeoutMs, format,
-      options: { temperature: 0, num_predict: 1800, num_ctx: 16384 },
+      baseUrl, model, hardwarePreference, timeoutMs, signal, format,
+      options: { temperature: 0, num_predict: 1200, num_ctx: 16384 },
       messages: [{
         role: 'system',
         content: `${systemPrompt} Your previous response was not parseable. Return only one complete compact JSON object with no Markdown fences or commentary.`,
@@ -512,7 +636,7 @@ async function extractGroundedClaims({ baseUrl, model, question, evidence, hardw
   });
 }
 
-async function consolidateGroundedClaims({ baseUrl, model, question, claims, hardwarePreference = 'auto', timeoutMs = 240000 }) {
+async function consolidateGroundedClaims({ baseUrl, model, question, claims, hardwarePreference = 'auto', timeoutMs = 240000, signal = null }) {
   const items = (Array.isArray(claims) ? claims : []).map((claim, index) => `[${index + 1}] ${String(claim.text || '').slice(0, 700)}`);
   if (!items.length) return [];
   const format = {
@@ -533,11 +657,11 @@ async function consolidateGroundedClaims({ baseUrl, model, question, claims, har
     },
     required: ['claims'],
   };
-  const systemPrompt = 'Merge the numbered grounded points into at most 8 complete, non-repetitive points that directly answer the question. Merge only genuine repetition or fragments that must be read together. Preserve the clearest source wording and retain every distinct definition, step, condition, example, qualification, and disagreement. Do not rewrite simple statements into abstract or sophisticated language. Do not add transitions, causes, consequences, metaphors, labels, or interpretations that are absent from the input. Every merged point must cite all supporting input claim numbers in claim_numbers. Return only valid JSON matching the schema.';
+  const systemPrompt = 'Merge the numbered grounded points into at most 8 complete, non-repetitive points that directly answer the question. Every numbered input point must be represented by at least one output point; never silently omit an input. Merge only genuine repetition or fragments that must be read together. Preserve the clearest source wording and retain every distinct definition, step, condition, example, qualification, and disagreement. Do not rewrite simple statements into abstract or sophisticated language. Do not add transitions, causes, consequences, metaphors, labels, or interpretations that are absent from the input. Every merged point must cite all supporting input claim numbers in claim_numbers. Return only valid JSON matching the schema.';
   const userMessage = { role: 'user', content: `Question:\n${String(question).trim()}\n\nClaims to consolidate:\n${items.join('\n\n')}` };
   let content = await chat({
-    baseUrl, model, hardwarePreference, timeoutMs, format,
-    options: { temperature: 0, num_predict: 2200, num_ctx: 16384 },
+    baseUrl, model, hardwarePreference, timeoutMs, signal, format,
+    options: { temperature: 0, num_predict: 1200, num_ctx: 16384 },
     messages: [{ role: 'system', content: systemPrompt }, userMessage],
   });
   let parsed;
@@ -545,8 +669,8 @@ async function consolidateGroundedClaims({ baseUrl, model, question, claims, har
     parsed = parseStructuredJson(content, 'deep claim consolidation');
   } catch {
     content = await chat({
-      baseUrl, model, hardwarePreference, timeoutMs, format,
-      options: { temperature: 0, num_predict: 2800, num_ctx: 16384 },
+      baseUrl, model, hardwarePreference, timeoutMs, signal, format,
+      options: { temperature: 0, num_predict: 1600, num_ctx: 16384 },
       messages: [{ role: 'system', content: `${systemPrompt} Your previous response was not parseable. Return one compact JSON object without Markdown or commentary.` }, userMessage],
     });
     parsed = parseStructuredJson(content, 'deep claim consolidation');
@@ -559,7 +683,7 @@ async function consolidateGroundedClaims({ baseUrl, model, question, claims, har
   });
 }
 
-async function synthesizeDeepAnswer({ baseUrl, model, question, claims, maxParagraphs = 6, hardwarePreference = 'auto', timeoutMs = 300000 }) {
+async function synthesizeDeepAnswer({ baseUrl, model, question, claims, maxParagraphs = 6, hardwarePreference = 'auto', timeoutMs = 300000, signal = null }) {
   const items = (Array.isArray(claims) ? claims : []).map((claim, index) => `[${index + 1}] ${String(claim.text || '').slice(0, 900)}`);
   if (!items.length) throw new Error('Deep synthesis requires grounded claims');
   const format = {
@@ -582,14 +706,14 @@ async function synthesizeDeepAnswer({ baseUrl, model, question, claims, maxParag
     required: ['title', 'paragraphs'],
   };
   const paragraphLimit = Math.max(3, Math.min(8, Number(maxParagraphs) || 6));
-  const systemPrompt = `Write a clear, evidence-faithful answer using only the numbered grounded points. Begin with the most direct definition or answer found in the points. Use ${Math.min(4, paragraphLimit)} to ${paragraphLimit} short, logically ordered paragraphs when the evidence supports that much detail. Preserve the wording of the grounded points whenever it is already simple and clear; paraphrase only as much as needed to remove repetition or join closely related statements. Prefer ordinary source words over abstract, academic, polished, dramatic, or sophisticated synonyms. Keep all related sentences from one numbered point together in one paragraph instead of splitting that point into several tiny paragraphs. Include every materially distinct supported definition, step, condition, example, qualification, and consequence; completeness is more important than brevity. Do not repeatedly restate the same three steps. Do not add a generic introduction, conclusion, transition, metaphor, label, cause, consequence, interpretation, or religious claim that is absent from the supplied points. Do not use headings, bullets, Markdown, citation markers, source labels, or citation boilerplate in the prose. Each paragraph must cite every grounded point it uses in claim_numbers. Return valid JSON matching the schema.`;
+  const systemPrompt = `Write a clear, evidence-faithful answer using only the numbered grounded points. Every numbered grounded point must be used and cited by at least one paragraph. Begin with the most direct definition or answer found in the points. Use ${Math.min(4, paragraphLimit)} to ${paragraphLimit} short, logically ordered paragraphs when the evidence supports that much detail. Preserve the wording of the grounded points whenever it is already simple and clear; paraphrase only as much as needed to remove repetition or join closely related statements. Prefer ordinary source words over abstract, academic, polished, dramatic, or sophisticated synonyms. Keep all related sentences from one numbered point together in one paragraph instead of splitting that point into several tiny paragraphs. Include every materially distinct supported definition, step, condition, example, qualification, and consequence; completeness is more important than brevity. Do not repeatedly restate the same three steps. Do not add a generic introduction, conclusion, transition, metaphor, label, cause, consequence, interpretation, or religious claim that is absent from the supplied points. Do not use headings, bullets, Markdown, citation markers, source labels, or citation boilerplate in the prose. Each paragraph must cite every grounded point it uses in claim_numbers. Return valid JSON matching the schema.`;
   const messages = [{ role: 'system', content: systemPrompt }, {
     role: 'user',
     content: `Question:\n${String(question).trim()}\n\nGrounded claims:\n${items.join('\n\n')}`,
   }];
   let content = await chat({
-    baseUrl, model, hardwarePreference, timeoutMs, format,
-    options: { temperature: 0, num_predict: 5200, num_ctx: 16384 },
+    baseUrl, model, hardwarePreference, timeoutMs, signal, format,
+    options: { temperature: 0, num_predict: 1800, num_ctx: 16384 },
     messages,
   });
   let parsed;
@@ -597,8 +721,8 @@ async function synthesizeDeepAnswer({ baseUrl, model, question, claims, maxParag
     parsed = parseStructuredJson(content, 'deep synthesis');
   } catch {
     content = await chat({
-      baseUrl, model, hardwarePreference, timeoutMs, format,
-      options: { temperature: 0, num_predict: 6000, num_ctx: 16384 },
+      baseUrl, model, hardwarePreference, timeoutMs, signal, format,
+      options: { temperature: 0, num_predict: 2400, num_ctx: 16384 },
       messages: [{ role: 'system', content: `${systemPrompt} Your previous response was not parseable. Return only one complete compact JSON object; do not use Markdown fences or commentary.` }, messages[1]],
     });
     parsed = parseStructuredJson(content, 'deep synthesis');
@@ -638,6 +762,10 @@ module.exports = {
   applyHardwarePreference,
   summarizeOllamaProcessor,
   getOllamaHardware,
+  getModelDetails,
+  requireThinkingModel,
+  planDeepSearchProbes,
+  adjudicateTeachingUnits,
   cleanGeneratedAnswer,
   parseStructuredJson,
   verifyGroundedAnswer,

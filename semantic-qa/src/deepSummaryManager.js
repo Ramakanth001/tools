@@ -1,25 +1,25 @@
 const crypto = require('node:crypto');
 const ollama = require('./ollama');
-const { extractRequestedPhrases } = require('./core');
+const { sha256 } = require('./corpusStructure');
 const { sanitizeError } = require('./syncManager');
 
 const MAX_DEEP_RECORDS = 100;
 const DEFAULT_DEEP_RECORDS = 60;
-const DEFAULT_DEEP_PARALLEL_REQUESTS = 2;
-const MAX_DEEP_PARALLEL_REQUESTS = 4;
-const DEFAULT_DEEP_REQUEST_TIMEOUT_MS = 300000;
-const MAX_DEEP_REQUEST_TIMEOUT_MS = 900000;
-const VALIDATION_BATCH_SIZE = 12;
-const CLAIM_BATCH_SIZE = 8;
-const CONSOLIDATION_BATCH_SIZE = 12;
-const MAX_SYNTHESIS_CLAIMS = 24;
+const DEFAULT_DEEP_PARALLEL_REQUESTS = 1;
+const MAX_DEEP_PARALLEL_REQUESTS = 1;
+const DEFAULT_DEEP_REQUEST_TIMEOUT_MS = 600000;
+const MAX_DEEP_REQUEST_TIMEOUT_MS = 600000;
+const DEEP_JOB_TIMEOUT_MS = 45 * 60 * 1000;
+const ADJUDICATION_BATCH_CHARACTERS = 42000;
+const MODEL_CALL_ATTEMPTS = 2;
+
 const DEEP_PHASE_DEFINITIONS = [
-  { id: 'collect', name: 'Collect candidate evidence', weight: 2, unit: 'passages' },
-  { id: 'validate', name: 'Validate evidence relevance', weight: 42, unit: 'passages' },
-  { id: 'extract', name: 'Extract grounded points', weight: 30, unit: 'passages' },
-  { id: 'pool', name: 'Pool overlapping evidence', weight: 15, unit: 'groups' },
-  { id: 'write', name: 'Write evidence-faithful summary', weight: 10, unit: 'answer' },
-  { id: 'cite', name: 'Resolve evidence citations', weight: 1, unit: 'citations' },
+  { id: 'plan', name: 'Plan semantic probes', weight: 8, unit: 'probes' },
+  { id: 'retrieve', name: 'Search teachings and discovery context', weight: 18, unit: 'probes' },
+  { id: 'read', name: 'Read complete Swami answers', weight: 18, unit: 'sources' },
+  { id: 'adjudicate', name: 'Independently adjudicate teachings', weight: 34, unit: 'reviews' },
+  { id: 'cluster', name: 'Build distinct teaching clusters', weight: 10, unit: 'teachings' },
+  { id: 'verify', name: 'Verify verbatim source spans', weight: 12, unit: 'teachings' },
 ];
 
 function normalizedText(value) {
@@ -32,77 +32,25 @@ function phasePercent(phase) {
   return Math.min(100, Math.round((phase.processed / phase.total) * 100));
 }
 
-function phaseUsesOllama(phase) {
-  return ['validate', 'extract', 'pool', 'write'].includes(phase.id);
-}
-
 function progressSnapshot(job) {
   const now = Date.now();
-  const phaseProgress = (job.phases || []).map((phase) => ({ ...phase, percent: phasePercent(phase) }));
-  const weighted = phaseProgress.reduce((total, phase) => total + (phase.weight * phase.percent) / 100, 0);
-  const overallPercent = job.status === 'completed' ? 100 : Math.min(99, Math.round(weighted));
-  const elapsedSeconds = Math.max(0, Math.round((now - job.startedAtMs) / 1000));
-  let etaSeconds = null;
-  let secondsPerWeight = job.secondsPerWeight ?? null;
-  const observedModelWeight = phaseProgress
-    .filter(phaseUsesOllama)
-    .reduce((total, phase) => total + (phase.weight * phase.percent) / 100, 0);
-  if (job.status === 'running' && job.modelProgressObserved && observedModelWeight > 0 && job.modelWorkStartedAtMs) {
-    const modelElapsedSeconds = Math.max(0.001, (now - job.modelWorkStartedAtMs) / 1000);
-    const rawSecondsPerWeight = modelElapsedSeconds / observedModelWeight;
-    if (job.lastEtaModelWeight !== observedModelWeight) {
-      secondsPerWeight = secondsPerWeight == null
-        ? rawSecondsPerWeight
-        : (secondsPerWeight * 0.65) + (rawSecondsPerWeight * 0.35);
-      job.secondsPerWeight = secondsPerWeight;
-      job.lastEtaModelWeight = observedModelWeight;
-    }
-  }
-  if (job.status === 'running' && secondsPerWeight != null) {
-    const remainingModelWeight = phaseProgress
-      .filter(phaseUsesOllama)
-      .reduce((total, phase) => {
-        if (['completed', 'skipped'].includes(phase.status)) return total;
-        return total + phase.weight * (1 - phase.percent / 100);
-      }, 0);
-    etaSeconds = remainingModelWeight > 0
-      ? Math.min(86400, Math.max(1, Math.ceil(remainingModelWeight * secondsPerWeight)))
-      : 0;
-    job.etaSeconds = etaSeconds;
-  } else if (job.status === 'completed') {
-    etaSeconds = 0;
-  }
-  const phases = phaseProgress.map((phase) => {
-    const startedAtMs = phase.startedAt ? Date.parse(phase.startedAt) : null;
-    const finishedAtMs = phase.finishedAt ? Date.parse(phase.finishedAt) : null;
-    const phaseElapsedSeconds = startedAtMs
-      ? Math.max(0, Math.round(((finishedAtMs || now) - startedAtMs) / 1000))
-      : 0;
-    if (!phaseUsesOllama(phase) || secondsPerWeight == null) {
-      return { ...phase, elapsedSeconds: phaseElapsedSeconds, etaSeconds: phase.status === 'completed' ? 0 : null, estimatedDurationSeconds: phase.status === 'completed' ? phaseElapsedSeconds : null };
-    }
-    const remainingWeight = ['completed', 'skipped'].includes(phase.status)
-      ? 0
-      : phase.weight * (1 - phase.percent / 100);
-    const phaseEtaSeconds = phase.status === 'running'
-      ? (remainingWeight > 0 ? Math.max(1, Math.ceil(remainingWeight * secondsPerWeight)) : 0)
-      : null;
-    const estimatedDurationSeconds = phase.status === 'completed'
-      ? phaseElapsedSeconds
-      : phase.status === 'skipped'
-        ? 0
-        : phase.status === 'running'
-          ? phaseElapsedSeconds + phaseEtaSeconds
-          : Math.max(1, Math.ceil(phase.weight * secondsPerWeight));
-    return { ...phase, elapsedSeconds: phaseElapsedSeconds, etaSeconds: phaseEtaSeconds, estimatedDurationSeconds };
-  });
+  const phases = job.phases.map((phase) => ({
+    ...phase,
+    percent: phasePercent(phase),
+    elapsedSeconds: phase.startedAt
+      ? Math.max(0, Math.round(((phase.finishedAt ? Date.parse(phase.finishedAt) : now) - Date.parse(phase.startedAt)) / 1000))
+      : 0,
+    etaSeconds: null,
+    estimatedDurationSeconds: null,
+  }));
+  const weighted = phases.reduce((total, phase) => total + (phase.weight * phase.percent) / 100, 0);
   return {
     phases,
-    overallPercent,
-    elapsedSeconds,
-    etaSeconds,
-    estimatedTotalSeconds: etaSeconds == null ? null : elapsedSeconds + etaSeconds,
-    estimatedCompletionAt: etaSeconds > 0 ? new Date(Date.now() + etaSeconds * 1000).toISOString() : null,
+    overallPercent: job.status === 'completed' ? 100 : Math.min(99, Math.round(weighted)),
+    elapsedSeconds: Math.max(0, Math.round((now - job.startedAtMs) / 1000)),
+    etaSeconds: null,
+    estimatedTotalSeconds: null,
+    estimatedCompletionAt: null,
   };
 }
 
@@ -112,13 +60,14 @@ function publicJob(job) {
     id: job.id,
     status: job.status,
     phase: job.phase,
+    currentOperation: job.currentOperation,
     processed: job.processed,
     total: job.total,
     percent: job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : 0,
     phaseProcessed: job.phaseProcessed,
     phaseTotal: job.phaseTotal,
     phasePercent: job.phaseTotal ? Math.min(100, Math.round((job.phaseProcessed / job.phaseTotal) * 100)) : 0,
-    parallelism: job.parallelism,
+    parallelism: 1,
     activeRequests: job.activeRequests,
     hardwarePreference: job.hardwarePreference,
     hardware: job.hardware,
@@ -131,57 +80,101 @@ function publicJob(job) {
   };
 }
 
-function collectCandidateEvidence(matches, { searchMode, threshold, question = '', retrievalCoverage = {} }) {
-  const requestedPhrases = extractRequestedPhrases(question);
+function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, retrievalCoverage = {} } = {}) {
   const evidence = [];
   const seen = new Set();
-  for (const match of (Array.isArray(matches) ? matches : [])) {
-    const passage = Array.isArray(match.matchedPassages) ? match.matchedPassages[0] : null;
-    if (!passage?.text) continue;
-    const key = normalizedText(passage.text);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    const score = Number(match.relevanceScore ?? match.searchScore ?? match.similarity) || 0;
-    const similarity = Number(match.similarity) || 0;
-    const normalizedPassage = normalizedText(passage.text);
-    const preservesRequestedPhrase = !requestedPhrases.length || requestedPhrases.every((phrase) => normalizedPassage.includes(phrase));
-    // Text rank widens recall but does not establish meaning or answerability.
-    // Conventional candidates must therefore pass the independent verifier.
-    const automaticallyAccepted = searchMode === 'search'
-      ? false
-      : score >= Number(threshold) && similarity >= 0.30 && preservesRequestedPhrase;
-    const exploratoryEligible = searchMode === 'search'
-      ? score >= 0.04
-      : similarity >= 0.25 && score >= Number(threshold) - 0.18;
-    if (!automaticallyAccepted && !exploratoryEligible) continue;
-    evidence.push({
-      sourceId: match.sourceId,
-      sourceGroup: match.sourceGroup ?? null,
-      sourceOrder: match.sourceOrder ?? null,
-      sourceTitle: String(match.question || '').trim() || null,
-      question: match.question,
-      text: passage.text,
-      start: passage.start,
-      end: passage.end,
-      relevanceScore: score,
-      semanticSimilarity: similarity,
-      matchChannels: match.matchChannels || passage.matchChannels || [],
-      automaticallyAccepted,
-    });
+  const candidateLimit = Math.max(1, Math.min(MAX_DEEP_RECORDS, Math.trunc(Number(maxRecords)) || DEFAULT_DEEP_RECORDS));
+  for (const match of Array.isArray(matches) ? matches : []) {
+    const passages = Array.isArray(match.matchedPassages) ? match.matchedPassages : [];
+    for (const passage of passages) {
+      const exactText = String(passage.citationText || passage.text || '');
+      const key = passage.answerUnitId || `${match.sourceId}:${passage.citationStart ?? passage.start}:${passage.citationEnd ?? passage.end}:${normalizedText(exactText)}`;
+      if (!exactText.trim() || seen.has(key)) continue;
+      seen.add(key);
+      evidence.push({
+        sourceId: String(match.sourceId),
+        sourceGroup: match.sourceGroup ?? match.sourceId,
+        sourceTitle: String(match.question || '').trim() || null,
+        answerUnitId: passage.answerUnitId || match.answerUnitId || null,
+        author: passage.author || match.author || 'Swami',
+        unitKind: passage.unitKind || match.unitKind || 'swami_teaching',
+        associatedQuestion: passage.associatedQuestion || '',
+        text: exactText,
+        start: Number.isInteger(passage.citationStart) ? passage.citationStart : Number(passage.start) || 0,
+        end: Number.isInteger(passage.citationEnd) ? passage.citationEnd : Number(passage.end) || exactText.length,
+        contextComplete: passage.contextComplete !== false,
+        storyComplete: passage.storyComplete !== false,
+        relevanceScore: Number(match.relevanceScore ?? match.searchScore ?? match.similarity) || 0,
+        semanticSimilarity: Number(passage.semanticSimilarity ?? match.similarity) || 0,
+        matchChannels: match.matchChannels || passage.matchChannels || [],
+      });
+      if (evidence.length >= candidateLimit) break;
+    }
+    if (evidence.length >= candidateLimit) break;
   }
   return {
     evidence,
+    candidateLimit,
+    candidatesTruncated: evidence.length >= candidateLimit && evidence.length < (Array.isArray(matches) ? matches.length : 0),
     retrievedCandidates: Array.isArray(matches) ? matches.length : 0,
     exhaustive: Boolean(retrievalCoverage.exhaustive),
     scannedPassages: Number(retrievalCoverage.scannedPassages) || 0,
   };
 }
 
+function fuseMatches(resultSets, maximum) {
+  const fused = new Map();
+  for (const matches of resultSets) {
+    for (let rank = 0; rank < matches.length; rank += 1) {
+      const match = matches[rank];
+      const key = String(match.sourceId);
+      const existing = fused.get(key) || { match, score: 0, ranks: 0 };
+      existing.score += 1 / (60 + rank + 1);
+      existing.ranks += 1;
+      if (Number(match.relevanceScore || 0) > Number(existing.match.relevanceScore || 0)) existing.match = match;
+      fused.set(key, existing);
+    }
+  }
+  return [...fused.values()]
+    .sort((left, right) => right.score - left.score || right.ranks - left.ranks || String(left.match.sourceId).localeCompare(String(right.match.sourceId)))
+    .slice(0, maximum)
+    .map(({ match, score, ranks }) => ({ ...match, fusedProbeScore: score, matchedProbeCount: ranks }));
+}
+
+function batchesByCharacters(units, maximumCharacters = ADJUDICATION_BATCH_CHARACTERS) {
+  const batches = [];
+  let current = [];
+  let size = 0;
+  for (const unit of units) {
+    const length = String(unit.text || '').length + 500;
+    if (current.length && size + length > maximumCharacters) {
+      batches.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(unit);
+    size += length;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+function fallbackUnits(evidence) {
+  return evidence.map((item, index) => ({
+    ...item,
+    answerUnitId: item.answerUnitId || `${item.sourceId}:legacy:${index + 1}`,
+    unitIndex: index + 1,
+    displayText: item.text,
+    start: 0,
+    end: item.text.length,
+    contentHash: sha256(item.text),
+  }));
+}
+
 function createDeepSummaryManager({
-  validateEvidence = ollama.validateEvidenceBatch,
-  extractClaims = ollama.extractGroundedClaims,
-  consolidateClaims = ollama.consolidateGroundedClaims,
-  synthesize = ollama.synthesizeDeepAnswer,
+  requireThinking = ollama.requireThinkingModel,
+  planProbes = ollama.planDeepSearchProbes,
+  adjudicate = ollama.adjudicateTeachingUnits,
   inspectHardware = null,
 } = {}) {
   const jobs = new Map();
@@ -195,423 +188,320 @@ function createDeepSummaryManager({
 
   function log(job, message) {
     job.logs.push(`[${new Date().toISOString()}] ${message}`);
-    if (job.logs.length > 100) job.logs.shift();
+    if (job.logs.length > 120) job.logs.shift();
     publish(job, 'log');
   }
 
-  function cancelled(job) {
-    if (!job.cancelRequested) return false;
-    const error = new Error('Deep summary cancelled');
-    error.code = 'DEEP_SUMMARY_CANCELLED';
+  function throwIfStopped(job) {
+    if (!job.abortController.signal.aborted) return;
+    const reason = job.abortController.signal.reason;
+    if (reason instanceof Error) throw reason;
+    const error = new Error('Deep Search cancelled');
+    error.code = 'DEEP_SEARCH_CANCELLED';
     throw error;
   }
 
-  function beginPhase(job, phaseId, total = 0) {
-    const phase = job.phases.find((item) => item.id === phaseId);
-    if (!phase) throw new Error(`Unknown deep summary phase: ${phaseId}`);
+  function beginPhase(job, id, total, operation) {
+    const phase = job.phases.find((item) => item.id === id);
     phase.status = 'running';
     phase.processed = 0;
     phase.total = Math.max(0, Number(total) || 0);
-    phase.startedAt = phase.startedAt || new Date().toISOString();
-    if (phaseUsesOllama(phase) && !job.modelWorkStartedAtMs) job.modelWorkStartedAtMs = Date.now();
-    job.currentPhaseId = phaseId;
+    phase.startedAt = new Date().toISOString();
+    job.currentPhaseId = id;
     job.phase = phase.name;
-    job.phaseProcessed = phase.processed;
+    job.currentOperation = operation || phase.name;
+    job.phaseProcessed = 0;
     job.phaseTotal = phase.total;
+    publish(job);
   }
 
-  function updatePhase(job, processed, total = null) {
+  function advance(job, amount = 1, operation = null) {
     const phase = job.phases.find((item) => item.id === job.currentPhaseId);
-    if (!phase) return;
-    if (total != null) phase.total = Math.max(0, Number(total) || 0);
-    phase.processed = Math.max(0, Math.min(phase.total || Number(processed) || 0, Number(processed) || 0));
+    phase.processed = Math.min(phase.total, phase.processed + amount);
     job.phaseProcessed = phase.processed;
-    job.phaseTotal = phase.total;
+    if (operation) job.currentOperation = operation;
+    publish(job);
   }
 
-  function addPhaseWork(job, amount) {
+  function completePhase(job) {
     const phase = job.phases.find((item) => item.id === job.currentPhaseId);
-    if (!phase) return;
-    phase.total += Math.max(0, Number(amount) || 0);
-    job.phaseTotal = phase.total;
-  }
-
-  function incrementPhase(job, amount) {
-    const phase = job.phases.find((item) => item.id === job.currentPhaseId);
-    if (!phase) return;
-    phase.processed = Math.min(phase.total, phase.processed + Math.max(0, Number(amount) || 0));
-    job.phaseProcessed = phase.processed;
-    job.phaseTotal = phase.total;
-    job.modelProgressObserved = true;
-  }
-
-  function completePhase(job, phaseId = job.currentPhaseId) {
-    const phase = job.phases.find((item) => item.id === phaseId);
-    if (!phase) return;
-    if (!phase.total) phase.total = 1;
     phase.processed = phase.total;
     phase.status = 'completed';
     phase.finishedAt = new Date().toISOString();
-    if (job.currentPhaseId === phaseId) {
-      job.phaseProcessed = phase.processed;
-      job.phaseTotal = phase.total;
-    }
+    job.phaseProcessed = phase.processed;
+    publish(job);
   }
 
-  function skipPendingPhases(job) {
-    for (const phase of job.phases) {
-      if (phase.status === 'pending') {
-        phase.status = 'skipped';
-        phase.finishedAt = new Date().toISOString();
-      }
-    }
+  function skipPending(job) {
+    for (const phase of job.phases) if (phase.status === 'pending') phase.status = 'skipped';
   }
 
-  function stopCurrentPhase(job, status) {
-    const phase = job.phases.find((item) => item.id === job.currentPhaseId);
-    if (phase?.status === 'running') {
-      phase.status = status;
-      phase.finishedAt = new Date().toISOString();
-    }
-  }
-
-  function boundedInteger(value, minimum, maximum, fallback) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.trunc(parsed))) : fallback;
-  }
-
-  async function refreshHardware(job, config) {
-    if (typeof inspectHardware !== 'function') return;
+  async function oneModelCall(job, operation, callback) {
+    throwIfStopped(job);
+    job.activeRequests = 1;
+    job.currentOperation = operation;
+    publish(job);
     try {
-      job.hardware = await inspectHardware({ baseUrl: config.baseUrl, model: config.model });
-      const processor = job.hardware?.runtime?.processor;
-      if (processor) log(job, `Ollama summary model processor: ${processor}.`);
-    } catch (error) {
-      log(job, `Could not inspect Ollama processor allocation (${sanitizeError(error)}).`);
-    }
-  }
-
-  function recoverableOllamaError(error, label) {
-    return new RegExp(`timed out|empty chat response|invalid json for ${label}`, 'iu').test(String(error?.message || ''));
-  }
-
-  function batchesOf(items, batchSize) {
-    const batches = [];
-    for (let index = 0; index < items.length; index += batchSize) batches.push({ items: items.slice(index, index + batchSize), offset: index });
-    return batches;
-  }
-
-  async function mapConcurrent(job, items, concurrency, worker, onComplete = () => {}) {
-    if (!items.length) return [];
-    const results = new Array(items.length);
-    let cursor = 0;
-    let firstError = null;
-    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-      while (!firstError) {
-        cancelled(job);
-        const index = cursor;
-        cursor += 1;
-        if (index >= items.length) return;
-        job.activeRequests += 1;
-        publish(job);
-        let completed = false;
+      for (let attempt = 1; attempt <= MODEL_CALL_ATTEMPTS; attempt += 1) {
         try {
-          results[index] = await worker(items[index], index);
-          completed = true;
+          return await callback();
         } catch (error) {
-          firstError ||= error;
-        } finally {
-          job.activeRequests = Math.max(0, job.activeRequests - 1);
+          throwIfStopped(job);
+          const permanent = ['OLLAMA_MODEL_NOT_ALLOWED', 'OLLAMA_THINKING_REQUIRED'].includes(error?.code);
+          if (attempt >= MODEL_CALL_ATTEMPTS || permanent) throw error;
+          log(job, `${operation} failed once; retrying the same bounded model call.`);
+          job.currentOperation = `${operation} · retry ${attempt + 1} of ${MODEL_CALL_ATTEMPTS}`;
+          publish(job);
         }
-        if (completed) onComplete(items[index], results[index], index);
-        publish(job);
       }
-    });
-    await Promise.all(workers);
-    if (firstError) throw firstError;
-    return results;
-  }
-
-  async function validateEvidenceResilient(job, config, batch) {
-    try {
-      return await validateEvidence({
-        baseUrl: config.baseUrl, model: config.model, question: config.question, evidence: batch,
-        hardwarePreference: config.hardwarePreference,
-        timeoutMs: config.requestTimeoutMs,
-      });
-    } catch (error) {
-      cancelled(job);
-      if (!recoverableOllamaError(error, 'deep evidence validation')) throw error;
-      if (batch.length > 1) {
-        const midpoint = Math.ceil(batch.length / 2);
-        log(job, `Evidence validation was interrupted; retrying ${batch.length} passages as ${midpoint} + ${batch.length - midpoint}.`);
-        const left = await validateEvidenceResilient(job, config, batch.slice(0, midpoint));
-        const right = await validateEvidenceResilient(job, config, batch.slice(midpoint));
-        return [...left, ...right.map((number) => number + midpoint)];
-      }
-      log(job, `Skipping source ${batch[0]?.sourceId || 'unknown'} after its individual evidence validation remained unavailable (${sanitizeError(error)}).`);
-      return [];
+      throw new Error(`${operation} did not return a result`);
     }
-  }
-
-  async function extractClaimsResilient(job, config, batch, evidenceOffset) {
-    try {
-      const extracted = await extractClaims({
-        baseUrl: config.baseUrl, model: config.model, question: config.question, evidence: batch,
-        hardwarePreference: config.hardwarePreference,
-        timeoutMs: config.requestTimeoutMs,
-      });
-      const normalized = (Array.isArray(extracted) ? extracted : []).flatMap((claim) => {
-        const text = String(claim?.text || '').trim();
-        const evidenceNumbers = [...new Set((Array.isArray(claim?.evidenceNumbers) ? claim.evidenceNumbers : [])
-          .map(Number)
-          .filter((number) => Number.isInteger(number) && number >= 1 && number <= batch.length)
-          .map((number) => evidenceOffset + number))];
-        return text && evidenceNumbers.length ? [{ text, evidenceNumbers, fallback: false }] : [];
-      });
-      if (normalized.length) return normalized;
-      throw new Error('Ollama returned no grounded claims for this evidence batch');
-    } catch (error) {
-      cancelled(job);
-      if (!recoverableOllamaError(error, 'deep claim extraction') && !/no grounded claims/iu.test(String(error?.message || ''))) throw error;
-      if (batch.length > 1) {
-        const midpoint = Math.ceil(batch.length / 2);
-        log(job, `Claim extraction batch could not be parsed; retrying ${batch.length} passages as smaller groups.`);
-        const left = await extractClaimsResilient(job, config, batch.slice(0, midpoint), evidenceOffset);
-        const right = await extractClaimsResilient(job, config, batch.slice(midpoint), evidenceOffset + midpoint);
-        return [...left, ...right];
-      }
-      const text = String(batch[0]?.text || '').trim().slice(0, 1800);
-      if (!text) return [];
-      log(job, `Using the verified source passage directly after claim extraction remained unavailable for source ${batch[0].sourceId}.`);
-      return [{ text, evidenceNumbers: [evidenceOffset + 1], fallback: true }];
-    }
-  }
-
-  async function synthesizeResilient(job, config, claims) {
-    let timeoutMs = config.requestTimeoutMs;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        return await synthesize({
-          baseUrl: config.baseUrl, model: config.model, question: config.question, claims, maxParagraphs: 8,
-          hardwarePreference: config.hardwarePreference, timeoutMs,
-        });
-      } catch (error) {
-        cancelled(job);
-        if (attempt > 0 || !recoverableOllamaError(error, 'deep synthesis')) throw error;
-        timeoutMs = Math.min(MAX_DEEP_REQUEST_TIMEOUT_MS, Math.max(timeoutMs + 60000, Math.round(timeoutMs * 1.5)));
-        log(job, `Deep answer writing was interrupted; retrying once with a ${Math.round(timeoutMs / 1000)} second timeout.`);
-      }
-    }
-    throw new Error('Deep answer writing remained unavailable');
-  }
-
-  async function consolidateForSynthesis(job, config, inputClaims) {
-    let current = inputClaims;
-    while (current.length > MAX_SYNTHESIS_CLAIMS) {
-      log(job, `Pooling ${current.length} grounded claims into a smaller non-repetitive set for final writing.`);
-      const claimBatches = batchesOf(current, CONSOLIDATION_BATCH_SIZE);
-      addPhaseWork(job, claimBatches.length);
-      const pooledBatches = await mapConcurrent(job, claimBatches, config.parallelRequests, async ({ items: batch }, batchIndex) => {
-        let consolidated;
-        try {
-          consolidated = await consolidateClaims({
-            baseUrl: config.baseUrl, model: config.model, question: config.question, claims: batch,
-            hardwarePreference: config.hardwarePreference,
-            timeoutMs: config.requestTimeoutMs,
-          });
-        } catch (error) {
-          cancelled(job);
-          log(job, `Claim pooling was unavailable for one batch; preserving it through deterministic pairwise pooling (${sanitizeError(error)}).`);
-          consolidated = [];
-          for (let pair = 0; pair < batch.length; pair += 2) {
-            const pairClaims = batch.slice(pair, pair + 2);
-            consolidated.push({
-              text: pairClaims.map((claim) => claim.text).join(' '),
-              claimNumbers: pairClaims.map((_claim, pairIndex) => pair + pairIndex + 1),
-            });
-          }
-        }
-        const normalized = [];
-        for (const claim of consolidated) {
-          const claimNumbers = [...new Set((Array.isArray(claim?.claimNumbers) ? claim.claimNumbers : [])
-            .map(Number).filter((number) => Number.isInteger(number) && number >= 1 && number <= batch.length))];
-          const text = String(claim?.text || '').trim();
-          if (!text || !claimNumbers.length) continue;
-          normalized.push({
-            text,
-            evidenceNumbers: [...new Set(claimNumbers.flatMap((claimNumber) => batch[claimNumber - 1]?.evidenceNumbers || []))],
-          });
-        }
-        log(job, `Pooled claim group ${batchIndex + 1} of ${claimBatches.length}.`);
-        return normalized;
-      }, () => { incrementPhase(job, 1); });
-      const next = pooledBatches.flat();
-      if (!next.length) throw new Error('Grounded claim pooling returned no usable claims');
-      if (next.length >= current.length) {
-        const paired = [];
-        for (let index = 0; index < current.length; index += 2) {
-          const pair = current.slice(index, index + 2);
-          paired.push({
-            text: pair.map((claim) => claim.text).join(' '),
-            evidenceNumbers: [...new Set(pair.flatMap((claim) => claim.evidenceNumbers))],
-          });
-        }
-        current = paired;
-      } else {
-        current = next;
-      }
-    }
-    return current;
+    finally { job.activeRequests = 0; publish(job); }
   }
 
   async function run(job, config) {
+    const deadline = setTimeout(() => {
+      const error = new Error('Deep Search exceeded its 45-minute job limit');
+      error.code = 'DEEP_SEARCH_DEADLINE';
+      job.abortController.abort(error);
+    }, DEEP_JOB_TIMEOUT_MS);
+    deadline.unref?.();
     try {
-      config.parallelRequests = boundedInteger(config.parallelRequests, 1, MAX_DEEP_PARALLEL_REQUESTS, DEFAULT_DEEP_PARALLEL_REQUESTS);
-      config.requestTimeoutMs = boundedInteger(config.requestTimeoutMs, 60000, MAX_DEEP_REQUEST_TIMEOUT_MS, DEFAULT_DEEP_REQUEST_TIMEOUT_MS);
-      config.hardwarePreference = ollama.normalizeHardwarePreference(config.hardwarePreference);
-      job.hardwarePreference = config.hardwarePreference;
-      job.parallelism = config.parallelRequests;
       job.status = 'running';
-      beginPhase(job, 'collect', Array.isArray(config.matches) ? config.matches.length : 0);
-      const collected = collectCandidateEvidence(config.matches, config);
-      updatePhase(job, Array.isArray(config.matches) ? config.matches.length : 0);
-      completePhase(job, 'collect');
-      const accepted = collected.evidence.filter((item) => item.automaticallyAccepted);
-      const exploratory = collected.evidence.filter((item) => !item.automaticallyAccepted);
-      job.total = Math.max(1, exploratory.length + collected.evidence.length + 1);
-      beginPhase(job, 'validate', exploratory.length);
-      const validationBatches = batchesOf(exploratory, VALIDATION_BATCH_SIZE);
-      log(job, `Inspecting ${collected.evidence.length} candidate passages from ${new Set(collected.evidence.map((item) => item.sourceId)).size} records with up to ${config.parallelRequests} parallel Ollama requests.`);
+      const common = {
+        baseUrl: config.baseUrl,
+        model: config.model,
+        hardwarePreference: config.hardwarePreference,
+        timeoutMs: Math.min(MAX_DEEP_REQUEST_TIMEOUT_MS, Math.max(60000, Number(config.requestTimeoutMs) || DEFAULT_DEEP_REQUEST_TIMEOUT_MS)),
+        signal: job.abortController.signal,
+      };
 
-      const validationResults = await mapConcurrent(job, validationBatches, config.parallelRequests, async ({ items: batch }) => ({
-        batch,
-        acceptedNumbers: await validateEvidenceResilient(job, config, batch),
-      }), ({ items: batch }) => {
-        job.processed += batch.length;
-        incrementPhase(job, batch.length);
-      });
-      for (const { batch, acceptedNumbers } of validationResults) {
-        for (const number of [...new Set(acceptedNumbers)]) {
-          if (Number.isInteger(number) && number >= 1 && number <= batch.length) accepted.push(batch[number - 1]);
-        }
+      beginPhase(job, 'plan', 1, `Checking thinking capability for ${config.model}`);
+      await oneModelCall(job, `Checking thinking capability for ${config.model}`, () => requireThinking(common));
+      const probes = await oneModelCall(job, 'Planning practical, principle, qualification, and counter-teaching probes', () => planProbes({ ...common, question: config.question }));
+      advance(job, 1);
+      completePhase(job);
+      log(job, `Planned ${probes.length} focused probes without changing the user question.`);
+
+      beginPhase(job, 'retrieve', probes.length, 'Searching citable teachings and non-citable discovery context');
+      const resultSets = [Array.isArray(config.matches) ? config.matches : []];
+      for (let index = 0; index < probes.length; index += 1) {
+        throwIfStopped(job);
+        const probe = probes[index];
+        if (typeof config.retrieveProbe === 'function') resultSets.push(await config.retrieveProbe(probe, job.abortController.signal));
+        advance(job, 1, `Searching probe ${index + 1} of ${probes.length}`);
       }
-      completePhase(job, 'validate');
-      if (exploratory.length) await refreshHardware(job, config);
-      log(job, `Verified ${accepted.length} of ${collected.evidence.length} relevance-qualified passages for grounded claim extraction.`);
-      if (!accepted.length) {
-        job.status = 'completed';
-        skipPendingPhases(job);
-        job.phase = 'Complete';
-        job.processed = job.total;
+      const fusedMatches = fuseMatches(resultSets, Math.max(1, Math.min(MAX_DEEP_RECORDS, Number(config.maxRecords) || DEFAULT_DEEP_RECORDS)));
+      const collected = collectCandidateEvidence(fusedMatches, config);
+      completePhase(job);
+
+      beginPhase(job, 'read', fusedMatches.length, 'Reconstructing complete Swami replies and teachings');
+      let units = typeof config.readAnswerUnits === 'function'
+        ? await config.readAnswerUnits(fusedMatches.map((match) => match.sourceId))
+        : [];
+      if (!units.length) units = fallbackUnits(collected.evidence);
+      units = units.filter((unit) => String(unit.author || 'Swami') === 'Swami' && ['swami_reply', 'swami_teaching'].includes(unit.unitKind || 'swami_teaching'));
+      advance(job, fusedMatches.length);
+      completePhase(job);
+      log(job, `Read ${units.length} complete citable Swami answer units from ${new Set(units.map((unit) => unit.sourceId)).size} sources.`);
+
+      if (!units.length) {
+        skipPending(job);
         job.result = {
-          status: 'not_available', reason: 'no_verified_evidence', paragraphs: [], evidence: [],
-          coverage: {
-            scannedPassages: collected.scannedPassages,
-            retrievedCandidates: collected.retrievedCandidates,
-            candidateRecords: collected.evidence.length,
-            verifiedRecords: 0,
-            rejectedRecords: collected.evidence.length,
-            exhaustiveScan: collected.exhaustive,
-          },
+          status: 'not_available', mode: 'deep', answerStatus: 'insufficient', reason: 'no_citable_swami_units',
+          notice: 'No responsibly relevant Swami teaching was found.', paragraphs: [], teachingClusters: [], evidence: [],
+          audit: { probes: probes.length, sourcesRead: 0, rejectedEvidence: collected.evidence.length, disagreements: 0, finalVerification: 0 },
         };
+        job.status = 'completed';
+        job.phase = 'Complete';
+        job.currentOperation = 'Complete';
         job.finishedAt = new Date().toISOString();
         publish(job, 'status');
         return;
       }
 
-      beginPhase(job, 'extract', accepted.length);
-      let fallbackClaimCount = 0;
-      const claimBatches = batchesOf(accepted, CLAIM_BATCH_SIZE);
-      const extractedBatches = await mapConcurrent(job, claimBatches, config.parallelRequests, async ({ items: batch, offset }) =>
-        extractClaimsResilient(job, config, batch, offset), ({ items: batch }) => {
-        job.processed += batch.length;
-        incrementPhase(job, batch.length);
+      const batches = batchesByCharacters(units);
+      beginPhase(job, 'adjudicate', batches.length * 2, 'Running independent Qwen adjudication 1');
+      const first = new Map();
+      const second = new Map();
+      for (let index = 0; index < batches.length; index += 1) {
+        const batch = batches[index];
+        const decisions = await oneModelCall(job, `Independent adjudication 1 · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 1 }));
+        for (const decision of decisions) first.set(decision.answerUnitId, decision);
+        advance(job, 1);
+      }
+      for (let index = 0; index < batches.length; index += 1) {
+        const batch = batches[index];
+        const decisions = await oneModelCall(job, `Independent adjudication 2 · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 2 }));
+        for (const decision of decisions) second.set(decision.answerUnitId, decision);
+        advance(job, 1);
+      }
+      const disagreements = units.filter((unit) => {
+        const left = first.get(unit.answerUnitId);
+        const right = second.get(unit.answerUnitId);
+        return !left || !right || left.classification !== right.classification || left.contextComplete !== right.contextComplete || left.storyComplete !== right.storyComplete;
       });
-      const claims = [];
-      for (const extracted of extractedBatches) {
-        for (const claim of extracted) {
-          if (claim.fallback) fallbackClaimCount += 1;
-          claims.push({
-            text: claim.text,
-            evidenceNumbers: claim.evidenceNumbers,
-          });
+      const third = new Map();
+      if (disagreements.length) {
+        const disagreementBatches = batchesByCharacters(disagreements);
+        job.phases.find((phase) => phase.id === 'adjudicate').total += disagreementBatches.length;
+        job.phaseTotal += disagreementBatches.length;
+        for (let index = 0; index < disagreementBatches.length; index += 1) {
+          const batch = disagreementBatches[index];
+          const decisions = await oneModelCall(job, `Resolving adjudication disagreements · batch ${index + 1} of ${disagreementBatches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 3 }));
+          for (const decision of decisions) third.set(decision.answerUnitId, decision);
+          advance(job, 1);
         }
       }
-      if (!claims.length) throw new Error('No grounded claims could be extracted from the verified evidence');
-      completePhase(job, 'extract');
-      if (!job.hardware) await refreshHardware(job, config);
+      completePhase(job);
 
-      beginPhase(job, 'pool', 0);
-      const synthesisClaims = await consolidateForSynthesis(job, config, claims);
-      completePhase(job, 'pool');
+      const adjudicated = units.map((unit) => {
+        const left = first.get(unit.answerUnitId);
+        const right = second.get(unit.answerUnitId);
+        const decision = third.get(unit.answerUnitId) || (left?.classification === right?.classification ? left : null);
+        return { unit, decision };
+      });
+      const accepted = adjudicated.filter(({ decision }) => decision && decision.classification !== 'irrelevant' && decision.contextComplete === true &&
+        (decision.classification !== 'illustration' || decision.storyComplete === true));
 
-      beginPhase(job, 'write', 1);
-      cancelled(job);
-      const synthesis = await synthesizeResilient(job, config, synthesisClaims);
-      updatePhase(job, 1);
-      completePhase(job, 'write');
-
-      beginPhase(job, 'cite', synthesisClaims.length);
-      const paragraphs = synthesis.paragraphs.map((paragraph) => ({
-        text: paragraph.text,
-        evidenceNumbers: [...new Set(paragraph.claimNumbers.flatMap((claimNumber) => synthesisClaims[claimNumber - 1]?.evidenceNumbers || []))]
-          .filter((number) => number >= 1 && number <= accepted.length),
-      })).filter((paragraph) => paragraph.evidenceNumbers.length);
-      const usedClaimNumbers = new Set(synthesis.paragraphs.flatMap((paragraph) => paragraph.claimNumbers || []));
-      const omittedClaims = synthesisClaims
-        .map((claim, index) => ({ ...claim, claimNumber: index + 1 }))
-        .filter((claim) => !usedClaimNumbers.has(claim.claimNumber));
-      for (let index = 0; index < omittedClaims.length; index += 3) {
-        const group = omittedClaims.slice(index, index + 3);
-        paragraphs.push({
-          text: group.map((claim) => claim.text).join(' '),
-          evidenceNumbers: [...new Set(group.flatMap((claim) => claim.evidenceNumbers || []))]
-            .filter((number) => number >= 1 && number <= accepted.length),
-        });
+      beginPhase(job, 'cluster', accepted.length, 'Grouping distinct teachings without rewriting them');
+      const clusters = new Map();
+      for (const item of accepted) {
+        const label = String(item.decision.cluster || item.decision.classification.replace(/_/gu, ' ')).trim() || 'Related teaching';
+        const key = normalizedText(label);
+        if (!clusters.has(key)) clusters.set(key, { label, classification: item.decision.classification, items: [] });
+        clusters.get(key).items.push(item);
+        advance(job, 1);
       }
-      if (!paragraphs.length) throw new Error('Deep summary citations did not resolve to original evidence');
-      updatePhase(job, synthesisClaims.length);
-      completePhase(job, 'cite');
+      completePhase(job);
 
-      const usedEvidence = new Set(paragraphs.flatMap((paragraph) => paragraph.evidenceNumbers));
-      job.processed = job.total;
-      job.phase = 'Complete';
-      job.status = 'completed';
-      job.finishedAt = new Date().toISOString();
+      beginPhase(job, 'verify', accepted.length, 'Checking authors, hashes, and exact display-text offsets');
+      const verified = [];
+      for (const item of accepted) {
+        const unit = item.unit;
+        const displayText = String(unit.displayText ?? unit.text ?? '');
+        const start = Number(unit.start);
+        const end = Number(unit.end);
+        const exact = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= displayText.length
+          ? displayText.slice(start, end)
+          : '';
+        const hashValid = !unit.contentHash || sha256(String(unit.text || '')) === unit.contentHash;
+        const unitValid = unit.author === 'Swami' && exact === unit.text && hashValid && item.decision.contextComplete &&
+          (item.decision.classification !== 'illustration' || item.decision.storyComplete);
+        if (unitValid) {
+          const candidates = collected.evidence.filter((candidate) =>
+            (candidate.answerUnitId && candidate.answerUnitId === unit.answerUnitId) ||
+            (!candidate.answerUnitId && String(candidate.sourceId) === String(unit.sourceId)));
+          const passage = candidates.find((candidate) => {
+            const citationStart = Number(candidate.start);
+            const citationEnd = Number(candidate.end);
+            return candidate.author === 'Swami' && candidate.contextComplete !== false && candidate.storyComplete !== false &&
+              Number.isInteger(citationStart) && Number.isInteger(citationEnd) &&
+              citationStart >= start && citationEnd <= end && citationEnd > citationStart &&
+              displayText.slice(citationStart, citationEnd) === candidate.text;
+          });
+          const selected = passage || {
+            text: unit.text,
+            start,
+            end,
+            contextComplete: true,
+            storyComplete: item.decision.storyComplete,
+          };
+          verified.push({ ...item, selected });
+        }
+        advance(job, 1);
+      }
+      completePhase(job);
+
+      const evidence = verified.map((item, index) => ({
+        evidenceNumber: index + 1,
+        sourceId: item.unit.sourceId,
+        answerUnitId: item.unit.answerUnitId,
+        sourceTitle: item.unit.title || null,
+        author: item.unit.author,
+        unitKind: item.unit.unitKind,
+        associatedQuestion: item.unit.associatedQuestion || '',
+        start: item.selected.start,
+        end: item.selected.end,
+        text: item.selected.text,
+        contentHash: sha256(item.selected.text),
+        answerUnitHash: item.unit.contentHash,
+        contextComplete: item.selected.contextComplete !== false && item.decision.contextComplete,
+        storyComplete: item.selected.storyComplete !== false && item.decision.storyComplete,
+        classification: item.decision.classification,
+        relationship: item.decision.relationship,
+        cluster: item.decision.cluster,
+      }));
+      const evidenceNumberByUnit = new Map(evidence.map((item) => [item.answerUnitId, item.evidenceNumber]));
+      const teachingClusters = [...clusters.values()].flatMap((cluster, index) => {
+        const numbers = cluster.items.map((item) => evidenceNumberByUnit.get(item.unit.answerUnitId)).filter(Boolean);
+        if (!numbers.length) return [];
+        return [{
+          id: `teaching-${index + 1}`,
+          label: cluster.label,
+          classification: cluster.classification,
+          primaryEvidenceNumbers: numbers.slice(0, 2),
+          additionalEvidenceNumbers: numbers.slice(2),
+        }];
+      });
+      const usedEvidence = new Set(teachingClusters.flatMap((cluster) => cluster.primaryEvidenceNumbers));
+      for (const item of evidence) item.usedInSummary = usedEvidence.has(item.evidenceNumber);
+      const paragraphs = evidence.filter((item) => usedEvidence.has(item.evidenceNumber)).map((item) => ({ text: item.text, evidenceNumbers: [item.evidenceNumber] }));
+      const answerStatus = evidence.some((item) => item.classification === 'direct_answer')
+        ? 'direct'
+        : evidence.length ? 'related_teachings' : 'insufficient';
+      const notice = answerStatus === 'direct'
+        ? 'Swami directly addresses this question in the teachings below.'
+        : answerStatus === 'related_teachings'
+          ? 'No literal answer was found. The following verified teachings meaningfully relate to the question.'
+          : 'No responsibly relevant Swami teaching was found.';
       job.result = {
-        status: 'ready',
+        status: evidence.length ? 'ready' : 'not_available',
         mode: 'deep',
-        title: synthesis.title,
+        answerStatus,
+        reason: evidence.length ? null : 'no_verified_evidence',
+        notice,
+        title: answerStatus === 'direct' ? 'Direct teaching' : answerStatus === 'related_teachings' ? 'Related teachings' : 'Insufficient evidence',
         paragraphs,
-        evidence: accepted.map((item, index) => ({ ...item, evidenceNumber: index + 1, usedInSummary: usedEvidence.has(index + 1) })),
-        coverage: {
-          scannedPassages: collected.scannedPassages,
-          retrievedCandidates: collected.retrievedCandidates,
-          exhaustiveScan: collected.exhaustive,
-          candidateRecords: collected.evidence.length,
-          automaticallyAcceptedRecords: collected.evidence.filter((item) => item.automaticallyAccepted).length,
-          verifiedExpandedRecords: accepted.filter((item) => !item.automaticallyAccepted).length,
-          verifiedRecords: accepted.length,
-          rejectedRecords: collected.evidence.length - accepted.length,
-          claimCount: claims.length,
-          pooledClaimCount: synthesisClaims.length,
-          supplementalClaimParagraphs: Math.ceil(omittedClaims.length / 3),
-          fallbackClaimCount,
-          usedSourceCount: new Set(accepted.filter((_item, index) => usedEvidence.has(index + 1)).map((item) => String(item.sourceId))).size,
+        teachingClusters,
+        evidence,
+        audit: {
+          probes: probes.length,
+          retrievedCandidates: resultSets.reduce((total, set) => total + set.length, 0),
+          retrievedSourceIds: fusedMatches.map((match) => String(match.sourceId)),
+          sourcesRead: new Set(units.map((unit) => unit.sourceId)).size,
+          sourceIdsRead: [...new Set(units.map((unit) => String(unit.sourceId)))],
+          answerUnitsRead: units.length,
+          rejectedEvidence: units.length - verified.length,
+          disagreements: disagreements.length,
+          finalVerification: verified.length,
+          scannedPassages: Number(config.retrievalCoverage?.scannedPassages) || 0,
         },
       };
-      log(job, `Completed with ${accepted.length} verified evidence passages and ${claims.length} grounded claims.`);
+      job.processed = job.total;
+      job.status = 'completed';
+      job.phase = 'Complete';
+      job.currentOperation = 'Complete';
+      job.finishedAt = new Date().toISOString();
+      if (typeof inspectHardware === 'function') {
+        try { job.hardware = await inspectHardware({ baseUrl: config.baseUrl, model: config.model }); } catch { /* non-fatal */ }
+      }
+      log(job, `Completed with ${verified.length} exact verified teachings; discarded ${units.length - verified.length}.`);
       publish(job, 'status');
     } catch (error) {
-      job.status = error?.code === 'DEEP_SUMMARY_CANCELLED' ? 'cancelled' : 'failed';
-      stopCurrentPhase(job, job.status);
+      const cancelled = error?.code === 'DEEP_SEARCH_CANCELLED';
+      job.status = cancelled ? 'cancelled' : 'failed';
+      const phase = job.phases.find((item) => item.status === 'running');
+      if (phase) { phase.status = job.status; phase.finishedAt = new Date().toISOString(); }
       job.phase = job.status;
+      job.currentOperation = job.status;
       job.error = sanitizeError(error);
       job.finishedAt = new Date().toISOString();
       log(job, job.error);
       publish(job, 'status');
     } finally {
+      clearTimeout(deadline);
+      if (job.heartbeat) clearInterval(job.heartbeat);
       for (const listener of [...job.listeners]) { try { listener.end(); } catch { /* ignore */ } }
       job.listeners.clear();
     }
@@ -620,24 +510,33 @@ function createDeepSummaryManager({
   function start(config) {
     const id = `deep_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
     const job = {
-      id, status: 'queued', phase: 'queued', processed: 0, total: 0, error: null, result: null,
-      phaseProcessed: 0, phaseTotal: 0,
-      parallelism: boundedInteger(config.parallelRequests, 1, MAX_DEEP_PARALLEL_REQUESTS, DEFAULT_DEEP_PARALLEL_REQUESTS), activeRequests: 0,
+      id, status: 'queued', phase: 'queued', currentOperation: 'Queued', processed: 0, total: 1,
+      phaseProcessed: 0, phaseTotal: 0, activeRequests: 0,
       hardwarePreference: ollama.normalizeHardwarePreference(config.hardwarePreference), hardware: null,
       phases: DEEP_PHASE_DEFINITIONS.map((phase) => ({ ...phase, status: 'pending', processed: 0, total: 0, startedAt: null, finishedAt: null })),
-      currentPhaseId: null, modelProgressObserved: false, etaSeconds: null, secondsPerWeight: null,
-      lastEtaModelWeight: null, modelWorkStartedAtMs: null, startedAtMs: Date.now(),
-      logs: [], listeners: new Set(), cancelRequested: false, createdAt: new Date().toISOString(), finishedAt: null,
+      currentPhaseId: null, error: null, result: null, startedAtMs: Date.now(), abortController: new AbortController(),
+      logs: [], listeners: new Set(), createdAt: new Date().toISOString(), finishedAt: null,
     };
     jobs.set(id, job);
-    queueMicrotask(() => void run(job, config));
+    job.heartbeat = setInterval(() => { if (job.status === 'running') publish(job); }, 1000);
+    job.heartbeat.unref?.();
+    queueMicrotask(() => void run(job, { ...config, hardwarePreference: job.hardwarePreference }));
     return publicJob(job);
   }
 
   function get(id) { return jobs.has(id) ? publicJob(jobs.get(id)) : null; }
-  function cancel(id) { const job = jobs.get(id); if (job) job.cancelRequested = true; return job ? publicJob(job) : null; }
+  function cancel(id) {
+    const job = jobs.get(id);
+    if (job && !job.abortController.signal.aborted) {
+      const error = new Error('Deep Search cancelled');
+      error.code = 'DEEP_SEARCH_CANCELLED';
+      job.abortController.abort(error);
+    }
+    return job ? publicJob(job) : null;
+  }
   function subscribe(id, response) {
-    const job = jobs.get(id); if (!job) return false;
+    const job = jobs.get(id);
+    if (!job) return false;
     job.listeners.add(response);
     response.write(`event: status\ndata: ${JSON.stringify(publicJob(job))}\n\n`);
     return true;

@@ -30,6 +30,7 @@ async function withServer(callback, overrides = {}) {
   const ollama = {
     testOllama: async () => ({ ok: true, model: 'embeddinggemma', dimension: 3 }),
     testChatModel: async () => ({ ok: true, model: 'gemma3:4b' }),
+    requireThinkingModel: async () => ({ ok: true, model: 'qwen3:14b-q8_0', capabilities: ['thinking'] }),
     embedTexts: async () => [[0.1, 0.2, 0.3]],
     generateGroundedAnswer: async ({ evidence }) => ({ answer: evidence[0].text, evidenceNumbers: [1] }),
     ...(overrides.ollama || {}),
@@ -311,7 +312,7 @@ test('grounded summary synthesizes only from independently relevant answer passa
   assert.equal(embeddedInputs.length, 1);
 });
 
-test('summary generation failure preserves the accepted stored answer', async () => {
+test('verbatim selection does not depend on a summary generation model', async () => {
   let embeddingCalls = 0;
   let generationCalls = 0;
   await withServer(async (baseUrl) => {
@@ -328,9 +329,9 @@ test('summary generation failure preserves the accepted stored answer', async ()
     assert.equal(response.status, 200);
     assert.equal(payload.strongMatch, true);
     assert.equal(payload.acceptedMatch.sourceId, 'accepted');
-    assert.equal(payload.summary.status, 'unavailable');
-    assert.equal(payload.summary.reason, 'summary_generation_failed');
-    assert.deepEqual(payload.summary.evidence, []);
+    assert.equal(payload.summary.status, 'ready');
+    assert.equal(payload.summary.mode, 'verbatim-selection');
+    assert.equal(payload.summary.text, 'This stored answer remains visible if summary embedding fails.');
   }, {
     database: {
       getIndexStatus: async () => ({
@@ -365,10 +366,10 @@ test('summary generation failure preserves the accepted stored answer', async ()
     },
   });
   assert.equal(embeddingCalls, 1);
-  assert.equal(generationCalls, 1);
+  assert.equal(generationCalls, 0);
 });
 
-test('grounded answerability rejects a topical neighbor with the wrong requested purpose', async () => {
+test('fast verbatim mode labels a semantic neighbor as related without composing an answer', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/search`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -379,12 +380,12 @@ test('grounded answerability rejects a topical neighbor with the wrong requested
       }),
     });
     const payload = await response.json();
-    assert.equal(payload.strongMatch, false);
-    assert.equal(payload.message, 'I could not find a clear answer in the existing data.');
-    assert.equal(payload.acceptedMatch, undefined);
+    assert.equal(payload.strongMatch, true);
+    assert.equal(payload.acceptedMatch.sourceId, 'lamp');
     assert.equal(payload.matches.length, 1);
-    assert.deepEqual(payload.relevantMatches, []);
-    assert.equal(payload.summary.reason, 'no_answerable_evidence');
+    assert.deepEqual(payload.relevantMatches.map((item) => item.sourceId), ['lamp']);
+    assert.equal(payload.summary.answerStatus, 'related_teachings');
+    assert.equal(payload.summary.text, 'Oil lamps provide light.');
   }, {
     database: {
       getIndexStatus: async () => ({
@@ -557,9 +558,10 @@ test('document catalog and viewer return a reconstructed highlighted discourse',
   });
 });
 
-test('Deep Summary starts an asynchronous verified pooling job', async () => {
+test('Deep Search starts an asynchronous role-aware job with the dedicated Qwen model', async () => {
   const started = [];
   let exhaustiveCalls = 0;
+  let exhaustiveArguments = [];
   const deepSummaryManager = {
     start: (config) => { started.push(config); return { id: 'deep-1', status: 'queued', phase: 'queued', processed: 0, total: 0, percent: 0 }; },
     get: () => ({ id: 'deep-1', status: 'running' }), cancel: () => ({ id: 'deep-1', status: 'running' }),
@@ -571,7 +573,7 @@ test('Deep Summary starts an asynchronous verified pooling job', async () => {
       body: JSON.stringify({
         indexConnection: { host: 'db', user: 'writer', database: 'index' }, question: 'What does the phrase mean?',
         searchMode: 'semantic', threshold: 0.49,
-        summary: { enabled: false, mode: 'deep', model: 'gemma3:4b', hardwarePreference: 'gpu' },
+        summary: { enabled: false, mode: 'deep', deepModel: 'qwen3:14b-q8_0', deepMaxRecords: 37, hardwarePreference: 'gpu' },
       }),
     });
     const payload = await response.json();
@@ -586,8 +588,9 @@ test('Deep Summary starts an asynchronous verified pooling job', async () => {
           embeddingFormatVersion: EMBEDDINGGEMMA_FORMAT, retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
         },
       }),
-      searchAllPassageIndex: async () => {
+      searchAllPassageIndex: async (...args) => {
         exhaustiveCalls += 1;
+        exhaustiveArguments = args;
         return { hybrid: true, exhaustive: true, scannedPassages: 19777, rows: [asPassage({
           sourceId: 'meaning', question: 'Meaning', answer: 'The passage explains the phrase.', similarity: 0.8, metadata: {},
         })] };
@@ -599,7 +602,43 @@ test('Deep Summary starts an asynchronous verified pooling job', async () => {
   assert.equal(exhaustiveCalls, 1);
   assert.equal(started[0].matches[0].sourceId, 'meaning');
   assert.deepEqual(started[0].retrievalCoverage, { exhaustive: true, scannedPassages: 19777 });
-  assert.equal(started[0].parallelRequests, 2);
-  assert.equal(started[0].requestTimeoutMs, 300000);
+  assert.equal(started[0].model, 'qwen3:14b-q8_0');
+  assert.equal(started[0].parallelRequests, 1);
+  assert.equal(started[0].requestTimeoutMs, 600000);
+  assert.equal(started[0].maxRecords, 37);
+  assert.equal(exhaustiveArguments[4], 111);
   assert.equal(started[0].hardwarePreference, 'gpu');
+});
+
+test('v4 remains available only for ordinary search during the role-aware rebuild', async () => {
+  await withServer(async (baseUrl) => {
+    const ordinary = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' }, question: 'Question',
+        searchMode: 'search', summary: { enabled: false, mode: 'off' },
+      }),
+    });
+    assert.equal(ordinary.status, 200);
+    const roleAware = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' }, question: 'Question',
+        searchMode: 'search', summary: { enabled: true, mode: 'standard' },
+      }),
+    });
+    assert.equal(roleAware.status, 409);
+    assert.match((await roleAware.json()).error, /Ordinary v4 search remains available/iu);
+  }, {
+    database: {
+      getIndexStatus: async () => ({
+        initialized: true, recordCount: 1,
+        corpus: {
+          embeddingModel: 'embeddinggemma', embeddingModelDigest: 'model-digest', embeddingDimension: 3,
+          embeddingFormatVersion: EMBEDDINGGEMMA_FORMAT, retrievalSchemaVersion: 'passage-v4',
+        },
+      }),
+      searchTextIndex: async () => ({ rows: [asPassage({ sourceId: 'v4:1', question: 'Question', answer: 'Legacy exact text.' })] }),
+    },
+  });
 });

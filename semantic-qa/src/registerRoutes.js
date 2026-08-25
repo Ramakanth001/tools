@@ -67,6 +67,7 @@ const OllamaSchema = z.object({
 
 const SummaryModelSchema = z.object({
   summaryModel: z.string().trim().min(1).default('gemma3:4b'),
+  deepSummaryModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q8_0'),
   hardwarePreference: z.enum(['auto', 'gpu', 'cpu']).default('auto'),
 });
 
@@ -120,10 +121,9 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
   const embedding = deps.ollama || ollama;
   const syncManager = deps.syncManager || createSyncManager({ db, embed: embedding.embedTexts, probe: embedding.testOllama });
   const deepSummaryManager = deps.deepSummaryManager || createDeepSummaryManager({
-    validateEvidence: embedding.validateEvidenceBatch,
-    extractClaims: embedding.extractGroundedClaims,
-    consolidateClaims: embedding.consolidateGroundedClaims,
-    synthesize: embedding.synthesizeDeepAnswer,
+    requireThinking: embedding.requireThinkingModel,
+    planProbes: embedding.planDeepSearchProbes,
+    adjudicate: embedding.adjudicateTeachingUnits,
     inspectHardware: embedding.getOllamaHardware,
   });
   const router = express.Router();
@@ -140,13 +140,13 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       ollamaInput.success
         ? diagnosticCheck(() => embedding.testOllama({ baseUrl: ollamaInput.data.ollamaBaseUrl, model: ollamaInput.data.model }))
         : Promise.resolve({ status: 'not_configured', error: 'Ollama URL and model are required.' }),
-      ollamaInput.success && summaryInput.success && typeof embedding.testChatModel === 'function'
-        ? diagnosticCheck(() => embedding.testChatModel({
+      ollamaInput.success && summaryInput.success && typeof embedding.requireThinkingModel === 'function'
+        ? diagnosticCheck(() => embedding.requireThinkingModel({
           baseUrl: ollamaInput.data.ollamaBaseUrl,
-          model: summaryInput.data.summaryModel,
+          model: summaryInput.data.deepSummaryModel,
           hardwarePreference: summaryInput.data.hardwarePreference,
         }))
-        : Promise.resolve({ status: 'not_configured', error: 'A local summary model is required for synthesized answers.' }),
+        : Promise.resolve({ status: 'not_configured', error: 'A reasoning-capable Qwen model is required for Deep Search.' }),
       sourceInput.success
         ? diagnosticCheck(() => db.testPostgresConnection(sourceInput.data))
         : Promise.resolve({ status: 'not_configured', error: 'Source PostgreSQL connection is not configured.' }),
@@ -345,20 +345,24 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         enabled: z.boolean().default(false),
         mode: z.enum(['off', 'standard', 'deep']).optional(),
         model: z.string().trim().min(1).default('gemma3:4b'),
+        deepModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q8_0'),
+        deliberation: z.enum(['maximum']).default('maximum'),
         maxRecords: z.coerce.number().int().min(1).max(MAX_RECORDS).default(DEFAULT_MAX_RECORDS),
         maxLines: z.coerce.number().int().min(1).max(MAX_LINES).default(DEFAULT_MAX_LINES),
         deepMaxRecords: z.coerce.number().int().min(1).max(MAX_DEEP_RECORDS).default(DEFAULT_DEEP_RECORDS),
-        parallelRequests: z.coerce.number().int().min(1).max(MAX_DEEP_PARALLEL_REQUESTS).default(DEFAULT_DEEP_PARALLEL_REQUESTS),
+        parallelRequests: z.coerce.number().int().min(1).max(1).default(1),
         requestTimeoutMs: z.coerce.number().int().min(60000).max(MAX_DEEP_REQUEST_TIMEOUT_MS).default(DEFAULT_DEEP_REQUEST_TIMEOUT_MS),
         hardwarePreference: z.enum(['auto', 'gpu', 'cpu']).default('auto'),
       }).optional().default({
         enabled: false,
         mode: 'off',
         model: 'gemma3:4b',
+        deepModel: 'qwen3:14b-q8_0',
+        deliberation: 'maximum',
         maxRecords: DEFAULT_MAX_RECORDS,
         maxLines: DEFAULT_MAX_LINES,
         deepMaxRecords: DEFAULT_DEEP_RECORDS,
-        parallelRequests: DEFAULT_DEEP_PARALLEL_REQUESTS,
+        parallelRequests: 1,
         requestTimeoutMs: DEFAULT_DEEP_REQUEST_TIMEOUT_MS,
         hardwarePreference: 'auto',
       }),
@@ -376,8 +380,9 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           threshold: effectiveThreshold,
           matches: [],
           retrievalCoverage: { exhaustive: true, scannedPassages: 0 },
+          maxRecords: data.summary.deepMaxRecords,
           baseUrl: data.ollamaBaseUrl,
-          model: data.summary.model,
+          model: data.summary.deepModel,
           parallelRequests: data.summary.parallelRequests,
           requestTimeoutMs: data.summary.requestTimeoutMs,
           hardwarePreference: data.summary.hardwarePreference,
@@ -400,11 +405,22 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         });
       }
       const compatibility = indexCompatibility(status);
-      if (compatibility.requiresRebuild) {
+      const v4Available = status.corpus.retrievalSchemaVersion === 'passage-v4';
+      const roleAwareSelectionRequested = summaryMode === 'standard' || summaryMode === 'deep';
+      if (compatibility.requiresRebuild && (!v4Available || roleAwareSelectionRequested)) {
         return res.status(409).json({
           ok: false,
-          error: `The search index is outdated; run a full rebuild. ${compatibility.rebuildReasons.join('; ')}.`,
+          error: roleAwareSelectionRequested && v4Available
+            ? 'Verbatim Selection and Deep Search are unavailable while the role-aware v5 index is being rebuilt. Ordinary v4 search remains available.'
+            : `The search index is outdated; run a full rebuild. ${compatibility.rebuildReasons.join('; ')}.`,
           ...compatibility,
+        });
+      }
+      if (summaryMode === 'deep' && typeof embedding.requireThinkingModel === 'function') {
+        await embedding.requireThinkingModel({
+          baseUrl: data.ollamaBaseUrl,
+          model: data.summary.deepModel,
+          timeoutMs: 30000,
         });
       }
       const needsSemanticVector = data.searchMode === 'semantic';
@@ -441,18 +457,21 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           ? Math.max(data.topK, data.summary.maxRecords * 4)
         : data.topK;
       const candidateLimit = Math.max(60, rankedRecordLimit * 12);
-      const exhaustiveSemanticSearch = needsSemanticVector && typeof db.searchAllPassageIndex === 'function';
+      const exhaustiveSemanticSearch = summaryMode === 'deep'
+        && needsSemanticVector
+        && typeof db.searchAllPassageIndex === 'function';
       const result = exhaustiveSemanticSearch
         ? await db.searchAllPassageIndex(
           data.indexConnection,
           vectors[0],
           buildLexicalQuery(data.question),
           Math.max(0.25, data.threshold - 0.18),
+          rankedRecordLimit * 3,
         )
         : needsSemanticVector
           ? await db.searchPassageIndex(data.indexConnection, vectors[0], buildLexicalQuery(data.question), candidateLimit)
         : await db.searchTextIndex(data.indexConnection, data.question, rankedRecordLimit);
-      const rerankLimit = result.exhaustive ? Math.max(1, result.rows.length) : rankedRecordLimit;
+      const rerankLimit = rankedRecordLimit;
       const rankedMatches = orderMatches(
         needsSemanticVector
           ? rerankPassageMatches(result.rows, data.question, rerankLimit)
@@ -522,11 +541,31 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
             exhaustive: Boolean(result.exhaustive),
             scannedPassages: Number(result.scannedPassages) || 0,
           },
+          maxRecords: data.summary.deepMaxRecords,
           baseUrl: data.ollamaBaseUrl,
-          model: data.summary.model,
+          model: data.summary.deepModel,
           parallelRequests: data.summary.parallelRequests,
           requestTimeoutMs: data.summary.requestTimeoutMs,
           hardwarePreference: data.summary.hardwarePreference,
+          retrieveProbe: async (probe) => {
+            const probeVector = (await embedding.embedTexts({
+              baseUrl: data.ollamaBaseUrl,
+              model: status.corpus.embeddingModel,
+              texts: [buildQueryEmbeddingText(probe, {
+                model: status.corpus.embeddingModel,
+                formatVersion: status.corpus.embeddingFormatVersion,
+              })],
+            }))[0];
+            const [semanticResult, textResult] = await Promise.all([
+              db.searchPassageIndex(data.indexConnection, probeVector, buildLexicalQuery(probe), Math.max(60, data.summary.deepMaxRecords * 4)),
+              db.searchTextIndex(data.indexConnection, probe, Math.max(20, data.summary.deepMaxRecords)),
+            ]);
+            return orderMatches([
+              ...rerankPassageMatches(semanticResult.rows, probe, data.summary.deepMaxRecords),
+              ...rerankTextMatches(textResult.rows, data.summary.deepMaxRecords),
+            ], probe).slice(0, data.summary.deepMaxRecords);
+          },
+          readAnswerUnits: (references) => db.getAnswerUnits(data.indexConnection, references),
         });
       }
       res.json({

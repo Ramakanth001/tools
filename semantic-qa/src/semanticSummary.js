@@ -1,4 +1,4 @@
-const SUMMARY_MODE = 'grounded-generative';
+const SUMMARY_MODE = 'verbatim-selection';
 const DEFAULT_MAX_RECORDS = 15;
 const DEFAULT_MAX_LINES = 3;
 const MAX_RECORDS = 15;
@@ -226,11 +226,16 @@ function buildEvidencePassages(matches) {
   for (const match of matches) {
     const indexedPassages = Array.isArray(match.matchedPassages) && match.matchedPassages.length
       ? match.matchedPassages.map((passage) => ({
-        text: passage.text,
-        start: passage.start,
-        end: passage.end,
+        text: passage.citationText || passage.text,
+        start: Number.isInteger(passage.citationStart) ? passage.citationStart : passage.start,
+        end: Number.isInteger(passage.citationEnd) ? passage.citationEnd : passage.end,
         semanticSimilarity: Number(passage.semanticSimilarity),
         lexicalScore: Number(passage.lexicalScore) || 0,
+        answerUnitId: passage.answerUnitId || null,
+        author: passage.author || 'Swami',
+        unitKind: passage.unitKind || 'swami_teaching',
+        contextComplete: passage.contextComplete !== false,
+        storyComplete: passage.storyComplete !== false,
       }))
       : null;
     const sourcePassages = indexedPassages || splitAnswerForIndex(match.answer);
@@ -407,7 +412,8 @@ async function buildSemanticSummary({
   const candidateEvidence = selected
     .filter((candidate) => (
       allowedSources.has(String(candidate.sourceId)) &&
-      String(candidate.answer).includes(candidate.text)
+      Number.isInteger(Number(candidate.start)) && Number.isInteger(Number(candidate.end)) &&
+      String(candidate.answer).slice(Number(candidate.start), Number(candidate.end)) === candidate.text
     ))
     .map(expandEvidenceContext)
     .map((candidate) => ({
@@ -421,6 +427,11 @@ async function buildSemanticSummary({
       semanticSimilarity: candidate.semanticSimilarity,
       recordRelevance: candidate.recordRelevance,
       relevanceRank: candidate.relevanceRank,
+      answerUnitId: candidate.answerUnitId || null,
+      author: candidate.author || 'Swami',
+      unitKind: candidate.unitKind || 'swami_teaching',
+      contextComplete: candidate.contextComplete !== false,
+      storyComplete: candidate.storyComplete !== false,
     }));
 
   if (!candidateEvidence.length) {
@@ -434,39 +445,23 @@ async function buildSemanticSummary({
       },
     };
   }
-  if (typeof generateAnswer !== 'function') {
-    throw new Error('A local summary model is not available');
-  }
-  const generated = await generateAnswer({
-    baseUrl,
-    model,
-    question,
-    evidence: candidateEvidence,
-    maxSentences: maxLines,
-    hardwarePreference,
-  });
-  if (generated.answerable === false) {
-    return {
-      relevantMatches: [],
-      summary: {
-        status: 'not_available',
-        mode: SUMMARY_MODE,
-        reason: 'no_answerable_evidence',
-        evidence: [],
-      },
-    };
-  }
-  const evidence = generated.evidenceNumbers.map((number) => ({
-    ...candidateEvidence[number - 1],
-    evidenceNumber: number,
-  }));
+  const evidence = candidateEvidence
+    .filter((item) => item.author === 'Swami' && item.contextComplete && item.storyComplete)
+    .slice(0, clampInteger(maxLines, 1, MAX_LINES, DEFAULT_MAX_LINES))
+    .map((item, index) => ({ ...item, evidenceNumber: index + 1 }));
+  if (!evidence.length) return {
+    relevantMatches: [],
+    summary: { status: 'not_available', mode: SUMMARY_MODE, reason: 'no_complete_swami_evidence', evidence: [] },
+  };
 
   return {
     relevantMatches,
     summary: {
       status: 'ready',
       mode: SUMMARY_MODE,
-      text: generated.answer,
+      answerStatus: 'related_teachings',
+      notice: 'Verified Swami teachings selected verbatim.',
+      text: evidence.map((item) => item.text).join('\n\n'),
       evidence,
       sourceCount: new Set(evidence.map((item) => String(item.sourceId))).size,
       candidateRecordCount: relevant.length,

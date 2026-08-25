@@ -2,18 +2,77 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   applyHardwarePreference,
+  adjudicateTeachingUnits,
+  chat,
   cleanGeneratedAnswer,
   consolidateGroundedClaims,
   extractGroundedClaims,
   generateGroundedAnswer,
   normalizeModelReference,
   parseStructuredJson,
+  planDeepSearchProbes,
+  requireThinkingModel,
   summarizeOllamaProcessor,
   synthesizeDeepAnswer,
   testOllama,
   validateEvidenceBatch,
   verifyGroundedAnswer,
 } = require('../src/ollama');
+
+test('Deep Search rejects non-thinking and unapproved models without a silent fallback', async () => {
+  await assert.rejects(() => requireThinkingModel({
+    baseUrl: 'http://127.0.0.1:11434', model: 'gemma3:4b',
+  }), (error) => error.code === 'OLLAMA_MODEL_NOT_ALLOWED' && /requires qwen3:14b-q8_0 or qwen3:14b-q4_K_M/iu.test(error.message));
+});
+
+test('thinking is sent explicitly and Ollama reasoning text is never returned as content', async () => {
+  const originalFetch = global.fetch;
+  let request;
+  global.fetch = async (_url, options) => {
+    request = JSON.parse(options.body);
+    return new Response(JSON.stringify({ message: { thinking: 'private reasoning trace', content: 'final only' } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const content = await chat({
+      baseUrl: 'http://127.0.0.1:11434', model: 'qwen3:14b-q8_0', think: true,
+      messages: [{ role: 'user', content: 'Question' }], options: { num_ctx: 32768 },
+    });
+    assert.equal(content, 'final only');
+    assert.equal(request.think, true);
+    assert.equal(request.options.num_ctx, 32768);
+    assert.doesNotMatch(content, /private reasoning/iu);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('Qwen capability inspection and deep helpers use the supported thinking contract', async () => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  const responses = [
+    { capabilities: ['completion', 'thinking'], details: { family: 'qwen3', parameter_size: '14B' } },
+    { message: { thinking: 'discard', content: JSON.stringify({ probes: ['practical request', 'governing principle'] }) } },
+    { message: { thinking: 'discard', content: JSON.stringify({ decisions: [{ number: 1, classification: 'governing_principle', cluster: 'Duty', relationship: 'governs it', context_complete: true, story_complete: true }] }) } },
+  ];
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return new Response(JSON.stringify(responses.shift()), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const capability = await requireThinkingModel({ baseUrl: 'http://127.0.0.1:11434', model: 'qwen3:14b-q8_0' });
+    assert.ok(capability.capabilities.includes('thinking'));
+    const probes = await planDeepSearchProbes({ baseUrl: 'http://127.0.0.1:11434', model: 'qwen3:14b-q8_0', question: 'How should I work?' });
+    assert.deepEqual(probes, ['How should I work?', 'practical request', 'governing principle']);
+    const decisions = await adjudicateTeachingUnits({
+      baseUrl: 'http://127.0.0.1:11434', model: 'qwen3:14b-q8_0', question: 'How should I work?',
+      units: [{ answerUnitId: 'u1', author: 'Swami', unitKind: 'swami_teaching', text: 'Do your duty.' }],
+    });
+    assert.equal(decisions[0].classification, 'governing_principle');
+    assert.equal(requests[1].think, true);
+    assert.equal(requests[2].options.num_ctx, 32768);
+    assert.match(requests[2].messages[0].content, /success anecdotes are irrelevant because the user did not request examples/iu);
+  } finally { global.fetch = originalFetch; }
+});
 
 test('normalizes implicit latest model tags', () => {
   assert.equal(normalizeModelReference('embeddinggemma'), 'embeddinggemma:latest');
@@ -224,6 +283,31 @@ test('deep claim extraction retries malformed structured output', async () => {
     });
     assert.equal(calls, 2);
     assert.deepEqual(claims, [{ text: 'Recovered grounded claim.', evidenceNumbers: [1] }]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('deep summary helpers propagate cancellation to an active Ollama request', async () => {
+  const originalFetch = global.fetch;
+  const controller = new AbortController();
+  let requestAborted = false;
+  global.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => {
+      requestAborted = true;
+      reject(options.signal.reason || new Error('aborted'));
+    }, { once: true });
+  });
+  try {
+    const cancellation = new Error('Deep summary cancelled');
+    cancellation.code = 'DEEP_SUMMARY_CANCELLED';
+    const pending = validateEvidenceBatch({
+      baseUrl: 'http://127.0.0.1:11434', model: 'gemma3:4b', question: 'Q',
+      evidence: [{ text: 'Evidence.' }], signal: controller.signal,
+    });
+    controller.abort(cancellation);
+    await assert.rejects(pending, (error) => error.code === 'DEEP_SUMMARY_CANCELLED');
+    assert.equal(requestAborted, true);
   } finally {
     global.fetch = originalFetch;
   }
