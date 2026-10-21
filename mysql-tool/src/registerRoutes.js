@@ -100,7 +100,8 @@ async function loadProfilesTemplate() {
 }
 
 function ensurePassword(connection, res) {
-  if (String(normalizeMysqlConnection(connection).password || '').length > 0) return true;
+  const norm = normalizeMysqlConnection(connection);
+  if (norm.password !== undefined && norm.password !== null) return true;
   res.status(400).json({ ok: false, error: 'Password is required for MySQL connections' });
   return false;
 }

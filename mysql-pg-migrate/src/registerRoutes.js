@@ -291,7 +291,8 @@ function resolveRuntimeConnections(project, overrides = {}) {
 }
 
 function hasMysqlPassword(connection) {
-  return String(normalizeMysqlConnection(connection)?.password || '').length > 0;
+  const norm = normalizeMysqlConnection(connection);
+  return norm?.password !== undefined && norm?.password !== null;
 }
 
 function ensureMysqlPassword(connection, res) {
@@ -309,7 +310,7 @@ function ensureMysqlPassword(connection, res) {
 function hasPostgresCredentials(connection) {
   const connectionString = String(connection?.connectionString || '').trim();
   if (connectionString && connectionString !== MASKED_CONNECTION_STRING) return true;
-  if (String(connection?.pooler?.password || '').length > 0) return true;
+  if (connection?.pooler?.password !== undefined && connection?.pooler?.password !== null) return true;
   return false;
 }
 

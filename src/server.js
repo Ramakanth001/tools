@@ -2,7 +2,7 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { createRequire } = require('node:module');
 
-const toolRequire = createRequire(path.resolve(__dirname, '../pg-backup/package.json'));
+const toolRequire = createRequire(path.resolve(__dirname, '../package.json'));
 const express = toolRequire('express');
 
 const pgBackupManifest = require('../pg-backup/tool.manifest.js');

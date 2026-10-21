@@ -20,14 +20,22 @@ function normalizeSslMode(input) {
 
 function resolvePgSslConfig(connection) {
   const mode = normalizeSslMode(connection?.pooler?.sslmode);
-  if (mode === 'disable' || mode === 'allow' || mode === 'prefer') return undefined;
+  if (mode === 'disable') return false;
+  if (mode === 'allow' || mode === 'prefer') return undefined;
   if (mode === 'no-verify') return { rejectUnauthorized: false };
   return { rejectUnauthorized: true };
 }
 
-function buildPostgresClientConfig(connection) {
-  const connectionString = buildPostgresConnectionString(connection);
+function buildPostgresClientConfig(connection, { forceNoSsl = false } = {}) {
+  let connectionString = buildPostgresConnectionString(connection);
+  if (forceNoSsl) {
+    connectionString = connectionString.replace(/([?&])sslmode=[^&]*&?/i, '$1').replace(/[?&]$/, '');
+    return { connectionString, ssl: false };
+  }
   const ssl = resolvePgSslConfig(connection);
+  if (ssl === false) {
+    return { connectionString, ssl: false };
+  }
   return ssl ? { connectionString, ssl } : { connectionString };
 }
 
@@ -40,27 +48,42 @@ function buildPostgresConnectionString(connection) {
 }
 
 async function withClient(connection, fn) {
-  const client = new Client(buildPostgresClientConfig(connection));
-  await client.connect();
+  const mode = normalizeSslMode(connection?.pooler?.sslmode);
+  let config = buildPostgresClientConfig(connection);
+  let client = new Client(config);
+  try {
+    await client.connect();
+  } catch (err) {
+    if (
+      String(err?.message || '').includes('The server does not support SSL connections') &&
+      !['require', 'verify-ca', 'verify-full'].includes(mode)
+    ) {
+      client = new Client(buildPostgresClientConfig(connection, { forceNoSsl: true }));
+      await client.connect();
+    } else {
+      throw err;
+    }
+  }
   try {
     return await fn(client);
   } finally {
-    await client.end();
+    await client.end().catch(() => {});
   }
 }
 
 const MAX_POOL_CACHE_SIZE = 20;
 const poolCache = new Map();
 
-function getPool(connection) {
-  const connectionString = buildPostgresConnectionString(connection);
-  const cached = poolCache.get(connectionString);
+function getPool(connection, { forceNoSsl = false } = {}) {
+  const baseConnectionString = buildPostgresConnectionString(connection);
+  const cacheKey = forceNoSsl ? `${baseConnectionString}#nossl` : baseConnectionString;
+  const cached = poolCache.get(cacheKey);
   if (cached) {
     cached.lastUsedAt = Date.now();
     return cached.pool;
   }
-  const pool = new Pool({ ...buildPostgresClientConfig(connection), max: 10, idleTimeoutMillis: 30000 });
-  poolCache.set(connectionString, { pool, lastUsedAt: Date.now() });
+  const pool = new Pool({ ...buildPostgresClientConfig(connection, { forceNoSsl }), max: 10, idleTimeoutMillis: 30000 });
+  poolCache.set(cacheKey, { pool, lastUsedAt: Date.now() });
   if (poolCache.size > MAX_POOL_CACHE_SIZE) {
     const [oldestKey, oldest] = Array.from(poolCache.entries()).sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)[0] || [];
     if (oldestKey) {
@@ -78,8 +101,22 @@ async function closePostgresPools() {
 }
 
 async function withPooledClient(connection, fn) {
-  const pool = getPool(connection);
-  const client = await pool.connect();
+  const mode = normalizeSslMode(connection?.pooler?.sslmode);
+  let pool = getPool(connection);
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    if (
+      String(err?.message || '').includes('The server does not support SSL connections') &&
+      !['require', 'verify-ca', 'verify-full'].includes(mode)
+    ) {
+      pool = getPool(connection, { forceNoSsl: true });
+      client = await pool.connect();
+    } else {
+      throw err;
+    }
+  }
   try {
     return await fn(client);
   } finally {
