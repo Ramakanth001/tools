@@ -1,13 +1,18 @@
-.semantic-qa .qa-stack { display: flex; flex-direction: column; gap: 16px; }
+.semantic-qa { min-width: 0; }
+.semantic-qa .qa-stack { display: flex; min-width: 0; flex-direction: column; gap: 16px; }
 .semantic-qa .qa-search-card { max-width: 980px; margin: 0 auto; width: 100%; }
 .semantic-qa .qa-question { margin: 16px 0 12px; min-height: 130px; font-family: var(--sans); font-size: 15px; line-height: 1.55; }
-.semantic-qa .qa-results { display: grid; gap: 14px; max-width: 1100px; margin: 0 auto; width: 100%; }
+.semantic-qa .qa-results { display: grid; min-width: 0; gap: 14px; max-width: 1100px; margin: 0 auto; width: 100%; }
+.semantic-qa .qa-results-inspector { max-width: 1100px; min-width: 0; margin: 0 auto; width: 100%; }
+.semantic-qa .qa-answer { min-width: 0; overflow: hidden; }
 .semantic-qa .qa-answer-head, .semantic-qa .qa-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.semantic-qa .qa-answer-head > div { display: flex; gap: 8px; }
+.semantic-qa .qa-answer-head > div { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px; }
+.semantic-qa .qa-answer-head > .btn { flex: 0 1 auto; }
 .semantic-qa .qa-stored-question { margin: 16px 0 10px; color: rgba(238,242,255,.72); font-weight: 750; }
-.semantic-qa .qa-verbatim { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; padding: 16px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
+.semantic-qa .qa-verbatim { min-width: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; padding: 16px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
 .semantic-qa .qa-metadata { display: grid; grid-template-columns: minmax(100px, 180px) 1fr; margin: 14px 0; font-size: 12px; }
 .semantic-qa .qa-metadata dt, .semantic-qa .qa-metadata dd { margin: 0; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.semantic-qa .qa-metadata dd { min-width: 0; overflow-wrap: anywhere; }
 .semantic-qa .qa-metadata dt { color: var(--muted); font-weight: 800; }
 .semantic-qa .qa-no-match { max-width: 1100px; margin: 0 auto; width: 100%; font-weight: 800; }
 .semantic-qa .qa-grounded-summary { max-width: 1100px; margin: 0 auto; width: 100%; border-color: rgba(52,211,153,.32); background: linear-gradient(145deg, rgba(16,185,129,.08), rgba(124,58,237,.06)); }
@@ -15,7 +20,7 @@
 .semantic-qa .qa-summary-lines { display: grid; gap: 12px; margin: 0; padding-left: 24px; }
 .semantic-qa .qa-summary-lines li { padding: 13px 14px; border-radius: 12px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
 .semantic-qa .qa-summary-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
-.semantic-qa .qa-matched-passage { margin: 14px 0; padding: 13px 14px; border-radius: 12px; background: rgba(52,211,153,.07); border: 1px solid rgba(52,211,153,.2); }
+.semantic-qa .qa-matched-passage { min-width: 0; margin: 14px 0; padding: 13px 14px; border-radius: 12px; background: rgba(52,211,153,.07); border: 1px solid rgba(52,211,153,.2); }
 .semantic-qa .qa-summary-citation { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .semantic-qa .qa-summary-toggle { cursor: pointer; }
 .semantic-qa .qa-summary-toggle input { margin: 0 7px 0 0; }
@@ -119,6 +124,10 @@
   .semantic-qa .qa-setup-grid { grid-template-columns: 1fr; }
   .semantic-qa .qa-diagnostic-row { grid-template-columns: 12px 1fr; }
   .semantic-qa .qa-diagnostic-row .badge { grid-column: 2; justify-self: start; }
+  .semantic-qa .qa-answer-head > .btn { width: 100%; }
+  .semantic-qa .qa-metadata { grid-template-columns: 1fr; }
+  .semantic-qa .qa-metadata dt { padding-bottom: 0; }
+  .semantic-qa .qa-metadata dd { padding-top: 3px; }
   .semantic-qa .qa-mode-toggle { width: 100%; }
   .semantic-qa .qa-mode-toggle .btn { flex: 1; }
   .semantic-qa .qa-summary-select { width: 100%; align-items: stretch; flex-direction: column; }

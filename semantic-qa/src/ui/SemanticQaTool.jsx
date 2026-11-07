@@ -575,7 +575,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
         </div>
       ) : null}
       {remainingMatches.length ? (
-        <details className="card" style={{ maxWidth: 1100, margin: '0 auto', width: '100%' }}>
+        <details className="card qa-results-inspector">
           <summary style={{ cursor: 'pointer', fontWeight: 800 }}>
             {inspectorLabel} ({remainingMatches.length}) — inspection only
           </summary>

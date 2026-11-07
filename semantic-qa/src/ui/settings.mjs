@@ -1,5 +1,5 @@
 export const DEFAULT_SETTINGS = {
-  settingsVersion: 3,
+  settingsVersion: 4,
   sourceConnection: { connectionString: '', host: '127.0.0.1', port: 5432, user: '', password: '', database: 'postgres', sslMode: 'disable' },
   indexConnection: { connectionString: '', host: '127.0.0.1', port: 5432, user: '', password: '', database: 'postgres', sslMode: 'disable' },
   ollamaBaseUrl: 'http://127.0.0.1:11434',
@@ -123,6 +123,10 @@ export function mergeSettings(value = {}) {
   const summaryMode = value.summaryMode || (value.summaryEnabled === false ? 'off' : 'standard');
   const storedVersion = Math.max(1, Math.trunc(Number(value.settingsVersion) || 1));
   const timeoutValue = storedVersion < 3 ? DEFAULT_SETTINGS.deepSummaryTimeoutSeconds : value.deepSummaryTimeoutSeconds;
+  const storedSource = { ...DEFAULT_SETTINGS.sourceConnection, ...(value.sourceConnection || {}) };
+  const storedMapping = { ...DEFAULT_SETTINGS.mapping, ...(value.mapping || {}) };
+  const migrateUniversalChunks = storedSource.database === 'universal_qa_source' &&
+    (!storedMapping.table || storedMapping.table === 'qa_records');
   return {
     ...DEFAULT_SETTINGS,
     ...value,
@@ -135,8 +139,8 @@ export function mergeSettings(value = {}) {
     deepSummaryDeliberation: 'maximum',
     deepSummaryParallelRequests: 1,
     deepSummaryTimeoutSeconds: Math.max(60, Math.min(900, Math.trunc(Number(timeoutValue) || DEFAULT_SETTINGS.deepSummaryTimeoutSeconds))),
-    sourceConnection: { ...DEFAULT_SETTINGS.sourceConnection, ...(value.sourceConnection || {}), password: '', connectionString: '' },
+    sourceConnection: { ...storedSource, password: '', connectionString: '' },
     indexConnection: { ...DEFAULT_SETTINGS.indexConnection, ...(value.indexConnection || {}), password: '', connectionString: '' },
-    mapping: { ...DEFAULT_SETTINGS.mapping, ...(value.mapping || {}) },
+    mapping: migrateUniversalChunks ? { ...UNIVERSAL_QA_SETTINGS.mapping } : storedMapping,
   };
 }

@@ -47,6 +47,15 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(mergeSettings({ settingsVersion: 3, deepSummaryTimeoutSeconds: 300 }).deepSummaryTimeoutSeconds, 300);
   assert.equal(mergeSettings({ summaryHardwarePreference: 'invalid' }).summaryHardwarePreference, 'auto');
 
+  const migratedUniversal = mergeSettings({
+    settingsVersion: 3,
+    sourceConnection: { database: 'universal_qa_source' },
+    mapping: { schema: 'public', table: 'qa_records', idColumn: 'source_id', questionColumn: 'question', answerColumn: 'answer' },
+  });
+  assert.equal(migratedUniversal.mapping.table, 'corpus_documents');
+  assert.equal(migratedUniversal.mapping.idColumn, 'document_id');
+  assert.equal(migratedUniversal.mapping.answerColumn, 'display_text');
+
   const catalog = [{ name: 'public', tables: [{ name: 'corpus_documents', columns: [
     { name: 'document_id', primaryKey: true }, { name: 'title' }, { name: 'question_context' },
     { name: 'display_text' }, { name: 'source_group' }, { name: 'author' },
