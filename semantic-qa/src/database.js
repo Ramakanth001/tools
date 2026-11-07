@@ -758,11 +758,77 @@ async function updateSyncRun(client, job) {
   `, [job.id, job.status, job.processed, job.changed, job.total, job.error || null]);
 }
 
+// JavaScript offsets count UTF-16 code units because citations are ultimately
+// reproduced with displayText.slice(start, end). PostgreSQL substring offsets
+// count Unicode code points, so a direct SQL equality check reports false
+// failures after emoji and other supplementary-plane characters. SQL narrows
+// the candidates; JavaScript performs the authoritative verbatim check.
+async function countInvalidVerbatimPassages(client) {
+  const candidates = await client.query(`
+    SELECT p.source_id, p.passage_index,
+           p.start_offset AS "start", p.end_offset AS "end",
+           p.passage_text AS "passageText",
+           p.citation_start_offset AS "citationStart",
+           p.citation_end_offset AS "citationEnd",
+           p.citation_text AS "citationText",
+           r.answer
+    FROM semantic_qa.passages p JOIN semantic_qa.records r USING (source_id)
+    WHERE p.passage_text <> substring(r.answer FROM p.start_offset + 1 FOR p.end_offset - p.start_offset)
+       OR p.citation_text <> substring(r.answer FROM p.citation_start_offset + 1 FOR p.citation_end_offset - p.citation_start_offset)
+  `);
+  return candidates.rows.reduce((invalid, row) => {
+    const answer = String(row.answer || '');
+    const passageMatches = answer.slice(Number(row.start), Number(row.end)) === row.passageText;
+    const citationMatches = answer.slice(Number(row.citationStart), Number(row.citationEnd)) === row.citationText;
+    return invalid + (passageMatches && citationMatches ? 0 : 1);
+  }, 0);
+}
+
+async function preserveLegacyAliases(client, names, { includeV4Records = false } = {}) {
+  if (await relationExists(client, 'source_aliases')) {
+    await client.query(`
+      INSERT INTO semantic_qa.${quoteIdentifier(names.aliases)} (alias_id, source_id, answer_unit_id)
+      SELECT old.alias_id, old.source_id, COALESCE(exact.answer_unit_id, first_unit.answer_unit_id)
+      FROM semantic_qa.source_aliases old
+      JOIN semantic_qa.${quoteIdentifier(names.stage)} staged ON staged.source_id = old.source_id
+      LEFT JOIN semantic_qa.${quoteIdentifier(names.answerUnits)} exact
+        ON exact.answer_unit_id = old.answer_unit_id
+      LEFT JOIN LATERAL (
+        SELECT unit.answer_unit_id
+        FROM semantic_qa.${quoteIdentifier(names.answerUnits)} unit
+        WHERE unit.source_id = old.source_id
+        ORDER BY unit.unit_index
+        LIMIT 1
+      ) first_unit ON true
+      ON CONFLICT (alias_id) DO UPDATE SET
+        source_id = EXCLUDED.source_id, answer_unit_id = EXCLUDED.answer_unit_id
+    `);
+  }
+  if (!includeV4Records) return;
+  await client.query(`
+    INSERT INTO semantic_qa.${quoteIdentifier(names.aliases)} (alias_id, source_id, answer_unit_id)
+    SELECT legacy.source_id, staged.source_id, first_unit.answer_unit_id
+    FROM semantic_qa.records legacy
+    JOIN semantic_qa.${quoteIdentifier(names.stage)} staged
+      ON staged.source_id = legacy.source_group
+    LEFT JOIN LATERAL (
+      SELECT unit.answer_unit_id
+      FROM semantic_qa.${quoteIdentifier(names.answerUnits)} unit
+      WHERE unit.source_id = staged.source_id
+      ORDER BY unit.unit_index
+      LIMIT 1
+    ) first_unit ON true
+    ON CONFLICT (alias_id) DO UPDATE SET
+      source_id = EXCLUDED.source_id, answer_unit_id = EXCLUDED.answer_unit_id
+  `);
+}
+
 async function commitIncremental(client, {
   names, mapping, model, modelDigest = null, dimension, formatVersion, retrievalVersion, ollamaBaseUrl, total,
 }) {
   await client.query('BEGIN');
   try {
+    await preserveLegacyAliases(client, names);
     await client.query(`
       INSERT INTO semantic_qa.records
         (source_id, question, answer, metadata, source_group, source_order, content_hash, embedding, updated_at)
@@ -826,13 +892,8 @@ async function commitIncremental(client, {
       INSERT INTO semantic_qa.source_aliases (alias_id, source_id, answer_unit_id)
       SELECT alias_id, source_id, answer_unit_id FROM semantic_qa.${quoteIdentifier(names.aliases)}
     `);
-    const exactness = await client.query(`
-      SELECT count(*)::integer AS invalid
-      FROM semantic_qa.passages p JOIN semantic_qa.records r USING (source_id)
-      WHERE p.passage_text <> substring(r.answer FROM p.start_offset + 1 FOR p.end_offset - p.start_offset)
-         OR p.citation_text <> substring(r.answer FROM p.citation_start_offset + 1 FOR p.citation_end_offset - p.citation_start_offset)
-    `);
-    if (Number(exactness.rows[0]?.invalid)) throw new Error(`Verbatim offset validation failed for ${exactness.rows[0].invalid} passages`);
+    const invalidPassages = await countInvalidVerbatimPassages(client);
+    if (invalidPassages) throw new Error(`Verbatim offset validation failed for ${invalidPassages} passages`);
     await client.query(`
       UPDATE semantic_qa.corpus SET source_mapping = $1::jsonb, embedding_model = $2,
         embedding_model_digest = $3, embedding_dimension = $4, embedding_format_version = $5,
@@ -854,6 +915,7 @@ async function commitRebuild(client, {
   try {
     const previous = await client.query("SELECT retrieval_schema_version FROM semantic_qa.corpus WHERE id = 'default'");
     const preserveV4 = previous.rows[0]?.retrieval_schema_version === 'passage-v4';
+    await preserveLegacyAliases(client, names, { includeV4Records: preserveV4 });
     if (preserveV4 && !(await relationExists(client, 'records_v4_rollback'))) {
       await client.query('ALTER TABLE semantic_qa.records RENAME TO records_v4_rollback');
       await client.query('ALTER TABLE semantic_qa.passages RENAME TO passages_v4_rollback');
@@ -889,18 +951,13 @@ async function commitRebuild(client, {
     await client.query(`ALTER TABLE semantic_qa.${quoteIdentifier(names.aliases)} RENAME TO source_aliases`);
     await client.query(`ALTER TABLE semantic_qa.source_aliases RENAME CONSTRAINT ${quoteIdentifier(`${names.aliases}_pkey`)} TO source_aliases_pkey`);
     await client.query(`DROP TABLE IF EXISTS semantic_qa.${quoteIdentifier(names.seen)}`);
+    const invalidPassages = await countInvalidVerbatimPassages(client);
+    if (invalidPassages) throw new Error(`Verbatim offset validation failed for ${invalidPassages} passages`);
     await createHnswIndex(client);
     await createSearchIndex(client);
     await createPassageIndexes(client);
     await createV5Indexes(client);
     await grantV5ReadAccess(client);
-    const exactness = await client.query(`
-      SELECT count(*)::integer AS invalid
-      FROM semantic_qa.passages p JOIN semantic_qa.records r USING (source_id)
-      WHERE p.passage_text <> substring(r.answer FROM p.start_offset + 1 FOR p.end_offset - p.start_offset)
-         OR p.citation_text <> substring(r.answer FROM p.citation_start_offset + 1 FOR p.citation_end_offset - p.citation_start_offset)
-    `);
-    if (Number(exactness.rows[0]?.invalid)) throw new Error(`Verbatim offset validation failed for ${exactness.rows[0].invalid} passages`);
     await client.query(`
       INSERT INTO semantic_qa.corpus
         (id, source_mapping, embedding_model, embedding_model_digest, embedding_dimension,
@@ -1213,7 +1270,7 @@ async function searchIndex(connection, vector, queryText, limit) {
   });
 }
 
-async function searchDiscoveryCandidates(client, vectorLiteral, queryText, limit) {
+async function searchDiscoveryCandidates(client, vectorLiteral, queryText, limit, discoveryQuestion = queryText) {
   if (!(await relationExists(client, 'discovery_passages'))) return [];
   const boundedLimit = Math.max(1, Math.min(200, Number(limit) || 60));
   const result = await client.query(`
@@ -1226,17 +1283,26 @@ async function searchDiscoveryCandidates(client, vectorLiteral, queryText, limit
       ) ranked GROUP BY source_id
     ),
     lexical AS MATERIALIZED (
-      SELECT d.source_id, max(ts_rank_cd(d.search_vector, q.terms)) AS discovery_lexical
+      SELECT d.source_id,
+             max(ts_rank_cd(d.search_vector, q.terms)) AS discovery_lexical,
+             bool_or(
+               lower(regexp_replace(trim(d.discovery_text), '\\s+', ' ', 'g')) =
+               lower(regexp_replace(trim($4), '\\s+', ' ', 'g'))
+             ) AS discovery_exact
       FROM semantic_qa.discovery_passages d CROSS JOIN query q
       WHERE q.terms::text <> '' AND d.search_vector @@ q.terms
-      GROUP BY d.source_id ORDER BY discovery_lexical DESC LIMIT $3 * 4
+      GROUP BY d.source_id
+      ORDER BY discovery_exact DESC, discovery_lexical DESC
+      LIMIT $3 * 4
     ),
     sources AS MATERIALIZED (
       SELECT coalesce(d.source_id, l.source_id) AS source_id,
              coalesce(d.discovery_similarity, 0) AS discovery_similarity,
-             coalesce(l.discovery_lexical, 0) AS discovery_lexical
+             coalesce(l.discovery_lexical, 0) AS discovery_lexical,
+             coalesce(l.discovery_exact, false) AS discovery_exact
       FROM dense d FULL JOIN lexical l USING (source_id)
-      ORDER BY greatest(coalesce(d.discovery_similarity, 0), 1 - exp(-6 * coalesce(l.discovery_lexical, 0))) DESC
+      ORDER BY coalesce(l.discovery_exact, false) DESC,
+               greatest(coalesce(d.discovery_similarity, 0), 1 - exp(-6 * coalesce(l.discovery_lexical, 0))) DESC
       LIMIT $3
     )
     SELECT r.source_id AS "sourceId", r.question, r.answer, r.metadata,
@@ -1252,6 +1318,7 @@ async function searchDiscoveryCandidates(client, vectorLiteral, queryText, limit
            ts_rank_cd(p.search_vector, q.terms) AS "lexicalScore",
            s.discovery_similarity AS "discoverySimilarity",
            s.discovery_lexical AS "discoveryLexicalScore",
+           s.discovery_exact AS "discoveryExact",
            ARRAY['discovery']::text[] AS "matchChannels"
     FROM sources s
     JOIN semantic_qa.records r USING (source_id)
@@ -1262,11 +1329,11 @@ async function searchDiscoveryCandidates(client, vectorLiteral, queryText, limit
       LIMIT 3
     ) p ON true
     CROSS JOIN query q
-  `, [vectorLiteral, queryText, boundedLimit]);
+  `, [vectorLiteral, queryText, boundedLimit, discoveryQuestion]);
   return result.rows;
 }
 
-async function searchPassages(client, corpus, vector, queryText, limit) {
+async function searchPassages(client, corpus, vector, queryText, limit, discoveryQuestion = queryText) {
   const vectorLiteral = toVectorLiteral(vector);
   const limits = searchLimits(limit);
   await client.query('BEGIN');
@@ -1332,7 +1399,7 @@ async function searchPassages(client, corpus, vector, queryText, limit) {
       CROSS JOIN query q
     `, [vectorLiteral, queryText, limits.candidateLimit, limits.rawCandidateLimit]);
     const discoveryRows = corpus.retrievalSchemaVersion === RETRIEVAL_SCHEMA_VERSION
-      ? await searchDiscoveryCandidates(client, vectorLiteral, queryText, limits.candidateLimit)
+      ? await searchDiscoveryCandidates(client, vectorLiteral, queryText, limits.candidateLimit, discoveryQuestion)
       : [];
     await client.query('COMMIT');
     const rows = new Map();
@@ -1343,6 +1410,7 @@ async function searchPassages(client, corpus, vector, queryText, limit) {
         ...existing,
         discoverySimilarity: row.discoverySimilarity ?? existing.discoverySimilarity,
         discoveryLexicalScore: row.discoveryLexicalScore ?? existing.discoveryLexicalScore,
+        discoveryExact: row.discoveryExact ?? existing.discoveryExact,
         matchChannels: [...new Set([...(existing.matchChannels || []), ...(row.matchChannels || [])])],
       } : row);
     }
@@ -1353,7 +1421,7 @@ async function searchPassages(client, corpus, vector, queryText, limit) {
   }
 }
 
-async function searchPassageIndex(connection, vector, queryText, limit) {
+async function searchPassageIndex(connection, vector, queryText, limit, discoveryQuestion = queryText) {
   return withPool(connection, async (pool) => {
     const client = await pool.connect();
     try {
@@ -1362,7 +1430,7 @@ async function searchPassageIndex(connection, vector, queryText, limit) {
       if (!corpus || !(await recordsTableExists(client)) || !(await passagesTableExists(client))) {
         return { corpus, rows: [], hybrid: true, unit: 'answer_passage' };
       }
-      return await searchPassages(client, corpus, vector, queryText, limit);
+      return await searchPassages(client, corpus, vector, queryText, limit, discoveryQuestion);
     } finally {
       client.release();
     }
@@ -1919,6 +1987,7 @@ module.exports = {
   insertStageAliases,
   createSyncRun,
   updateSyncRun,
+  preserveLegacyAliases,
   commitIncremental,
   commitRebuild,
   searchRecords,

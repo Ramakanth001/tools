@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildTextPhraseQueries, commitIncremental, connectionToPoolConfig, searchAllPassages, searchPassages, searchRecords, searchTextRecords } = require('../src/database');
+const { buildTextPhraseQueries, commitIncremental, connectionToPoolConfig, preserveLegacyAliases, searchAllPassages, searchPassages, searchRecords, searchTextRecords } = require('../src/database');
 
 function compactSql(sql) {
   return String(sql).replace(/\s+/g, ' ').trim();
@@ -22,7 +22,9 @@ test('incremental commit reconciles deleted source IDs inside one transaction', 
   const statements = [];
   const client = {
     async query(sql) {
-      statements.push(compactSql(sql));
+      const statement = compactSql(sql);
+      statements.push(statement);
+      if (statement.includes('to_regclass')) return { rows: [{ exists: false }] };
       return { rows: [] };
     },
   };
@@ -36,6 +38,24 @@ test('incremental commit reconciles deleted source IDs inside one transaction', 
   assert.ok(statements.some((sql) => sql.includes('DELETE FROM semantic_qa.records') && sql.includes('NOT EXISTS')));
   assert.ok(statements.some((sql) => sql.includes('embedding_model_digest')));
   assert.equal(statements.at(-1), 'COMMIT');
+});
+
+test('full rebuild carries forward prior v5 aliases and orphaned v4 chunk locators', async () => {
+  const statements = [];
+  const client = {
+    async query(sql) {
+      const statement = compactSql(sql);
+      statements.push(statement);
+      if (statement.includes('to_regclass')) return { rows: [{ exists: true }] };
+      return { rows: [] };
+    },
+  };
+  await preserveLegacyAliases(client, {
+    stage: 'stage_job', aliases: 'aliases_job', answerUnits: 'units_job',
+  }, { includeV4Records: true });
+  assert.ok(statements.some((sql) => sql.includes('FROM semantic_qa.source_aliases old')));
+  assert.ok(statements.some((sql) => sql.includes('FROM semantic_qa.records legacy')));
+  assert.ok(statements.every((sql) => !sql.includes('DELETE FROM semantic_qa.source_aliases')));
 });
 
 test('hybrid search oversamples HNSW and diversifies both pools by explicit chunk group', async () => {
