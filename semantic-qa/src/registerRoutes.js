@@ -456,7 +456,10 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         : summaryMode === 'standard'
           ? Math.max(data.topK, data.summary.maxRecords * 4)
         : data.topK;
-      const candidateLimit = Math.max(60, rankedRecordLimit * 12);
+      // The visible result count must not shrink discovery recall. Exact source
+      // questions can lead to answer passages whose own embedding is much less
+      // similar than the question, so always fuse a broad bounded candidate pool.
+      const candidateLimit = Math.max(200, rankedRecordLimit * 12);
       const exhaustiveSemanticSearch = summaryMode === 'deep'
         && needsSemanticVector
         && typeof db.searchAllPassageIndex === 'function';
@@ -469,7 +472,13 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           rankedRecordLimit * 3,
         )
         : needsSemanticVector
-          ? await db.searchPassageIndex(data.indexConnection, vectors[0], buildLexicalQuery(data.question), candidateLimit)
+          ? await db.searchPassageIndex(
+            data.indexConnection,
+            vectors[0],
+            buildLexicalQuery(data.question),
+            candidateLimit,
+            data.question,
+          )
         : await db.searchTextIndex(data.indexConnection, data.question, rankedRecordLimit);
       const rerankLimit = rankedRecordLimit;
       const rankedMatches = orderMatches(
@@ -478,11 +487,20 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           : rerankTextMatches(result.rows, rankedRecordLimit),
         data.question,
       );
-      const visibleMatches = rankedMatches
-        .slice(0, data.topK)
-        .map(({ rankingSignals: _rankingSignals, ...match }) => match);
       const effectiveThreshold = needsSemanticVector ? data.threshold : SEARCH_THRESHOLD;
-      const response = buildSearchResponse(visibleMatches, effectiveThreshold, data.question);
+      const rankedResponse = buildSearchResponse(
+        rankedMatches.slice(0, data.topK),
+        effectiveThreshold,
+        data.question,
+      );
+      const stripRankingSignals = ({ rankingSignals: _rankingSignals, ...match }) => match;
+      const response = {
+        ...rankedResponse,
+        matches: rankedResponse.matches.map(stripRankingSignals),
+        ...(rankedResponse.acceptedMatch
+          ? { acceptedMatch: stripRankingSignals(rankedResponse.acceptedMatch) }
+          : {}),
+      };
       let summaryResult = {};
       if (summaryMode === 'standard') {
         if (!response.strongMatch) {
@@ -557,7 +575,13 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
               })],
             }))[0];
             const [semanticResult, textResult] = await Promise.all([
-              db.searchPassageIndex(data.indexConnection, probeVector, buildLexicalQuery(probe), Math.max(60, data.summary.deepMaxRecords * 4)),
+              db.searchPassageIndex(
+                data.indexConnection,
+                probeVector,
+                buildLexicalQuery(probe),
+                Math.max(60, data.summary.deepMaxRecords * 4),
+                probe,
+              ),
               db.searchTextIndex(data.indexConnection, probe, Math.max(20, data.summary.deepMaxRecords)),
             ]);
             return orderMatches([

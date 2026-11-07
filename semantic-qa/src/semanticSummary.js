@@ -255,6 +255,7 @@ function buildEvidencePassages(matches) {
         recordSimilarity: Number(match.similarity),
         relevanceRank: match.relevanceRank ?? null,
         semanticSimilarity: Number(passage.semanticSimilarity),
+        exactQaDiscovery: match.rankingSignals?.exactQaDiscovery === true,
       });
       if (passages.length >= MAX_TOTAL_PASSAGES) return passages;
     }
@@ -270,6 +271,7 @@ function selectGroundedEvidence(passages, limit, question = '') {
       passage.semanticSimilarity >= MIN_RECORD_DENSE_SIMILARITY
     ))
     .sort((left, right) => (
+      Number(Boolean(right.exactQaDiscovery)) - Number(Boolean(left.exactQaDiscovery)) ||
       right.semanticSimilarity - left.semanticSimilarity ||
       right.recordRelevance - left.recordRelevance ||
       Number(left.relevanceRank || Number.MAX_SAFE_INTEGER) - Number(right.relevanceRank || Number.MAX_SAFE_INTEGER) ||
@@ -432,6 +434,7 @@ async function buildSemanticSummary({
       unitKind: candidate.unitKind || 'swami_teaching',
       contextComplete: candidate.contextComplete !== false,
       storyComplete: candidate.storyComplete !== false,
+      exactQaDiscovery: candidate.exactQaDiscovery === true,
     }));
 
   if (!candidateEvidence.length) {
@@ -448,7 +451,7 @@ async function buildSemanticSummary({
   const evidence = candidateEvidence
     .filter((item) => item.author === 'Swami' && item.contextComplete && item.storyComplete)
     .slice(0, clampInteger(maxLines, 1, MAX_LINES, DEFAULT_MAX_LINES))
-    .map((item, index) => ({ ...item, evidenceNumber: index + 1 }));
+    .map(({ exactQaDiscovery: _exactQaDiscovery, ...item }, index) => ({ ...item, evidenceNumber: index + 1 }));
   if (!evidence.length) return {
     relevantMatches: [],
     summary: { status: 'not_available', mode: SUMMARY_MODE, reason: 'no_complete_swami_evidence', evidence: [] },
@@ -459,8 +462,10 @@ async function buildSemanticSummary({
     summary: {
       status: 'ready',
       mode: SUMMARY_MODE,
-      answerStatus: 'related_teachings',
-      notice: 'Verified Swami teachings selected verbatim.',
+      answerStatus: candidateEvidence[0]?.exactQaDiscovery ? 'direct' : 'related_teachings',
+      notice: candidateEvidence[0]?.exactQaDiscovery
+        ? 'A directly matching Swami reply was selected verbatim.'
+        : 'Verified Swami teachings selected verbatim.',
       text: evidence.map((item) => item.text).join('\n\n'),
       evidence,
       sourceCount: new Set(evidence.map((item) => String(item.sourceId))).size,

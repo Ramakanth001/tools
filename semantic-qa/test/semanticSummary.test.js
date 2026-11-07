@@ -69,6 +69,41 @@ test('verbatim selection never calls a generation model and returns exact stored
   assert.equal(answer.slice(result.summary.evidence[0].start, result.summary.evidence[0].end), result.summary.evidence[0].text);
 });
 
+test('an exact structured Q&A reply precedes denser semantic neighbors', async () => {
+  const directAnswer = 'Make your best effort and do not ask God to violate His rules.';
+  const neighborAnswer = 'A nearby teaching with a higher passage cosine remains secondary.';
+  const result = await buildSemanticSummary({
+    question: 'Should we ask the Lord for help?',
+    threshold: 0.49,
+    maxLines: 2,
+    matches: [
+      {
+        sourceId: 'qa:101', question: 'Should we ask the Lord for help?', answer: directAnswer,
+        relevanceScore: 1, similarity: 0.38, rankingSignals: { exactQaDiscovery: true },
+        matchedPassages: [{
+          text: directAnswer, citationText: directAnswer, start: 0, end: directAnswer.length,
+          citationStart: 0, citationEnd: directAnswer.length, semanticSimilarity: 0.38,
+          author: 'Swami', unitKind: 'swami_reply', contextComplete: true, storyComplete: true,
+        }],
+      },
+      {
+        sourceId: 'discourse:1', question: 'A related subject', answer: neighborAnswer,
+        relevanceScore: 0.72, similarity: 0.72,
+        matchedPassages: [{
+          text: neighborAnswer, citationText: neighborAnswer, start: 0, end: neighborAnswer.length,
+          citationStart: 0, citationEnd: neighborAnswer.length, semanticSimilarity: 0.72,
+          author: 'Swami', unitKind: 'swami_teaching', contextComplete: true, storyComplete: true,
+        }],
+      },
+    ],
+  });
+  assert.equal(result.summary.status, 'ready');
+  assert.equal(result.summary.answerStatus, 'direct');
+  assert.equal(result.summary.evidence[0].sourceId, 'qa:101');
+  assert.equal(result.summary.evidence[0].text, directAnswer);
+  assert.equal(result.summary.evidence[0].exactQaDiscovery, undefined);
+});
+
 test('invalid offsets cannot become displayed teaching text', async () => {
   const answer = 'The stored teaching remains exact.';
   const result = await buildSemanticSummary({

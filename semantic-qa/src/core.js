@@ -255,6 +255,7 @@ function rerankPassageMatches(rows, query, limit = 5) {
         semanticSimilarity: Math.max(0, Math.min(1, Number(row.similarity) || 0)),
         lexicalScore: Number(row.lexicalScore) || 0,
         discoverySimilarity: Math.max(0, Math.min(1, Number(row.discoverySimilarity) || 0)),
+        discoveryExact: row.discoveryExact === true,
         answerUnitId: row.answerUnitId || null,
         author: row.author || '',
         unitKind: row.unitKind || '',
@@ -274,6 +275,8 @@ function rerankPassageMatches(rows, query, limit = 5) {
     if (!passages.length) continue;
 
     const best = passages[0];
+    const exactQaDiscovery = sourceRows[0]?.metadata?.source_type === 'qa' &&
+      passages.some((passage) => passage.discoveryExact);
     const supportingPassages = passages.filter((passage, index) => (
       index > 0 && passage.semanticSimilarity >= Math.max(0.35, best.semanticSimilarity - 0.12)
     )).length;
@@ -281,7 +284,9 @@ function rerankPassageMatches(rows, query, limit = 5) {
     // only add a small bonus; word overlap and stored titles add nothing.
     const relevanceScore = Math.min(
       1,
-      Math.max(best.semanticSimilarity, best.discoverySimilarity * 0.92) + Math.min(0.03, supportingPassages * 0.015),
+      exactQaDiscovery
+        ? 1
+        : Math.max(best.semanticSimilarity, best.discoverySimilarity * 0.92) + Math.min(0.03, supportingPassages * 0.015),
     );
     const representative = sourceRows.find((row) => Number(row.passageIndex) === best.passageIndex) || sourceRows[0];
     rankedRecords.push({
@@ -295,6 +300,7 @@ function rerankPassageMatches(rows, query, limit = 5) {
         lexicalWeight: 0,
         titleWeight: 0,
         questionWeight: 0,
+        exactQaDiscovery,
       },
     });
   }
@@ -320,6 +326,7 @@ function rerankPassageMatches(rows, query, limit = 5) {
   const phrases = quotedPhrases(query);
   if (phrases.length && sorted.some((row) => passageMatchesQuotedPhrases(row, phrases))) {
     sorted.sort((left, right) => (
+      Number(Boolean(right.rankingSignals?.exactQaDiscovery)) - Number(Boolean(left.rankingSignals?.exactQaDiscovery)) ||
       Number(passageMatchesQuotedPhrases(right, phrases)) - Number(passageMatchesQuotedPhrases(left, phrases)) ||
       right.relevanceScore - left.relevanceScore ||
       right.similarity - left.similarity ||
@@ -413,6 +420,7 @@ function orderMatches(rows, query = '') {
   const hasQuotedMatch = phrases.length && rows.some((row) => passageMatchesQuotedPhrases(row, phrases));
   return [...rows]
     .sort((a, b) => (
+      Number(Boolean(b.rankingSignals?.exactQaDiscovery)) - Number(Boolean(a.rankingSignals?.exactQaDiscovery)) ||
       (hasQuotedMatch
         ? Number(passageMatchesQuotedPhrases(b, phrases)) - Number(passageMatchesQuotedPhrases(a, phrases))
         : 0) ||

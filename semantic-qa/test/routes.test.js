@@ -80,6 +80,8 @@ test('Ollama hardware endpoint reports detected devices and actual model allocat
 test('search uses the corpus embedding format and ranks indexed answer passages', async () => {
   let embeddedText;
   let lexicalQuery;
+  let candidateLimit;
+  let discoveryQuestion;
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/search`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -105,8 +107,10 @@ test('search uses the corpus embedding format and ranks indexed answer passages'
           retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
         },
       }),
-      searchPassageIndex: async (_connection, _vector, query) => {
+      searchPassageIndex: async (_connection, _vector, query, limit, originalQuestion) => {
         lexicalQuery = query;
+        candidateLimit = limit;
+        discoveryQuestion = originalQuestion;
         return {
           hybrid: true,
           rows: [
@@ -123,6 +127,52 @@ test('search uses the corpus embedding format and ranks indexed answer passages'
   });
   assert.equal(embeddedText, 'task: question answering | query: Who is Datta Swami?');
   assert.equal(lexicalQuery, 'datta OR swami');
+  assert.equal(candidateLimit, 200);
+  assert.equal(discoveryQuestion, 'Who is Datta Swami?');
+});
+
+test('search preserves exact structured Q&A precedence while hiding internal ranking signals', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' },
+        question: 'Why is "karma fruit" emphasized?', topK: 2, threshold: 0.5,
+      }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.matches[0].sourceId, 'paired-qa');
+    assert.equal(payload.acceptedMatch.sourceId, 'paired-qa');
+    assert.equal('rankingSignals' in payload.matches[0], false);
+  }, {
+    database: {
+      getIndexStatus: async () => ({
+        initialized: true, recordCount: 2,
+        corpus: {
+          embeddingModel: 'embeddinggemma', embeddingModelDigest: 'model-digest',
+          embeddingDimension: 3, embeddingFormatVersion: EMBEDDINGGEMMA_FORMAT,
+          retrievalSchemaVersion: RETRIEVAL_SCHEMA_VERSION,
+        },
+      }),
+      searchPassageIndex: async () => ({
+        hybrid: true,
+        rows: [
+          asPassage({
+            sourceId: 'neighbor', question: 'Nearby discourse',
+            answer: 'This passage repeats the exact karma fruit phrase.', similarity: 0.91,
+            sourceGroup: 'neighbor', metadata: { source_type: 'discourse' },
+          }),
+          asPassage({
+            sourceId: 'paired-qa', question: 'Why is "karma fruit" emphasized?',
+            answer: 'Swami gives the complete explanation without repeating that wording.', similarity: 0.73,
+            discoverySimilarity: 0.95, discoveryExact: true,
+            sourceGroup: 'paired-qa', metadata: { source_type: 'qa' },
+          }),
+        ],
+      }),
+    },
+  });
 });
 
 test('search refuses to mix query embeddings with an outdated index format', async () => {

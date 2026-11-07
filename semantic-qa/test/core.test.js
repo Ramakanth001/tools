@@ -103,6 +103,26 @@ test('one independent semantic support passage can lift a borderline answer with
   assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
 });
 
+test('an exact structured Q&A discovery question returns its paired Swami answer first', () => {
+  const matches = rerankPassageMatches([
+    {
+      sourceId: 'semantic-neighbor', question: 'A nearby discourse',
+      passageIndex: 0, passageText: 'A strongly similar teaching about the exact “Lord help” phrase.',
+      passageStart: 0, passageEnd: 28, similarity: 0.91,
+      metadata: { source_type: 'discourse' },
+    },
+    {
+      sourceId: 'paired-qa', question: 'Why is “Lord help” emphasized?',
+      passageIndex: 0, passageText: 'Swami replied with the complete answer.',
+      passageStart: 0, passageEnd: 39, similarity: 0.73,
+      discoverySimilarity: 0.95, discoveryExact: true,
+      metadata: { source_type: 'qa' },
+    },
+  ], 'Why is “Lord help” emphasized?', 5);
+  assert.equal(matches[0].sourceId, 'paired-qa');
+  assert.equal(matches[0].rankingSignals.exactQaDiscovery, true);
+});
+
 test('an explicit quoted phrase orders the matching semantic answer before a nearby rewording', () => {
   const matches = rerankPassageMatches([
     {
