@@ -16,7 +16,7 @@ const DEFAULT_SETTINGS = {
   chatModel: '',
   contextTokens: 8192,
   responseTemperature: 0.3,
-  unloadAfterTurn: true,
+  unloadAfterTurn: false,
   hardwarePreference: 'auto',
   benchmarkSeed: null,
 };

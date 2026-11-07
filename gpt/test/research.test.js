@@ -28,9 +28,10 @@ test('12K and 16K context admit progressively more evidence and verbatim answers
   assert.equal(evidenceBudgetForContext(8192).reviewed, 48);
   assert.equal(evidenceBudgetForContext(8192).completeAnswerBatches, 2);
   assert.equal(evidenceBudgetForContext(12288).candidates, 180);
+  assert.equal(evidenceBudgetForContext(8192).selections, 12);
+  assert.equal(evidenceBudgetForContext(12288).selections, 20);
   assert.equal(evidenceBudgetForContext(12288).reviewed, 96);
-  assert.equal(evidenceBudgetForContext(12288).selections, 10);
-  assert.equal(evidenceBudgetForContext(16384).selections, 12);
+  assert.equal(evidenceBudgetForContext(16384).selections, 24);
   assert.equal(evidenceBudgetForContext(16384).completeAnswerBatches, 4);
 });
 
@@ -242,13 +243,25 @@ test('verified distinct answer types remain available for a developed corpus ans
   assert.deepEqual(selected.map((item) => item.evidenceId), ['Q3', 'Q1', 'Q2']);
 });
 
-test('final exact answers keep at most two paragraphs from one source group', () => {
+test('final exact answers keep every verified paragraph even when several come from one source group', () => {
   const evidence = [
     { evidenceId: 'Q1', sourceGroup: 'same', retrievalRank: 1 }, { evidenceId: 'Q2', sourceGroup: 'same', retrievalRank: 2 },
     { evidenceId: 'Q3', sourceGroup: 'same', retrievalRank: 3 }, { evidenceId: 'Q4', sourceGroup: 'different', retrievalRank: 4 },
   ];
   const judgments = evidence.map((item) => ({ evidence_id: item.evidenceId, support_type: 'governing_principle', reason: 'Useful doctrine.' }));
-  assert.deepEqual(filterVerifiedExtractiveSelections({ judgments }, evidence, 8).map((item) => item.evidenceId), ['Q1', 'Q2', 'Q4']);
+  assert.deepEqual(filterVerifiedExtractiveSelections({ judgments }, evidence, 8).map((item) => item.evidenceId), ['Q1', 'Q2', 'Q3', 'Q4']);
+});
+
+test('rendered answers expose additional relevant evidence even when the prose did not cite it', () => {
+  const evidence = [
+    { evidenceId: 'E1', key: 's1:0', sourceId: 's1', passageIndex: 0, start: 0, end: 20, excerpt: 'Primary evidence text.', metadata: {} },
+    { evidenceId: 'E2', key: 's2:0', sourceId: 's2', passageIndex: 0, start: 0, end: 23, excerpt: 'Additional relevant text.', metadata: {} },
+  ];
+  const rendered = renderAnswer({ paragraphs: [{ text: 'Supported answer.', evidence_ids: ['E1'] }] }, evidence, evidence);
+  assert.equal(rendered.answer, 'Supported answer. [1]');
+  assert.equal(rendered.sources.length, 2);
+  assert.deepEqual(rendered.sources.map((source) => source.cited), [true, false]);
+  assert.deepEqual(rendered.sources.map((source) => source.citationNumber), [1, 2]);
 });
 
 test('objective normalization limits probes and falls back when the model returns none', () => {
@@ -259,6 +272,32 @@ test('objective normalization limits probes and falls back when the model return
   assert.equal(normalized.probes[0].text, 'q');
   const advice = normalizeObjective({ intent: 'advice', probes: Array.from({ length: 8 }, (_, index) => ({ text: `a${index}`, purpose: 'relationship' })) }, 'May I ask for this?', {});
   assert.equal(advice.probes.length, 4);
+});
+
+test('compound direct questions search every requested facet independently', () => {
+  const question = 'What is Ganesh Chaturthi? Is it a good practice to immerse the Ganesh idol after worship?';
+  const objective = fallbackObjective(question);
+  assert.equal(objective.intent, 'direct');
+  assert.deepEqual(objective.facets, [
+    'What is Ganesh Chaturthi?',
+    'Is it a good practice to immerse the Ganesh idol after worship?',
+  ]);
+  assert.deepEqual(objective.probes.map((probe) => probe.text), [question, ...objective.facets]);
+});
+
+test('requests for other relevant citations retain a broad four-probe allowance', () => {
+  const objective = normalizeObjective({
+    standalone_question: 'What is Ganesh Chaturthi and should its idol be immersed?',
+    intent: 'direct',
+    facets: ['Meaning of Ganesh Chaturthi', 'Practice of idol immersion'],
+    probes: [
+      { text: 'Ganapati meaning and symbolism', purpose: 'primary' },
+      { text: 'Ganesh idol immersion Udvaasana Visarjanam', purpose: 'relationship' },
+      { text: 'Other teachings about permanent Ganesh worship', purpose: 'relationship' },
+    ],
+  }, 'Show all other relevant citations and sources.', {});
+  assert.equal(objective.source_breadth_requested, true);
+  assert.equal(objective.probes.length, 4);
 });
 
 test('direct advice planning always searches the actual user question first', () => {
@@ -332,6 +371,17 @@ test('source-question reranking uses EmbeddingGemma document format and semantic
   );
   assert.equal(reranked[0].sourceId, 'question-match');
   assert.equal(reranked[0].scores.questionSimilarity, 1);
+});
+
+test('source-question reranking preserves matches for separate compound-question facets', () => {
+  const reranked = rerankBySourceQuestion(
+    [{ sourceId: 'immersion' }, { sourceId: 'festival-definition' }, { sourceId: 'unrelated' }],
+    [[1, 0, 0], [0, 1, 0]],
+    [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+  );
+  assert.deepEqual(new Set(reranked.slice(0, 2).map((item) => item.sourceId)), new Set(['immersion', 'festival-definition']));
+  assert.equal(reranked[0].scores.questionSimilarity, 1);
+  assert.equal(reranked[1].scores.questionSimilarity, 1);
 });
 
 test('semantic adjudication requires the requested relationship even for broad advice', () => {

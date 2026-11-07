@@ -155,9 +155,9 @@ class GptStore {
                'sourceId', e.source_id, 'sourceGroup', e.source_group, 'passageIndex', e.passage_index,
                'start', e.start_offset, 'end', e.end_offset, 'excerpt', e.excerpt, 'title', e.title,
                'metadata', e.metadata, 'locator', e.locator, 'channels', e.channels, 'scores', e.scores,
-               'adjudication', e.adjudication
+               'adjudication', e.adjudication, 'cited', e.cited
              ) ORDER BY e.citation_number NULLS LAST, e.evidence_key)
-             FROM gpt.evidence e WHERE e.turn_id = m.turn_id AND e.cited), '[]'::jsonb) AS sources
+             FROM gpt.evidence e WHERE e.turn_id = m.turn_id), '[]'::jsonb) AS sources
       FROM gpt.messages m WHERE m.conversation_id = $1 ORDER BY m.created_at, m.id
     `, [conversationId]);
     return { ...conversation.rows[0], messages: messages.rows };
@@ -220,16 +220,25 @@ class GptStore {
       await client.query('BEGIN');
       await client.query(`INSERT INTO gpt.messages (id, conversation_id, turn_id, role, content)
         VALUES ($1, $2, $3, 'assistant', $4)`, [assistantMessageId, conversationId, turnId, answer]);
-      for (const item of evidence || []) {
+      if ((evidence || []).length) {
+        const rows = evidence.map((item) => ({
+          id: id(), evidenceKey: item.key, citationNumber: item.citationNumber || null,
+          sourceId: item.sourceId, sourceGroup: item.sourceGroup || null, passageIndex: item.passageIndex,
+          startOffset: item.start, endOffset: item.end, excerpt: item.excerpt, title: item.title || null,
+          metadata: item.metadata || {}, locator: item.locator || {}, channels: item.channels || [],
+          scores: item.scores || {}, adjudication: item.adjudication || {}, cited: Boolean(item.cited),
+        }));
         await client.query(`INSERT INTO gpt.evidence
           (id, turn_id, evidence_key, citation_number, source_id, source_group, passage_index, start_offset, end_offset,
            excerpt, title, metadata, locator, channels, scores, adjudication, cited)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17)`, [
-          id(), turnId, item.key, item.citationNumber || null, item.sourceId, item.sourceGroup || null,
-          item.passageIndex, item.start, item.end, item.excerpt, item.title || null,
-          JSON.stringify(item.metadata || {}), JSON.stringify(item.locator || {}), JSON.stringify(item.channels || []),
-          JSON.stringify(item.scores || {}), JSON.stringify(item.adjudication || {}), Boolean(item.cited),
-        ]);
+          SELECT row.id, $1, row."evidenceKey", row."citationNumber", row."sourceId", row."sourceGroup",
+                 row."passageIndex", row."startOffset", row."endOffset", row.excerpt, row.title,
+                 row.metadata, row.locator, row.channels, row.scores, row.adjudication, row.cited
+          FROM jsonb_to_recordset($2::jsonb) AS row(
+            id text, "evidenceKey" text, "citationNumber" integer, "sourceId" text, "sourceGroup" text,
+            "passageIndex" integer, "startOffset" integer, "endOffset" integer, excerpt text, title text,
+            metadata jsonb, locator jsonb, channels jsonb, scores jsonb, adjudication jsonb, cited boolean
+          )`, [turnId, JSON.stringify(rows)]);
       }
       await client.query(`UPDATE gpt.turns SET status = 'complete', stats = $2::jsonb, finished_at = now() WHERE id = $1`, [turnId, JSON.stringify(stats || {})]);
       await client.query(`UPDATE gpt.conversations SET memory = $2::jsonb, model_tag = $3, updated_at = now() WHERE id = $1`,

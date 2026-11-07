@@ -22,7 +22,7 @@ test('all answer export formats contain clear exact citations but never a full d
     },
   };
   const markdown = answerExportMarkdown(input);
-  assert.match(markdown, /## Citations/u);
+  assert.match(markdown, /## All relevant citations/u);
   assert.match(markdown, /### \[1\] A SPIRITUAL DISCOURSE/u);
   assert.match(markdown, /\*\*Exact cited excerpt\*\*/u);
   assert.match(markdown, /> This is the exact cited passage used to support the answer\./u);
@@ -39,7 +39,7 @@ test('all answer export formats contain clear exact citations but never a full d
   assert.doesNotMatch(text, /FULL DISCOURSE|FULL METADATA/u);
 
   const html = answerExportHtml(input);
-  assert.match(html, /<h2>Citations<\/h2>/u);
+  assert.match(html, /<h2>All relevant citations<\/h2>/u);
   assert.match(html, /Exact cited excerpt/u);
   assert.match(html, /This is the exact cited passage/u);
   assert.doesNotMatch(html, /FULL DISCOURSE|FULL METADATA/u);

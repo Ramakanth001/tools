@@ -11,7 +11,7 @@ test('normal runtime settings never acquire an accidental benchmark seed', () =>
 test('legacy oversized contexts migrate to the memory-safe local default', () => {
   const settings = mergeSettings({ contextTokens: 24576 });
   assert.equal(settings.contextTokens, 8192);
-  assert.equal(settings.unloadAfterTurn, true);
+  assert.equal(settings.unloadAfterTurn, false);
   assert.equal(mergeSettings({ contextTokens: 12288 }).contextTokens, 12288);
 });
 
