@@ -166,6 +166,44 @@ class CorpusReader {
     return contractFingerprint(result.rows[0]);
   }
 
+  async topicDocuments() {
+    const result = await this.pool().query(`
+      WITH ranked AS (
+        SELECT r.source_id, coalesce(r.source_group, r.source_id) AS document_group,
+               r.question, r.metadata, r.embedding::text AS embedding,
+               row_number() OVER (PARTITION BY coalesce(r.source_group, r.source_id)
+                 ORDER BY r.source_order NULLS LAST, r.source_id) AS document_rank
+        FROM semantic_qa.records r
+      )
+      SELECT source_id AS "sourceId", document_group AS "sourceGroup", question AS title,
+             metadata, embedding
+      FROM ranked WHERE document_rank = 1 ORDER BY document_group, source_id
+    `);
+    return result.rows;
+  }
+
+  async topicEvidence(sourceIds) {
+    const references = [...new Set((sourceIds || []).map(String).filter(Boolean))];
+    if (!references.length) return [];
+    const result = await this.pool().query(`
+      WITH requested(source_id, rank) AS (
+        SELECT source_id, ordinality::integer
+        FROM unnest($1::text[]) WITH ORDINALITY AS input(source_id, ordinality)
+      )
+      SELECT r.source_id AS "sourceId", r.source_group AS "sourceGroup", r.question AS title,
+             r.metadata, p.passage_index AS "passageIndex", p.citation_start_offset AS start,
+             p.citation_end_offset AS "end", p.citation_text AS excerpt, requested.rank
+      FROM requested JOIN semantic_qa.records r USING (source_id)
+      JOIN LATERAL (
+        SELECT passage_index, citation_start_offset, citation_end_offset, citation_text
+        FROM semantic_qa.passages WHERE source_id = requested.source_id
+        ORDER BY passage_index LIMIT 1
+      ) p ON true
+      ORDER BY requested.rank
+    `, [references]);
+    return result.rows;
+  }
+
   async searchProbe(vector, query, { channelLimit = 40, resultLimit = 60, signal } = {}) {
     const client = await this.pool().connect();
     const phrases = quotedPhrases(query);
