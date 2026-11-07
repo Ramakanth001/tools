@@ -114,12 +114,20 @@ function combineSourceContext(...values) {
     .join('\n\n');
 }
 
+function explicitByline(text) {
+  const value = String(text || '');
+  const match = value.match(/(?:^|\n)\s*\[\s*By\s+([^\]\n]{1,160})\]\s*/iu);
+  if (!match || Number(match.index) > 500) return '';
+  return String(match[1] || '').replace(/\s+/gu, ' ').trim();
+}
+
 function sourceDocument(row, sourceType) {
   const isQa = sourceType === 'qa';
   const originalRecordId = isQa ? row.qaId : row.dcId;
   const documentId = `${sourceType}:${originalRecordId}`;
   const rawContent = String((isQa ? row.answerBySwami : row.textDC) ?? '');
   const displayText = htmlToPlainText(rawContent);
+  const resolvedAuthor = String(row.author || '').trim() || explicitByline(displayText) || 'Swami';
   const title = htmlToPlainText(row.title);
   const questionContext = isQa
     ? combineSourceContext(row.briefQuestion, row.questionBk)
@@ -130,7 +138,7 @@ function sourceDocument(row, sourceType) {
     question: combineSourceContext(title, questionContext),
     text: displayText,
     language: row.masterLanguage || '',
-    author: row.author || '',
+    author: resolvedAuthor,
   });
   return {
     documentId,
@@ -144,7 +152,7 @@ function sourceDocument(row, sourceType) {
     displayText,
     rawContentHash: sha256(rawContent),
     displayTextHash: sha256(displayText),
-    author: String(row.author || '').trim() || 'Swami',
+    author: resolvedAuthor,
     defaultUnitKind: isQa ? 'swami_reply' : 'swami_teaching',
     language: row.masterLanguage || '',
     recordDate: row.recordDate,
@@ -258,7 +266,7 @@ function buildDiscourseRecords(rows, {
 function mysqlConfig() {
   return {
     host: process.env.UNIVERSAL_MYSQL_HOST || '127.0.0.1',
-    port: Number(process.env.UNIVERSAL_MYSQL_PORT || 3306),
+    port: Number(process.env.UNIVERSAL_MYSQL_PORT || 3307),
     user: process.env.UNIVERSAL_MYSQL_USER || 'root',
     password: process.env.UNIVERSAL_MYSQL_PASSWORD || '',
     charset: 'utf8mb4',
@@ -533,6 +541,7 @@ module.exports = {
   chunkText,
   combineSourceContext,
   decodeHtmlEntities,
+  explicitByline,
   htmlToPlainText,
   mysqlConfig,
   quoteMysqlIdentifier,

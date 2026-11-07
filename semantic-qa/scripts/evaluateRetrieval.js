@@ -1,4 +1,5 @@
 const cases = require('../eval/relevance-cases.json');
+const database = require('../src/database');
 
 const apiBase = String(process.env.SEMANTIC_QA_EVAL_API || 'http://127.0.0.1:8790/api').replace(/\/+$/, '');
 const topK = Math.max(1, Math.min(20, Number(process.env.SEMANTIC_QA_EVAL_TOP_K || 5)));
@@ -30,14 +31,27 @@ async function search(question) {
   return payload;
 }
 
+async function canonicalSourceIds() {
+  const ids = [...new Set(cases.flatMap((entry) => entry.relevantSourceIds || []).map(String))];
+  if (!ids.length) return new Map();
+  return database.withPool(indexConnection, async (pool) => {
+    const result = await pool.query(`
+      SELECT alias_id, source_id FROM semantic_qa.source_aliases
+      WHERE alias_id = ANY($1::text[])
+    `, [ids]);
+    return new Map(result.rows.map((row) => [row.alias_id, row.source_id]));
+  });
+}
+
 async function run() {
   const results = [];
+  const aliases = await canonicalSourceIds();
   for (const entry of cases) {
     const payload = await search(entry.question);
     const groups = payload.matches.map((match) => match.sourceGroup || match.sourceId);
     const sourceIds = payload.matches.map((match) => match.sourceId);
     const relevantGroups = entry.relevantSourceGroups || [];
-    const relevantSourceIds = entry.relevantSourceIds || [];
+    const relevantSourceIds = [...new Set((entry.relevantSourceIds || []).map((id) => aliases.get(String(id)) || String(id)))];
     const rank = relevantGroups.length
       ? groups.findIndex((group) => relevantGroups.includes(group)) + 1
       : 0;

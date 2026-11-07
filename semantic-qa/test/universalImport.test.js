@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildDocuments, buildDiscourseRecords, buildRecords, chunkText, htmlToPlainText, quoteMysqlIdentifier, resolveMysqlDatabase } = require('../scripts/importUniversalQa');
+const { buildDocuments, buildDiscourseRecords, buildRecords, chunkText, explicitByline, htmlToPlainText, mysqlConfig, quoteMysqlIdentifier, resolveMysqlDatabase } = require('../scripts/importUniversalQa');
+
+test('an explicit source byline is retained while a missing byline defaults later to Swami', () => {
+  assert.equal(explicitByline('[By Dr. Nikhil]\n\nAn experience.'), 'Dr. Nikhil');
+  assert.equal(explicitByline('An unmarked teaching.'), '');
+});
 
 test('MySQL source database is discovered from the two authoritative tables', async () => {
   const prior = process.env.UNIVERSAL_MYSQL_DATABASE;
@@ -13,6 +18,17 @@ test('MySQL source database is discovered from the two authoritative tables', as
   } finally {
     if (prior == null) delete process.env.UNIVERSAL_MYSQL_DATABASE;
     else process.env.UNIVERSAL_MYSQL_DATABASE = prior;
+  }
+});
+
+test('the verified local Universal MySQL endpoint defaults to port 3307', () => {
+  const prior = process.env.UNIVERSAL_MYSQL_PORT;
+  delete process.env.UNIVERSAL_MYSQL_PORT;
+  try {
+    assert.equal(mysqlConfig().port, 3307);
+  } finally {
+    if (prior == null) delete process.env.UNIVERSAL_MYSQL_PORT;
+    else process.env.UNIVERSAL_MYSQL_PORT = prior;
   }
 });
 const { sha256 } = require('../src/corpusStructure');

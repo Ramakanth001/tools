@@ -98,7 +98,7 @@ async function run() {
     try {
       await client.query("UPDATE semantic_qa.corpus SET retrieval_schema_version = 'passage-v4' WHERE id = 'default'");
       const names = await database.createSyncStage(client, 'validation_promote', 3);
-      await stageDocument(client, names, { sourceId: 'discourse:validation', answer: 'Do your duty without attachment.' });
+      await stageDocument(client, names, { sourceId: 'discourse:validation', answer: 'Do your duty 💠 without attachment.' });
       await database.commitRebuild(client, commitPayload(names));
       const rollback = await client.query(`
         SELECT to_regclass('semantic_qa.records_v4_rollback') IS NOT NULL AS records,
@@ -116,7 +116,7 @@ async function run() {
   assert.equal(status.passageCount, 1);
   const units = await database.getAnswerUnits(connection, ['discourse:validation:001']);
   assert.equal(units.length, 1);
-  assert.equal(units[0].text, 'Do your duty without attachment.');
+  assert.equal(units[0].text, 'Do your duty 💠 without attachment.');
   assert.equal(units[0].displayText.slice(units[0].start, units[0].end), units[0].text);
   const dense = await database.searchPassageIndex(connection, vector, 'validation OR duty', 10);
   assert.ok(dense.rows.some((row) => row.sourceId === 'discourse:validation'));
@@ -139,7 +139,7 @@ async function run() {
         /Verbatim offset validation failed/u,
       );
       const preserved = await client.query('SELECT source_id, answer FROM semantic_qa.records ORDER BY source_id');
-      assert.deepEqual(preserved.rows, [{ source_id: 'discourse:validation', answer: 'Do your duty without attachment.' }]);
+      assert.deepEqual(preserved.rows, [{ source_id: 'discourse:validation', answer: 'Do your duty 💠 without attachment.' }]);
     } finally {
       if (names) await database.dropSyncStage(client, names);
       client.release();

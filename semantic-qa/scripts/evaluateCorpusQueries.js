@@ -23,10 +23,10 @@ async function loadCases() {
     const result = await pool.query(`
       SELECT DISTINCT ON (source_group)
              source_group AS "sourceGroup",
-             metadata->>'source_context' AS question
+             coalesce(nullif(metadata->>'question_context', ''), question) AS question
       FROM semantic_qa.records
       WHERE metadata->>'source_type' = 'qa'
-        AND length(coalesce(metadata->>'source_context', '')) BETWEEN 1 AND 20000
+        AND length(coalesce(nullif(metadata->>'question_context', ''), question)) BETWEEN 1 AND 20000
       ORDER BY source_group, source_order NULLS FIRST, source_id
     `);
     return caseLimit ? result.rows.slice(0, caseLimit) : result.rows;
