@@ -165,7 +165,7 @@ export function answerExportMarkdown({ title, message }) {
   const sources = exportSources(message);
   const sections = [`# ${clean(title) || 'GPT corpus answer'}`, '', answer];
   if (sources.length) {
-    sections.push('', '## Citations', '', '_Only the exact excerpts used to support this answer are included below._');
+    sections.push('', '## All relevant citations', '', '_Includes citations used in the answer and additional evidence independently verified as relevant._');
     sources.forEach((source, index) => {
       const number = Number(source.citationNumber) || index + 1;
       const details = sourceDetails(source);
@@ -182,7 +182,7 @@ export function answerExportText({ title, message }) {
   const sections = [heading, '='.repeat(Math.min(heading.length, 80)), '', clean(message?.content)];
   const sources = exportSources(message);
   if (sources.length) {
-    sections.push('', 'CITATIONS', '---------', 'Only the exact excerpts used to support this answer are included below.');
+    sections.push('', 'ALL RELEVANT CITATIONS', '----------------------', 'Includes citations used in the answer and additional evidence independently verified as relevant.');
     sources.forEach((source, index) => {
       const number = Number(source.citationNumber) || index + 1;
       const details = sourceDetails(source);
@@ -195,7 +195,7 @@ export function answerExportText({ title, message }) {
 export function answerExportHtml({ title, message, wordCompatible = false }) {
   const heading = clean(title) || 'GPT corpus answer';
   const sources = exportSources(message);
-  const sourceSection = sources.length ? `<section class="citations"><h2>Citations</h2><p class="citation-note">Only the exact excerpts used to support this answer are included below.</p>${sources.map(citationHtml).join('\n')}</section>` : '';
+  const sourceSection = sources.length ? `<section class="citations"><h2>All relevant citations</h2><p class="citation-note">Includes citations used in the answer and additional evidence independently verified as relevant.</p>${sources.map(citationHtml).join('\n')}</section>` : '';
   return `<!doctype html>
 <html lang="en"${wordCompatible ? ' xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"' : ''}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(heading)}</title>${wordCompatible ? '<meta name="ProgId" content="Word.Document">' : ''}<style>${documentCss()}</style></head>
@@ -209,7 +209,7 @@ export function conversationExportHtml({ title, messages }) {
   const turnSections = turns.map((turn, turnIndex) => {
     const answers = turn.answers.map((message, answerIndex) => {
       const sources = exportSources(message);
-      const citations = sources.length ? `<section class="answer-citations"><h3>Citations for this answer</h3><p class="citation-note">Only the exact excerpts used to support this answer are included below.</p>${sources.map(citationHtml).join('\n')}</section>` : '';
+      const citations = sources.length ? `<section class="answer-citations"><h3>All relevant citations</h3><p class="citation-note">Includes citations used in the answer and additional evidence independently verified as relevant.</p>${sources.map(citationHtml).join('\n')}</section>` : '';
       const version = turn.answers.length > 1 ? `<div class="answer-version">Answer ${answerIndex + 1} of ${turn.answers.length}</div>` : '';
       return `<section class="answer-block"><h2>Answer</h2>${version}${markdownBlocksHtml(message.content)}${citations}</section>`;
     }).join('\n');

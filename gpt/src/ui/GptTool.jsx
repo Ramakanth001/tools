@@ -107,6 +107,13 @@ function Message({ message, question, onSource, onRegenerate, isLatestAssistant 
         {isLatestAssistant ? <button type="button" onClick={() => onRegenerate(message.turnId)}>Regenerate</button> : null}
         {message.sources?.length ? <span>{message.sources.length} verified {message.sources.length === 1 ? 'source' : 'sources'}</span> : null}
       </div> : null}
+      {assistant && message.sources?.length ? <section className="gpt-citations-panel" aria-label="All relevant corpus citations">
+        <div className="gpt-citations-heading"><strong>All relevant citations</strong><span>{message.sources.length} verified corpus {message.sources.length === 1 ? 'passage' : 'passages'}</span></div>
+        <div className="gpt-citations-list">{message.sources.map((source) => <button type="button" className="gpt-citation-card" key={source.key || `${source.sourceId}:${source.citationNumber}`} onClick={() => onSource(source)}>
+          <span className="gpt-citation-number">[{source.citationNumber}]</span>
+          <span className="gpt-citation-details"><strong>{source.title || `Source ${source.sourceId}`}</strong><span>{source.excerpt}</span><small>{source.cited ? 'Used in the main answer' : 'Additional relevant evidence'} · Source {source.sourceId} · Open passage</small></span>
+        </button>)}</div>
+      </section> : null}
       {assistant && (message.researchDetails?.probes || message.researchDetails?.candidates) ? <details className="gpt-research-details"><summary>Research details</summary><div><span>{message.researchDetails.probes || 0} queries</span><span>{message.researchDetails.accepted || message.sources?.length || 0} sources reviewed</span>{message.researchDetails.repaired ? <span>Draft repaired</span> : null}</div></details> : null}
     </div>
   </article>;
@@ -520,7 +527,7 @@ export default function GptTool({ runtime = STANDALONE_RUNTIME }) {
           <small>{runtimeSaving ? 'Saving…' : TEMPERATURE_PRESETS.find((preset) => preset.value === settings.responseTemperature)?.description}</small>
         </div><div className="gpt-composer"><textarea rows="1" value={input} disabled={busy} placeholder="Ask the corpus…" onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} />
           {busy ? <button type="button" className="gpt-send stop" onClick={stop} aria-label="Stop">■</button> : <button type="button" className="gpt-send" disabled={!input.trim()} onClick={() => sendMessage()} aria-label="Send">↑</button>}
-        </div><div className="gpt-composer-note">Local Qwen · EmbeddingGemma · Qwen memory is released after each completed answer.</div></div>
+        </div><div className="gpt-composer-note">Local Qwen · EmbeddingGemma · {settings.unloadAfterTurn ? 'Qwen is unloaded after each answer; keeping it warm in Setup makes follow-ups faster.' : 'Qwen stays warm for faster follow-up questions.'}</div></div>
       </main>
       <SourceDrawer source={source} runtime={runtime} onClose={() => setSource(null)} />
     </div>

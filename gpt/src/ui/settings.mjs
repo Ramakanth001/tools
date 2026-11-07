@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS = {
   indexConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'spiritual_gpt_index_reader', password: '', database: 'universal_qa_index', sslMode: 'disable' },
   chatConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'spiritual_gpt_app', password: '', database: 'spiritual_gpt', sslMode: 'disable' },
   ollamaBaseUrl: 'http://127.0.0.1:11434', embeddingModel: 'embeddinggemma', chatModel: '',
-  contextTokens: 8192, responseTemperature: 0.3, hardwarePreference: 'auto', unloadAfterTurn: true,
+  contextTokens: 8192, responseTemperature: 0.3, hardwarePreference: 'auto', unloadAfterTurn: false,
 };
 
 function migrateLegacyIndexConnection(connection) {

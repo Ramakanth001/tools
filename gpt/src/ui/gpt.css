@@ -1,11 +1,11 @@
-.gpt-tool { --gpt-accent: #a78bfa; --gpt-blue: #60a5fa; color: var(--text); }
-.gpt-tool.standalone { min-height: 100vh; }
+.gpt-tool { --gpt-accent: #a78bfa; --gpt-blue: #60a5fa; min-width: 0; max-width: 1380px; margin: 0 auto; color: var(--text); }
+.gpt-tool.standalone { width: 100%; min-height: 100vh; max-width: none; }
 .gpt-tool.standalone.chat-mode { width: 100%; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
 .gpt-tool.standalone .gpt-shell { width: 100%; height: 100%; min-height: 0; max-height: 100%; border: 0; border-radius: 0; }
 .gpt-tool.standalone > .gpt-tool-nav { padding: 12px 18px 0; }
 .gpt-tool.standalone > .gpt-setup { padding: 0 18px 36px; }
 .gpt-tool-nav { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 12px; }
-.gpt-shell { position: relative; display: grid; grid-template-columns: 278px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: min(790px, calc(100vh - 170px)); overflow: hidden; border: 1px solid rgba(255,255,255,.1); border-radius: 20px; background: rgba(10,13,22,.92); box-shadow: 0 30px 80px rgba(0,0,0,.46); }
+.gpt-shell { position: relative; display: grid; grid-template-columns: clamp(232px, 22vw, 278px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: min(790px, calc(100vh - 170px)); overflow: hidden; border: 1px solid rgba(255,255,255,.1); border-radius: 20px; background: rgba(10,13,22,.92); box-shadow: 0 30px 80px rgba(0,0,0,.46); }
 .gpt-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border-right: 1px solid rgba(255,255,255,.08); background: linear-gradient(180deg, rgba(18,22,36,.98), rgba(12,15,26,.98)); }
 .gpt-sidebar-head { padding: 16px 14px 12px; }
 .gpt-new-chat { width: 100%; padding: 11px 13px; border: 1px solid rgba(167,139,250,.3); border-radius: 12px; background: rgba(124,58,237,.1); color: #ede9fe; cursor: pointer; font-weight: 800; text-align: left; }
@@ -33,7 +33,7 @@
 .gpt-export-chat { padding: 7px 10px; border: 1px solid rgba(96,165,250,.26); border-radius: 9px; background: rgba(37,99,235,.09); color: #bfdbfe; cursor: pointer; font-size: 10px; font-weight: 750; }
 .gpt-export-chat:hover { border-color: rgba(96,165,250,.55); background: rgba(37,99,235,.18); color: white; }
 .gpt-export-chat:disabled { opacity: .4; cursor: not-allowed; }
-.gpt-transcript { flex: 1; min-width: 0; min-height: 0; padding: 14px 0 180px; overflow-x: auto; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.gpt-transcript { flex: 1; min-width: 0; min-height: 0; padding: 18px 0 180px; overflow-x: hidden; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .gpt-welcome { max-width: 680px; margin: 74px auto 20px; padding: 0 26px; text-align: center; }
 .gpt-welcome-mark { display: inline-flex; width: 58px; height: 58px; align-items: center; justify-content: center; border: 1px solid rgba(167,139,250,.48); border-radius: 18px; background: linear-gradient(135deg, #7c3aed, #2563eb); box-shadow: 0 18px 48px rgba(76,29,149,.4); font-size: 25px; font-weight: 900; }
 .gpt-welcome h2 { margin: 20px 0 9px; font-size: 25px; }
@@ -41,13 +41,13 @@
 .gpt-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-top: 28px; }
 .gpt-suggestions button { min-height: 92px; padding: 13px; border: 1px solid rgba(255,255,255,.1); border-radius: 13px; background: rgba(255,255,255,.035); color: rgba(238,242,255,.82); cursor: pointer; font: inherit; font-size: 12px; line-height: 1.45; text-align: left; }
 .gpt-suggestions button:hover { border-color: rgba(167,139,250,.38); background: rgba(124,58,237,.08); }
-.gpt-message { display: grid; grid-template-columns: 34px minmax(0, 760px); gap: 13px; max-width: 850px; margin: 0 auto; padding: 22px 26px; }
+.gpt-message { display: grid; grid-template-columns: 34px minmax(0, 760px); gap: 13px; max-width: 880px; margin: 0 auto; padding: 22px 26px; }
 .gpt-message.user { margin-top: 8px; }
 .gpt-avatar { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(255,255,255,.06); font-size: 12px; font-weight: 900; }
 .gpt-message.assistant .gpt-avatar { border-color: rgba(167,139,250,.3); background: linear-gradient(135deg, rgba(124,58,237,.8), rgba(37,99,235,.75)); }
 .gpt-message-body { min-width: 0; }
 .gpt-message-label { margin: 1px 0 8px; color: rgba(238,242,255,.64); font-size: 11px; font-weight: 850; }
-.gpt-message-content { overflow-wrap: anywhere; color: rgba(246,247,255,.92); font-size: 15px; line-height: 1.76; }
+.gpt-message-content { min-width: 0; overflow-wrap: anywhere; color: rgba(246,247,255,.92); font-size: 15px; line-height: 1.76; }
 .gpt-message-content p { margin: 0 0 13px; white-space: pre-wrap; }
 .gpt-message-content p:last-child { margin-bottom: 0; }
 .gpt-message-content h3, .gpt-message-content h4, .gpt-message-content h5, .gpt-message-content h6 { margin: 20px 0 7px; color: white; line-height: 1.35; }
@@ -64,6 +64,18 @@
 .gpt-table-wrap th { background: rgba(124,58,237,.1); color: #ede9fe; }
 .gpt-message.user .gpt-message-content { display: inline-block; padding: 11px 15px; border: 1px solid rgba(255,255,255,.08); border-radius: 4px 16px 16px; background: rgba(255,255,255,.055); }
 .gpt-message-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; color: rgba(238,242,255,.42); font-size: 10px; }
+.gpt-citations-panel { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
+.gpt-citations-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.gpt-citations-heading strong { color: rgba(246,247,255,.86); font-size: 12px; }
+.gpt-citations-heading span { color: rgba(238,242,255,.42); font-size: 10px; }
+.gpt-citations-list { display: grid; gap: 7px; }
+.gpt-citation-card { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 9px; width: 100%; padding: 10px 11px; border: 1px solid rgba(96,165,250,.16); border-radius: 10px; background: rgba(37,99,235,.045); color: inherit; cursor: pointer; text-align: left; }
+.gpt-citation-card:hover { border-color: rgba(96,165,250,.42); background: rgba(37,99,235,.1); }
+.gpt-citation-number { color: #93c5fd; font-size: 11px; font-weight: 900; }
+.gpt-citation-details { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.gpt-citation-details > strong { overflow: hidden; color: #dbeafe; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.gpt-citation-details > span { display: -webkit-box; overflow: hidden; color: rgba(238,242,255,.66); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.gpt-citation-details > small { color: rgba(147,197,253,.56); font-size: 9px; }
 .gpt-export-menu { position: relative; }
 .gpt-export-menu summary { padding: 5px 8px; border: 1px solid rgba(96,165,250,.2); border-radius: 7px; background: rgba(37,99,235,.08); color: #bfdbfe; cursor: pointer; font-size: 10px; list-style: none; }
 .gpt-export-menu summary::-webkit-details-marker { display: none; }
