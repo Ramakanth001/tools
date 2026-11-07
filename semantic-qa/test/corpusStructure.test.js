@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  MAX_RETRIEVAL_CHARACTERS,
   buildAnswerPassages,
   buildDiscoveryTexts,
   parseAnswerUnits,
@@ -15,6 +16,59 @@ test('unmarked discourse is a complete Swami teaching even when its title is a q
   assert.deepEqual(parsed.units.map((unit) => unit.unitKind), ['swami_teaching']);
   assert.equal(parsed.units[0].text, text);
   assert.equal(parsed.units[0].author, 'Swami');
+});
+
+test('an introductory question note does not exclude an otherwise unmarked Swami teaching', () => {
+  const text = '[Answers to questions sent by devotees.]\n\nThe teaching begins here and remains exact.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:old', sourceType: 'discourse', text, question: 'A title?' });
+  assert.equal(parsed.ambiguities.length, 0);
+  assert.equal(parsed.units.length, 1);
+  assert.equal(parsed.units[0].unitKind, 'swami_teaching');
+  assert.equal(parsed.units[0].text, text);
+});
+
+test('a leading numbered question followed by an unmarked answer separates discovery from citation', () => {
+  const text = '[Continuation of a question and answer session.]\n\n6. How can these philosophies be united?\n\nThe aim of the preacher is to uplift people.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:old-qa', sourceType: 'discourse', text, question: 'Philosophies' });
+  assert.equal(parsed.ambiguities.length, 0);
+  assert.equal(parsed.units.length, 1);
+  assert.equal(parsed.units[0].unitKind, 'swami_reply');
+  assert.equal(parsed.units[0].associatedQuestion, '6. How can these philosophies be united?');
+  assert.equal(parsed.units[0].text, 'The aim of the preacher is to uplift people.');
+  assert.match(parsed.ignored[0].text, /How can these philosophies/u);
+});
+
+test('a bracketed asked-and-reply introduction starts the exact Swami reply after the note', () => {
+  const text = '[Dr. Nikhil asked Swami about food. Swami gave the following message in reply.]\n\nEating food is one issue.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:intro-reply', sourceType: 'discourse', text, question: 'Food' });
+  assert.equal(parsed.ambiguities.length, 0);
+  assert.equal(parsed.units.length, 1);
+  assert.equal(parsed.units[0].unitKind, 'swami_reply');
+  assert.equal(parsed.units[0].text, 'Eating food is one issue.');
+});
+
+test('Swami replied followed by a quotation mark is recognized without requiring a colon', () => {
+  const text = '[A devotee asked a question.]\n\nSwami replied “Buddha was safe.”';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:quoted-reply', sourceType: 'discourse', text, question: 'Why?' });
+  assert.equal(parsed.ambiguities.length, 0);
+  assert.equal(parsed.units.length, 1);
+  assert.equal(parsed.units[0].text, '“Buddha was safe.”');
+});
+
+test('real corpus Original Message and New Reply headers separate Swami from devotee comments', () => {
+  const text = 'Original Message of Shri Swami:\n\nExact first teaching.\n\nDr. Nikhil’s Comments on above Message:\n\nA devotee comment.\n\nNew Reply of Shri Datta Swami:\n\nExact second teaching.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:message-labels', sourceType: 'discourse', text });
+  assert.equal(parsed.ambiguities.length, 0);
+  assert.deepEqual(parsed.units.map((unit) => unit.text), ['Exact first teaching.', 'Exact second teaching.']);
+  assert.match(parsed.ignored[0].text, /devotee comment/u);
+});
+
+test('Datta Swami disciple speech is citable while the separately labeled God-preacher speech is context', () => {
+  const text = 'God-preacher Shri Datta spoke:-\n\nA separate speaker.\n\nDisciple of Datta (Datta Swami) spoke:-\n\nThe exact Swami passage.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:dialogue', sourceType: 'discourse', text });
+  assert.equal(parsed.ambiguities.length, 0);
+  assert.deepEqual(parsed.units.map((unit) => unit.text), ['The exact Swami passage.']);
+  assert.match(parsed.ignored[0].text, /separate speaker/u);
 });
 
 test('explicit English questions are discovery context and only Swami replies are citable', () => {
@@ -109,6 +163,18 @@ test('an explicit non-Swami byline is withheld rather than defaulted to Swami', 
   assert.equal(parsed.ambiguities.length, 1);
 });
 
+test('document authorship does not leak into an explicitly labeled Swami reply unit', () => {
+  const text = '[By Dr. Devotee]\n\nA personal introduction.\n\nSwami replied: Exact teaching.';
+  const parsed = parseAnswerUnits({
+    sourceId: 'discourse:mixed-author', sourceType: 'discourse', text, author: 'Dr. Devotee',
+  });
+  assert.equal(parsed.author, 'Dr. Devotee');
+  assert.equal(parsed.units.length, 1);
+  assert.equal(parsed.units[0].author, 'Swami');
+  assert.equal(parsed.units[0].text, 'Exact teaching.');
+  assert.ok(parsed.ignored.some((span) => /personal introduction/u.test(span.text)));
+});
+
 test('retrieval windows can overlap internally but citations expand to an exact paragraph', () => {
   const paragraph = Array.from({ length: 20 }, (_, index) => `Sentence ${index + 1} is unchanged.`).join(' ');
   const parsed = parseAnswerUnits({ sourceId: 'discourse:8', sourceType: 'discourse', text: paragraph });
@@ -119,6 +185,21 @@ test('retrieval windows can overlap internally but citations expand to an exact 
     assert.equal(paragraph.slice(passage.citationStart, passage.citationEnd), passage.citationText);
     assert.equal(passage.citationText, paragraph);
   }
+});
+
+test('exceptionally long single sentences and discovery context are bounded for embedding', () => {
+  const sentence = `Teaching ${'word '.repeat(900).trim()}.`;
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:long-sentence', sourceType: 'discourse', text: sentence });
+  const passages = buildAnswerPassages(sentence, parsed.units);
+  assert.ok(passages.length > 1);
+  assert.ok(passages.every((passage) => passage.text.length <= MAX_RETRIEVAL_CHARACTERS));
+  assert.ok(passages.every((passage) => passage.citationText === sentence));
+
+  const discovery = buildDiscoveryTexts({
+    sourceId: 'discourse:long-discovery', question: sentence, answer: sentence, metadata: {},
+  }, { units: [], ignored: [] });
+  assert.ok(discovery.length > 1);
+  assert.ok(discovery.every((item) => item.text.length <= MAX_RETRIEVAL_CHARACTERS));
 });
 
 test('story windows are incomplete unless a consequence or stated lesson is present', () => {

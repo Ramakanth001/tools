@@ -4,11 +4,15 @@ const SWAMI_AUTHOR = 'Swami';
 const MAX_RETRIEVAL_CHARACTERS = 1600;
 
 const REPLY_MARKERS = [
+  /(?:^|\n)\s*(?:Original\s+Message|New\s+Reply)\s+of\s+(?:(?:Shri|Sri|Śrī)\s+)?(?:Datta\s*)?S[vw][aā]+m[iīy](?:ji)?\s*(?::\s*-?|-)\s*/giu,
+  /(?:^|\n)\s*Disciple\s+of\s+Datta\s*\(\s*Datta\s+S[vw][aā]+m[iīy]\s*\)\s+(?:spoke|said|re?r?plied|answered)\s*(?::\s*-?|-)\s*/giu,
   /(?:^|\n)\s*\[\s*repl(?:y|ies)\s+(?:of|by)\s+[^\]\n]{0,500}s[vw][aā]+m[iīy][^\]\n]{0,1500}\]\s*/giu,
   /(?:^|\n)\s*\[(?=[^\]\n]{0,2000}\bgiven\s+below\b)(?=[^\]\n]{0,2000}s[vw][aā]+m[iīy](?:['’]s)?\s+(?:response|reply|answer|explanation|clarification|discourse))[^\]\n]{1,2000}\]\s*/giu,
+  /(?:^|\n)\s*\[(?=[^\]\n]{0,2000}\b(?:asked|question)\b)(?=[^\]\n]{0,2000}s[vw][aā]+m[iīy])(?=[^\]\n]{0,2000}\b(?:reply|answer|message)\b)[^\]\n]{1,2000}\]\s*/giu,
   /(?:^|\n)\s*\[\s*repl(?:y|ies)\s+to\s+(?:an?\s+|the\s+)?question\b[^\]\n]{0,2000}\]\s*/giu,
   /(?:^|\n)\s*\[(?=[^\]\n]{0,2000}(?:പ്രതികരണം|മറുപടി))(?=[^\]\n]{0,2000}സ്വാമി)[^\]\n]{1,2000}\]\s*/gu,
   /(?:^|\n|(?<=\]))\s*(?:(?:(?:Shri|Sri|Śrī)\s+)?(?:Datta\s*)?S[vw][aā]+m[iīy](?:ji)?(?:(?:\s+(?:re?r?plied|answered|responded|spoke|said|uv[aā]ca)(?:\s*\([^\n:]{1,100}\))?)|(?:['’]s\s+(?:reply|response|answer|comments?)))?|Answer|Reply)\s*(?::\s*-?|-)\s*/giu,
+  /(?:^|\n|(?<=\]))\s*(?:(?:Shri|Sri|Śrī)\s+)?(?:Datta\s*)?S[vw][aā]+m[iīy](?:ji)?\s+(?:re?r?plied|answered|responded|spoke|said|uv[aā]ca)\b\s*(?=["'“”‘’\p{L}\p{N}])/giu,
   /(?:^|\n|(?<=\]))\s*(?:ശ്രീ\s*)?സ്വാമി\s*(?:മറുപടി\s*(?:പറഞ്ഞു|നൽകി)|ഉത്തരം\s*പറഞ്ഞു)?\s*(?::\s*-?|-)\s*/gu,
   /(?:^|\n|(?<=\]))\s*(?:శ్రీ\s*)?స్వామి\s*(?:సమాధానము|సమాధానం|జవాబు)?\s*(?::\s*-?|-)\s*/gu,
 ];
@@ -26,6 +30,7 @@ const QUESTION_MARKERS = [
 const NON_SWAMI_SPEAKER_MARKERS = [
   /(?:^|\n)\s*\[\s*By\s+(?![^\]\n]{0,160}(?:s[vw][aā]+m[iīy]|datta))[^\]\n]{1,160}\]\s*/giu,
   /(?:^|\n)\s*(?:(?:Ms|Mrs|Mr|Dr|Prof)\.?\s+[^\n:]{1,100}|(?:Shri|Sri)\.?\s+[^\n:]{1,100}\s+(?:spoke|said|asked|comments?(?:\s+on[^\n:]*)?)|Mother(?:\s+of\s+[^\n:]{1,80})?|Father|Priest|Devotee|Questioner|Interviewer)\s*:\s*/giu,
+  /(?:^|\n)\s*God-preacher\s+(?:(?:Shri|Sri|Śrī)\s+)?Datta\s+(?:spoke|said|re?r?plied|answered)\s*(?::\s*-?|-)\s*/giu,
   /(?:^|\n)\s*(?:ഫാദർ|പുരോഹിതൻ|ഭക്തൻ|ചോദ്യകർത്താവ്)\s*:\s*/gu,
   /(?:^|\n)\s*(?:ఫాదర్|భక్తుడు|ప్రశ్నకర్త)\s*:\s*/gu,
 ];
@@ -96,7 +101,7 @@ function parseAnswerUnits({ text: input, sourceId = '', sourceType = '', questio
     const span = trimRange(text, 0, text.length);
     if (span.text) {
       units.push({
-        sourceId, answerUnitId: `${sourceId}:answer:1`, unitIndex: 1, unitKind: 'swami_reply', author: resolvedAuthor,
+        sourceId, answerUnitId: `${sourceId}:answer:1`, unitIndex: 1, unitKind: 'swami_reply', author: SWAMI_AUTHOR,
         associatedQuestion: String(question || '').trim(), language: String(language || ''),
         start: span.start, end: span.end, text: span.text, contextComplete: true, contentHash: sha256(span.text),
       });
@@ -105,18 +110,39 @@ function parseAnswerUnits({ text: input, sourceId = '', sourceType = '', questio
   }
 
   if (!replyEvents.length) {
-    if (otherSpeakerEvents.length || questionEvents.length) {
+    if (otherSpeakerEvents.length) {
       ambiguities.push({
         sourceId,
         reason: 'speaker-marked discourse has no recognized Swami reply marker',
-        offsets: [...questionEvents, ...otherSpeakerEvents].map((event) => event.start),
+        offsets: otherSpeakerEvents.map((event) => event.start),
       });
+      return { units, ignored, ambiguities, author: resolvedAuthor };
+    }
+    const paragraphs = paragraphSpans(text, 0, text.length);
+    const leadingLimit = Math.min(8, paragraphs.length - 1);
+    let questionParagraph = -1;
+    for (let index = 0; index < leadingLimit; index += 1) {
+      const paragraph = paragraphs[index];
+      if (paragraph.start > 7000) break;
+      if (/\?\s*(?:\]|["'”’])?\s*$/u.test(paragraph.text)) questionParagraph = index;
+    }
+    if (questionEvents.length && questionParagraph >= 0 && paragraphs[questionParagraph + 1]) {
+      const answer = trimRange(text, paragraphs[questionParagraph + 1].start, text.length);
+      const context = trimRange(text, 0, paragraphs[questionParagraph + 1].start);
+      if (context.text) ignored.push({ role: 'devotee_question', start: context.start, end: context.end, text: context.text });
+      if (answer.text) {
+        units.push({
+          sourceId, answerUnitId: `${sourceId}:reply:1`, unitIndex: 1, unitKind: 'swami_reply', author: SWAMI_AUTHOR,
+          associatedQuestion: paragraphs[questionParagraph].text, language: String(language || ''),
+          start: answer.start, end: answer.end, text: answer.text, contextComplete: true, contentHash: sha256(answer.text),
+        });
+      }
       return { units, ignored, ambiguities, author: resolvedAuthor };
     }
     const span = trimRange(text, 0, text.length);
     if (span.text) {
       units.push({
-        sourceId, answerUnitId: `${sourceId}:teaching:1`, unitIndex: 1, unitKind: 'swami_teaching', author: resolvedAuthor,
+        sourceId, answerUnitId: `${sourceId}:teaching:1`, unitIndex: 1, unitKind: 'swami_teaching', author: SWAMI_AUTHOR,
         associatedQuestion: String(question || '').trim(), language: String(language || ''),
         start: span.start, end: span.end, text: span.text, contextComplete: true, contentHash: sha256(span.text),
       });
@@ -146,7 +172,7 @@ function parseAnswerUnits({ text: input, sourceId = '', sourceType = '', questio
     }
     const unitIndex = units.length + 1;
     units.push({
-      sourceId, answerUnitId: `${sourceId}:reply:${unitIndex}`, unitIndex, unitKind: 'swami_reply', author: resolvedAuthor,
+      sourceId, answerUnitId: `${sourceId}:reply:${unitIndex}`, unitIndex, unitKind: 'swami_reply', author: SWAMI_AUTHOR,
       associatedQuestion: lastQuestion, language: String(language || ''),
       start: span.start, end: span.end, text: span.text, contextComplete: true, contentHash: sha256(span.text),
     });
@@ -193,6 +219,28 @@ function stanzaSpans(text, span) {
   return grouped;
 }
 
+function hardCharacterWindows(text, span, maxCharacters) {
+  if (span.end - span.start <= maxCharacters) return [span];
+  const windows = [];
+  const overlap = Math.min(160, Math.floor(maxCharacters / 8));
+  let cursor = span.start;
+  while (cursor < span.end) {
+    let end = Math.min(span.end, cursor + maxCharacters);
+    if (end < span.end) {
+      const candidate = text.slice(cursor + Math.floor(maxCharacters * 0.7), end);
+      const boundary = Math.max(candidate.lastIndexOf(' '), candidate.lastIndexOf('\n'), candidate.lastIndexOf('\t'));
+      if (boundary >= 0) end = cursor + Math.floor(maxCharacters * 0.7) + boundary;
+    }
+    const window = trimRange(text, cursor, end);
+    if (window.text) windows.push(window);
+    if (end >= span.end) break;
+    const next = Math.max(cursor + 1, end - overlap);
+    const leading = text.slice(next, Math.min(end, next + overlap)).search(/\s/u);
+    cursor = leading >= 0 ? next + leading + 1 : next;
+  }
+  return windows;
+}
+
 function nonCitableContextKind(value) {
   const text = String(value || '').trim();
   if (!text) return 'empty';
@@ -206,7 +254,7 @@ function nonCitableContextKind(value) {
 function retrievalWindows(text, citationSpan, maxCharacters = MAX_RETRIEVAL_CHARACTERS) {
   if (citationSpan.text.length <= maxCharacters) return [citationSpan];
   const sentences = sentenceSpans(text, citationSpan.start, citationSpan.end);
-  if (sentences.length <= 1) return [citationSpan];
+  if (sentences.length <= 1) return hardCharacterWindows(text, citationSpan, maxCharacters);
   const windows = [];
   let currentStart = sentences[0].start;
   let currentEnd = sentences[0].end;
@@ -219,7 +267,9 @@ function retrievalWindows(text, citationSpan, maxCharacters = MAX_RETRIEVAL_CHAR
     currentEnd = sentence.end;
   }
   windows.push(trimRange(text, currentStart, currentEnd));
-  return windows.filter((window) => window.text);
+  return windows
+    .filter((window) => window.text)
+    .flatMap((window) => hardCharacterWindows(text, window, maxCharacters));
 }
 
 function buildAnswerPassages(text, units, { maxCharacters = MAX_RETRIEVAL_CHARACTERS } = {}) {
@@ -270,7 +320,11 @@ function buildDiscoveryTexts(record, parsed = null) {
       if (nonCitableContextKind(span.text)) values.push(span.text);
     }
   }
-  return [...new Set(values)].map((text, index) => ({
+  const windows = [...new Set(values)].flatMap((text) => {
+    const span = trimRange(text, 0, text.length);
+    return retrievalWindows(text, span).map((window) => window.text);
+  });
+  return [...new Set(windows)].map((text, index) => ({
     sourceId: String(record.sourceId), discoveryIndex: index, text,
   }));
 }
@@ -280,6 +334,7 @@ module.exports = {
   SWAMI_AUTHOR,
   buildAnswerPassages,
   buildDiscoveryTexts,
+  hardCharacterWindows,
   markerEvents,
   nonCitableContextKind,
   parseAnswerUnits,
