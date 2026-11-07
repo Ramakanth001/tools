@@ -8,6 +8,7 @@ The UI name is **GPT**. It is a separate product from **Search Engine**, **Verba
 
 - Give accurate, developed answers from the local corpus rather than generic pretrained opinions.
 - Understand follow-up questions and preserve conversational context.
+- Route corpus-wide recurring-topic requests through a complete-document clustering task instead of narrow retrieval.
 - Search multiple ways when one semantic query is insufficient.
 - Read complete source answers before selecting the relevant paragraphs.
 - Distinguish direct support from merely related text.
@@ -204,7 +205,7 @@ The allowed context and temperature values are validated on both client and serv
 - Both supported quantizations remain selectable in Settings.
 - EmbeddingGemma is normally kept alive for five minutes.
 - Qwen stays available across the calls within one research turn.
-- The default policy unloads Qwen after every completed or cancelled answer to release RAM.
+- The default keeps Qwen warm for five minutes so conversational follow-ups avoid a full 14B-model reload; users can still select immediate unloading to release RAM.
 - An optional setting keeps Qwen warm for five minutes for faster subsequent turns.
 - Only one Qwen generation is allowed globally at a time; retrieval probes do not require a second Qwen instance.
 - Model changes apply to later turns and the previous model is explicitly unloaded.

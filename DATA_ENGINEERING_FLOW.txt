@@ -1,5 +1,5 @@
 CONTEXT-FAITHFUL SEARCH: END-TO-END DATA ENGINEERING FLOW
-Audit date: 2026-08-22 (Asia/Kolkata)
+Audit date: 2026-08-28 (Asia/Kolkata)
 Workspace: /Users/ramakanth/pers/website/tools
 
 ======================================================================
@@ -51,50 +51,57 @@ template1, universal_qa_index, and universal_qa_source. Only the three
 "universal/spiritual" PostgreSQL data databases are in the production
 application flow.
 
-MySQL was stopped during this audit. Its exact active source database
-name therefore could not be confirmed by SQL. On-disk names suggest
-"universal" and another encoded universal variant, but an on-disk folder
-name is not sufficient evidence to choose one. The importer now discovers
-the one database containing BOTH tblQA and tblDiscourse. If more than one
-matches, it stops and requires UNIVERSAL_MYSQL_DATABASE to be set.
+The live MySQL source was confirmed by SQL as database universal on
+127.0.0.1:3307 (MariaDB 10.4.28). The importer still discovers and verifies
+the database containing BOTH tblQA and tblDiscourse rather than trusting a
+name. If zero or multiple databases match, it stops and requires an explicit
+UNIVERSAL_MYSQL_DATABASE choice.
 
 ======================================================================
-2. CURRENT LIVE STATE (IMPORTANT BEFORE REBUILDING)
+2. CURRENT VERIFIED LIVE STATE
 ======================================================================
 
 MySQL
 
-  Status during audit: stopped; 127.0.0.1:3306 refused connections.
-  Consequence: validation/import cannot run until MySQL starts.
-  Source database name: unresolved until the server starts and the two
-  authoritative tables can be inspected.
+  Status: running and queryable at 127.0.0.1:3307.
+  Database: universal.
+  tblQA: 427 total rows; 419 active rows imported.
+  tblDiscourse: 5,710 total rows; 5,591 active rows imported.
+  Active source documents: 6,010.
 
 universal_qa_source
 
   Server: PostgreSQL 127.0.0.1:5433
   Schema: public
-  Current tables: qa_records only
-  Current rows: 19,777
-  Current approximate database/table footprint observed: 45 MB
-  Missing required v5 table: public.corpus_documents
-
-  This means the faithful one-row-per-original-document import has NOT yet
-  been loaded into the live source projection. qa_records is the legacy
-  chunk projection and must not be selected for a v5 rebuild.
+  Current tables: corpus_documents and compatibility qa_records.
+  corpus_documents: 6,010 rows (419 Q&A; 5,591 discourse).
+  qa_records: 19,776 current compatibility chunks.
+  Approximate database size observed: 104 MB.
+  Authors/defaults: 5,892 documents resolve to Swami; 118 contain an
+  explicit non-Swami leading byline.
+  Parser review: 121 documents are ambiguous and excluded from citations.
+  The v5 source mapping is public.corpus_documents; qa_records is never a
+  valid role-aware rebuild source.
 
 universal_qa_index
 
   Server: PostgreSQL 127.0.0.1:5433
   Schema: semantic_qa
-  Current active retrieval contract: passage-v4
-  Current records: 19,777
-  Current passages: 186,982
-  Approximate database size observed: 1,964 MB
-  Current tables: corpus, records, passages, sync_runs
-  Missing v5 tables: answer_units, discovery_passages, source_aliases
+  Active retrieval contract: answer-unit-v5.
+  records: 6,010 one-document snapshots.
+  answer_units: 11,337 complete citable Swami units.
+  passages: 73,587 citable answer retrieval windows.
+  discovery_passages: 21,302 non-citable title/question/context windows.
+  source_aliases: 23,196 locators (canonical IDs plus every distinct legacy
+  locator, including the previously orphaned discourse:4273:009).
+  Current tables: corpus, records, answer_units, passages,
+  discovery_passages, source_aliases, and sync_runs.
+  Rollback tables: records_v4_rollback and passages_v4_rollback.
+  Database size after promotion with retained v4 rollback: 3,114 MB.
 
-  Ordinary v4 search remains available. Role-aware v5 Deep Search is not
-  ready until a successful full v5 rebuild is atomically promoted.
+  The full v5 rebuild and a no-change incremental sync both completed. The
+  incremental scan processed 6,010 documents, found 0 changes, and made no
+  embedding writes.
 
 spiritual_gpt
 
@@ -105,19 +112,24 @@ spiritual_gpt
   turns
   Rows observed: 4 conversations, 10 messages, 5 turns, 31 evidence rows
 
-  This database is healthy as a chat/audit store. It does not compensate
-  for the currently incomplete v5 corpus index.
+  This database is healthy as a chat/audit store and remains independent of
+  the complete active v5 corpus index.
 
 Bottom line:
 
-  DO NOT trigger the role-aware rebuild from qa_records. First start MySQL,
-  validate/import corpus_documents, then perform the first full v5 rebuild.
+  The source projection and v5 index are live. Search Engine API health and
+  index status pass. GPT's read-only role can read all six v5 contract tables
+  with default_transaction_read_only = on.
 
 ======================================================================
 3. DATABASES, SCHEMAS, TABLES, AND PURPOSES
 ======================================================================
 
 3.1 MySQL source database (authoritative editorial source)
+
+  Verified endpoint: MariaDB/MySQL 127.0.0.1:3307, database universal.
+  The login secret is process-only and is not written to repository files,
+  browser storage, PostgreSQL, or this report.
 
 Authoritative tables:
 
@@ -139,12 +151,18 @@ Authoritative tables:
     - recordDate / multimediaFilename: provenance metadata
     - activeStatus: only activeStatus = 1 is imported
 
+  Neither table has an author column. Explicit leading [By ...] text is
+  retained as a byline when present. With no such byline, the author
+  defaults to Swami. tblQA.answerBySwami is always a Swami reply. The
+  comments, readoutTextToSpeech, and image fields are not teaching fields
+  and are not copied into the citable corpus.
+
 Rules for adding content:
 
   - Q&A goes into tblQA. Put the complete answer in answerBySwami.
   - Standalone preaching goes into tblDiscourse. Put the complete teaching
     in textDC.
-  - A blank/missing author defaults to Swami.
+  - No explicit leading byline defaults to Swami.
   - A discourse with a title and no explicit speaker marker is Swami's
     teaching, even when the title looks like a question.
   - Never add permanent source material directly to PostgreSQL. A later
@@ -338,6 +356,22 @@ The screenshot configuration that used universal_qa_source with
 semantic_qa_reader in GPT was wrong: that points GPT at the source
 projection, not the vector index. Exact stale instances of that pairing
 are now migrated automatically to the correct index database/role.
+
+There is no MySQL replication stream, PostgreSQL foreign-data wrapper,
+cross-database foreign key, trigger, or hidden database link between these
+stores. The links are application-level and explicit:
+
+  - the Node importer copies a complete validated snapshot from MySQL to
+    universal_qa_source;
+  - the Search Engine synchronization manager reads that projection and
+    writes universal_qa_index;
+  - Search Engine and GPT resolve the same source_id / answer_unit_id /
+    offset contract in universal_qa_index;
+  - GPT writes only its own conversation/evidence audit rows.
+
+Nothing moves automatically merely because a MySQL row was inserted. The
+operator must run validation, projection import, and then index sync. There
+is currently no scheduled CDC daemon.
 
 ======================================================================
 5. TRANSFORMATION FLOW: MYSQL TO POSTGRESQL SOURCE
@@ -572,14 +606,15 @@ never feed back into corpus retrieval or embeddings.
 Finding 1: Wrong/assumed MySQL database default
 
   Problem:
-    The importer silently defaulted to universal_vector_source, while the
-    stopped machine's on-disk MySQL names do not confirm that database.
+    The importer previously assumed an obsolete database/port instead of
+    validating the live source.
 
   Fix:
     The importer now connects without assuming a database and discovers the
     single database containing tblQA and tblDiscourse. An explicit configured
     database is verified. Zero/multiple matches stop with a clear error.
-    Validation output includes sourceMysqlDatabase.
+    Validation output includes sourceMysqlDatabase. The verified local
+    default port is 3307; the password remains process-only.
 
 Finding 2: Catalog discovery could erase the Universal preset
 
@@ -591,6 +626,8 @@ Finding 2: Catalog discovery could erase the Universal preset
   Fix:
     Discovery now preserves every valid selected column. Fallback detection
     prefers title and display_text, and keeps valid metadata/group/order.
+    Persisted Search Engine settings that still point universal_qa_source at
+    qa_records automatically migrate to corpus_documents.
 
 Finding 3: Legacy qa_records could be sent into a v5 rebuild
 
@@ -603,7 +640,78 @@ Finding 3: Legacy qa_records could be sent into a v5 rebuild
     universal_qa_source.public.qa_records is now rejected before any job or
     embedding work begins. It explicitly requires public.corpus_documents.
 
-Finding 4: GPT was visibly pointed at the source database
+Finding 4: Question markers incorrectly excluded unmarked Swami preaching
+
+  Problem:
+    A question-like title or introductory question was treated as proof of
+    an ambiguous speaker even when there was no competing speaker name.
+
+  Fix:
+    A discourse without an explicit different speaker defaults to a complete
+    Swami teaching. A leading devotee question followed by an unmarked answer
+    is discovery context plus a citable Swami reply. Rhetorical questions stay
+    inside Swami's teaching.
+
+Finding 5: Real reply labels were not fully recognized
+
+  Problem:
+    Original Message/New Reply headers, bracketed asked/reply introductions,
+    "Swami replied" without a colon, and several actual corpus variants could
+    lose their role boundary.
+
+  Fix:
+    The English/Malayalam/Telugu parser now recognizes the observed variants,
+    separates devotee questions from Swami replies, and assigns Swami to every
+    citable reply unit independently of document byline.
+
+Finding 6: Oversized logical units could exceed embedding context
+
+  Problem:
+    A single very long sentence or discovery field could exceed the local
+    embedding model's input context.
+
+  Fix:
+    Retrieval windows are bounded to 1,600 JavaScript characters with a small
+    overlap. Citation offsets still expand to the exact original logical unit;
+    no source wording is rewritten.
+
+Finding 7: PostgreSQL and JavaScript counted Unicode offsets differently
+
+  Problem:
+    PostgreSQL substring counts Unicode code points; JavaScript slice counts
+    UTF-16 code units. Emoji/supplementary characters caused 711 exact passages
+    to be falsely rejected after an otherwise successful rebuild.
+
+  Fix:
+    SQL narrows suspected mismatches and JavaScript performs the authoritative
+    display_text.slice(start,end) comparison. A disposable-database test proves
+    Unicode acceptance, genuine alteration rejection, and atomic rollback.
+
+Finding 8: Historical chunk aliases could disappear
+
+  Problem:
+    A changed old chunk boundary left discourse:4273:009 only in v4. Rebuilding
+    aliases solely from today's compatibility chunks would break that locator.
+
+  Fix:
+    First promotion imports every v4 locator. Later full and incremental syncs
+    carry existing aliases forward when the canonical document still exists.
+    The live source_aliases table resolves the orphaned locator.
+
+Finding 9: A small requested result count reduced discovery recall
+
+  Problem:
+    topK=5 indirectly limited the candidate pool, so an exact source question
+    could be absent even though topK=20 found it at rank 1. The benchmark also
+    compared canonical v5 IDs against old chunk IDs.
+
+  Fix:
+    Semantic search now fuses at least 200 bounded candidates regardless of
+    visible topK. Evaluation resolves expected legacy IDs through source_aliases.
+    The maintained 19-case relevance benchmark now has recall@5=1.0,
+    top-1 accuracy=1.0, and false-accept rate=0.
+
+Finding 10: GPT was visibly pointed at the source database
 
   Problem:
     universal_qa_source + semantic_qa_reader is not a corpus-index connection.
@@ -612,7 +720,7 @@ Finding 4: GPT was visibly pointed at the source database
     That exact stale pairing now migrates to universal_qa_index +
     spiritual_gpt_index_reader in both browser and server settings.
 
-Finding 5: GPT setup could appear successful against v4
+Finding 11: GPT setup could appear successful against v4
 
   Problem:
     Guided setup checked/granted only corpus, records, and passages, while
@@ -624,26 +732,58 @@ Finding 5: GPT setup could appear successful against v4
     answer-unit-v5 version. Runtime corpus inspection also checks discovery
     table existence/SELECT privilege.
 
-Verification after fixes:
+Finding 12: Fast verbatim display could overlook an exact Q&A reply
 
-  Search Engine: 112 tests passed, 1 environment-gated test skipped.
-  GPT:            78 tests passed, 0 skipped.
-  The skipped Search test is explicitly gated on live PostgreSQL/pgvector/
-  Ollama connectivity; it is not a failed assertion.
+  Problem:
+    The main result correctly ranked an exact structured Q&A first, but the
+    separate fast Verbatim Selection card sorted passages only by cosine and
+    could display weaker neighboring teachings ahead of that direct reply.
 
-These are code-level fixes. They do not claim that live data has already
-been migrated. The live source/index remain qa_records + passage-v4 until
-the operator sequence below completes.
+  Fix:
+    A verified exact Q&A discovery match now places its paired citable Swami
+    passage first and labels the outcome direct. A live qa:101 replay confirmed
+    that the exact reply is Evidence 1; its source text and offsets remain
+    unchanged. Paraphrased/neighbor questions still use related_teachings.
+
+Live verification after fixes:
+
+  - v5 full rebuild completed and promoted atomically.
+  - no-change incremental sync completed with changed=0.
+  - all 11,337 answer units and 73,587 passages reproduce exact stored slices.
+  - all answer-unit hashes match; invalid/orphan counts are zero.
+  - maintained relevance benchmark: 19/19 passed.
+  - all 419 active structured Q&A source questions were replayed: 418/419
+    resolve to the correct source at both rank 1 and rank 5 (99.7613%). The
+    remaining qa:433 input is a pathological copied social-media page rather
+    than a clean question; no unrelated answer was promoted as a strong match.
+  - mandatory live Q8 promotion replay passed in 24 minutes 15 seconds. It
+    returned related_teachings, cited the complete verified Swami reply from
+    discourse:2296, read discourse:5495 and the complete discourse:896 story,
+    and excluded discourse:4071 plus the specified orphan fragments.
+  - the Q8 replay scanned 73,587 passages, read 100 sources/answer units,
+    adjudicated 18 bounded complete units in three model batches, rejected 10
+    candidates, resolved 8 disagreements, and verified all 8 final passages.
+  - Search Engine automated suite: 131 passed, 0 failed, 1 environment-gated
+    test skipped. Search Engine production build passes.
+  - GPT code was not changed for this Search Engine rebuild. Its unchanged
+    regression suite passes 78/78 and its production build passes.
+  - live UI diagnostics report Ready for source PostgreSQL, index PostgreSQL,
+    corpus mapping, Ollama, and Qwen. The Index screen reports 6,010 records
+    and 73,587 answer passages. A live exact-question search returned qa:101
+    first and displayed its complete unchanged Swami reply.
 
 ======================================================================
-10. SAFE OPERATOR SEQUENCE FROM THE CURRENT STATE
+10. SAFE OPERATOR SEQUENCE FOR FUTURE SOURCE UPDATES
 ======================================================================
 
-1. Start the local XAMPP MySQL service.
+1. Confirm the MariaDB/MySQL service that owns port 3307 is running.
 
-2. Validate the projection without writing:
+2. From the Search Engine directory, put the MySQL password in memory only
+   and validate without writing:
 
      cd /Users/ramakanth/pers/website/tools/semantic-qa
+     read -s "UNIVERSAL_MYSQL_PASSWORD?MySQL password: "
+     export UNIVERSAL_MYSQL_PASSWORD
      npm run import:universal:check
 
    Read sourceMysqlDatabase in the report. If the command reports multiple
@@ -663,9 +803,27 @@ the operator sequence below completes.
 4. Only when validation is acceptable, run the projection import:
 
      npm run import:universal
+     unset UNIVERSAL_MYSQL_PASSWORD
 
-5. Open Search Engine -> Settings and load the Universal corpus preset.
-   Verify:
+5. Run the exact v5 structural preflight:
+
+     npm run preflight:universal:v5
+
+6. Run the incremental index sync:
+
+     npm run sync:universal:v5
+
+   It rebuilds every unit/passage/alias for each changed document, removes
+   deleted documents, and keeps embeddings for unchanged hashes.
+
+7. Review the sync report's processed, changed, removed/error, ambiguity,
+   passage, and discovery counts. Run the relevance checks appropriate to the
+   changed material.
+
+Search Engine UI equivalent (no separate manual connection is required):
+
+  Open Search Engine -> Setup and click "Load universal Q&A". Then open
+  Search Engine -> Settings and verify:
 
    Source PostgreSQL:
      Database: universal_qa_source
@@ -679,22 +837,23 @@ the operator sequence below completes.
      Answer: display_text
      Group: source_group
 
-   "Test and discover catalog" should now preserve this mapping.
-
-6. Verify the separate index connection:
+  "Test and discover catalog" preserves this mapping. Verify the separate
+  index connection:
 
      Database: universal_qa_index
      User: semantic_qa_indexer
 
-7. Run FULL REBUILD for the first v5 promotion. Do not choose incremental
-   while the active index contract is passage-v4.
+Full rebuild is now only needed when the embedding model/digest/dimension,
+embedding format, parser/index schema, or retrieval contract changes:
 
-8. Wait for completion. Confirm the active contract reports answer-unit-v5
-   and the v5 tables/counts are present. Run promotion evaluation and a live
-   Q8 Deep Search replay before depending on it.
+     npm run rebuild:universal:v5
 
-9. Open GPT Setup only after the Search Engine v5 rebuild succeeds. Refresh
-   status and verify:
+The live index remains readable until atomic promotion. Do not use
+public.qa_records for a role-aware rebuild.
+
+GPT is already linked read-only. Its Setup screen intentionally does not show
+Source PostgreSQL or Corpus mapping controls. Refresh status there only to
+verify:
 
    Read-only corpus index:
      universal_qa_index / spiritual_gpt_index_reader
@@ -702,14 +861,15 @@ the operator sequence below completes.
    Conversation database:
      spiritual_gpt / spiritual_gpt_app
 
-10. For later source updates, use:
+End-to-end operator chain:
 
-      Update MySQL
-        -> import:universal:check
-        -> import:universal
-        -> Search Engine Incremental sync
-        -> review changed/deleted document report
-        -> run relevant retrieval checks
+  Update MySQL universal
+    -> import:universal:check
+    -> import:universal
+    -> preflight:universal:v5
+    -> sync:universal:v5
+    -> review changed/deleted/ambiguous report
+    -> run relevant retrieval checks
 
 The source projection import is full/atomic each time. The expensive vector
 step is incremental: unchanged document hashes retain their existing vectors.

@@ -46,7 +46,7 @@ EmbeddingGemma produces 768-dimensional retrieval vectors in the current install
 flowchart LR
     subgraph Legacy["Legacy data"]
         SQL["universal.sql"]
-        MYSQL["MySQL: universal_vector_source"]
+        MYSQL["MySQL: universal"]
     end
 
     subgraph Source["Read-only source projection"]
@@ -100,7 +100,7 @@ This separation prevents the retrieval tool from writing into the source corpus 
 
 ## 4. Data Preparation from MySQL
 
-The legacy dump is first imported into MySQL as `universal_vector_source`. The application does not search MySQL directly. The importer at `scripts/importUniversalQa.js` produces a stable PostgreSQL projection.
+The authoritative legacy data is running in MySQL as `universal` on the verified local port `3307`. The application does not search MySQL directly. The importer at `scripts/importUniversalQa.js` produces a stable PostgreSQL projection.
 
 ### `tblQA` mapping
 
@@ -125,6 +125,8 @@ The legacy dump is first imported into MySQL as `universal_vector_source`. The a
 | `masterId`, `recordDate` | Source metadata |
 
 `tblDiscourse` may contain several explicit asked/replied pairs or one unmarked teaching. The role parser recognizes English, Malayalam, and Telugu ask/reply and speaker labels. Explicit transitions create separate `devotee_question` and `swami_reply` units. Without an explicit transition, the body is Swami teaching even when its title is written as a question. Rhetorical questions stay inside the current Swami unit. A speaker-marked document whose boundaries cannot be resolved is excluded from citations and reported for review.
+
+Neither live MySQL table has an author column. A leading source byline such as `[By ...]` is retained when present; otherwise the document defaults to Swami. `tblQA.answerBySwami` is always treated as a Swami reply. The legacy `comments`, text-to-speech, and image fields are not teaching text and are not projected into the citable corpus.
 
 ### Cleanup
 

@@ -209,9 +209,11 @@ The isolated local configuration is:
 | Imported source | `127.0.0.1` | `5433` | `universal_qa_source` | `semantic_qa_reader` | empty | `disable` |
 | Imported vector index | `127.0.0.1` | `5433` | `universal_qa_index` | `semantic_qa_indexer` | empty | `disable` |
 
-First run the read-only validation. It reports empty fields, duplicate identities, parsed roles, ambiguous boundaries, hashes, citable units, and proposed document count without writing:
+The verified local MySQL endpoint is `127.0.0.1:3307`, database `universal`. The password is intentionally never stored in this repository or browser settings. In a terminal, securely place it in the process environment, then run the read-only validation. It reports empty fields, duplicate identities, parsed roles, ambiguous boundaries, hashes, citable units, and proposed document count without writing:
 
 ```bash
+read -s "UNIVERSAL_MYSQL_PASSWORD?MySQL password: "
+export UNIVERSAL_MYSQL_PASSWORD
 npm --prefix ./semantic-qa run import:universal:check
 ```
 
@@ -219,11 +221,12 @@ Then run the repeatable projection:
 
 ```bash
 npm --prefix ./semantic-qa run import:universal
+unset UNIVERSAL_MYSQL_PASSWORD
 ```
 
 The optional connection environment variables are `UNIVERSAL_MYSQL_HOST`, `UNIVERSAL_MYSQL_PORT`, `UNIVERSAL_MYSQL_USER`, `UNIVERSAL_MYSQL_PASSWORD`, `UNIVERSAL_MYSQL_DATABASE`, `UNIVERSAL_PG_HOST`, `UNIVERSAL_PG_PORT`, `UNIVERSAL_PG_USER`, `UNIVERSAL_PG_PASSWORD`, `UNIVERSAL_PG_DATABASE`, and `UNIVERSAL_INCLUDE_DISCOURSE`.
 
-To add a Q&A, create an active `tblQA` row with a stable ID, `title`, optional `briefQuestion`/`questionBk`, and the complete unchanged answer in `answerBySwami`. To add standalone preaching, create an active `tblDiscourse` row with the topic in `title` and the complete unchanged teaching in `textDC`. Supply `masterId`, `masterLanguage`, date, author, and media metadata where available; a blank author means Swami.
+To add a Q&A, create an active `tblQA` row with a stable ID, `title`, optional `briefQuestion`/`questionBk`, and the complete unchanged answer in `answerBySwami`. To add standalone preaching, create an active `tblDiscourse` row with the topic in `title` and the complete unchanged teaching in `textDC`. Supply `masterId`, `masterLanguage`, date, and media metadata where available. The actual MySQL tables have no separate author column: absence of an explicit leading `[By ...]` byline means Swami, exactly as required. Do not add a byline merely to mark ordinary Swami teaching.
 
 The operational flow is:
 
@@ -231,11 +234,23 @@ The operational flow is:
 Update MySQL
 -> import:universal:check
 -> import:universal
--> Incremental sync
+-> sync:universal:v5
 -> review the changed-document and ambiguity report
 ```
 
-The one-time migration from `passage-v4` to `answer-unit-v5` must use **Full rebuild** because the index structure changed. After v5 is active, Incremental sync rebuilds every answer unit, citable passage, discovery passage, and alias for a changed document while retaining embeddings for unchanged documents. No document has a passage-count cutoff; long discourses are indexed completely.
+Before any rebuild, run the exact structural preflight:
+
+```bash
+npm --prefix ./semantic-qa run preflight:universal:v5
+```
+
+The one-time migration from `passage-v4` to `answer-unit-v5` must use **Full rebuild** because the index structure changed. The audited local rebuild can be run without manual field mapping:
+
+```bash
+npm --prefix ./semantic-qa run rebuild:universal:v5
+```
+
+After v5 is active, Incremental sync rebuilds every answer unit, citable passage, discovery passage, and alias for a changed document while retaining embeddings for unchanged documents. Historical citation aliases are carried forward, including aliases produced by older chunk boundaries. No document has a passage-count cutoff; long discourses are indexed completely.
 
 ## Run the Tool
 
@@ -270,9 +285,17 @@ Open `http://localhost:5173/tools/semantic-qa`.
 
 ## First-Time Setup
 
-1. Open **Setup** and run diagnostics.
-2. Confirm that Ollama and `embeddinggemma` are ready.
-3. Open **Settings**.
+These controls are in the **Search Engine** tool, not the separate GPT Setup screen.
+
+The audited local Universal corpus is already active as `answer-unit-v5` with
+6,010 records and 73,587 citable answer passages. Do not run another full
+rebuild merely to start using it; open **Index**, click **Refresh status**, and
+use **Search** when the state is **Ready**. The steps below are for a new
+machine or a deliberately replaced index.
+
+1. Open Search Engine -> **Setup**, click **Load universal Q&A**, and run diagnostics.
+2. Confirm that Ollama, `embeddinggemma`, and Qwen are ready.
+3. Open Search Engine -> **Settings**.
 4. Enter the source PostgreSQL connection and click **Test and discover catalog**.
 5. Select the source schema/table and map the unique ID, question, and answer columns.
 6. Optionally select metadata. Map document group and chunk order only when several rows are ordered chunks of one original document; never use a category or topic as the group.
