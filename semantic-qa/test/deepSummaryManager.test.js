@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { collectCandidateEvidence, createDeepSummaryManager } = require('../src/deepSummaryManager');
+const {
+  augmentDeepSearchProbes,
+  collectCandidateEvidence,
+  createDeepSummaryManager,
+  fuseMatches,
+  isLiteralDirectQuestionMatch,
+  selectAdjudicationUnits,
+} = require('../src/deepSummaryManager');
 const { sha256 } = require('../src/corpusStructure');
 
 function match(sourceId, text, score = 0.7) {
@@ -27,14 +34,14 @@ function match(sourceId, text, score = 0.7) {
   };
 }
 
-function unit(sourceId, text) {
+function unit(sourceId, text, associatedQuestion = '') {
   return {
     sourceId,
     answerUnitId: `${sourceId}:teaching:1`,
     title: `Title ${sourceId}`,
     author: 'Swami',
     unitKind: 'swami_teaching',
-    associatedQuestion: '',
+    associatedQuestion,
     start: 0,
     end: text.length,
     text,
@@ -78,6 +85,50 @@ test('candidate collection carries exact citation spans and role metadata', () =
   assert.equal(collected.evidence[0].author, 'Swami');
 });
 
+test('career Deep Search adds focused fruit, interview, and peaceful-life probes', () => {
+  const probes = augmentDeepSearchProbes(
+    'Can I ask God for a promotion in my job?',
+    ['What governs prayer for professional success?'],
+  );
+  assert.equal(probes[0], 'Can I ask God for a promotion in my job?');
+  assert.ok(probes.some((probe) => /job interview/u.test(probe)));
+  assert.ok(probes.some((probe) => /practical worldly fruit/u.test(probe)));
+  assert.ok(probes.some((probe) => /peaceful worldly life/u.test(probe)));
+  assert.ok(probes.length <= 6);
+});
+
+test('multi-probe fusion reserves top candidates from an otherwise outvoted probe', () => {
+  const fused = fuseMatches([
+    [match('common', 'Common'), match('probe-specific', 'Specific'), match('tail-a', 'Tail A')],
+    [match('common', 'Common'), match('other', 'Other'), match('tail-b', 'Tail B')],
+  ], 4);
+  assert.ok(fused.some((item) => item.sourceId === 'probe-specific'));
+  assert.equal(fused.find((item) => item.sourceId === 'probe-specific').bestProbeRank, 2);
+});
+
+test('bounded adjudication selects only retrieved complete units within its character budget', () => {
+  const units = [unit('first', 'a'.repeat(2000)), unit('second', 'b'.repeat(3000)), unit('unretrieved', 'c')];
+  const evidence = [
+    { answerUnitId: 'first:teaching:1', bestProbeRank: 1, matchedProbeCount: 2, relevanceScore: 0.8 },
+    { answerUnitId: 'second:teaching:1', bestProbeRank: 2, matchedProbeCount: 1, relevanceScore: 0.7 },
+  ];
+  const selected = selectAdjudicationUnits(units, evidence, 3000);
+  assert.deepEqual(selected.units.map((item) => item.sourceId), ['first']);
+  assert.equal(selected.candidates, 2);
+  assert.ok(selected.characters <= 3000);
+});
+
+test('literal direct status rejects a nearby interview teaching for a promotion question', () => {
+  assert.equal(isLiteralDirectQuestionMatch(
+    'I want promotion in my job can I ask God to give me that boon?',
+    'What should a devotee pray before attending an interview, test, or medical surgery?',
+  ), false);
+  assert.equal(isLiteralDirectQuestionMatch(
+    'Can I ask God for a job promotion?',
+    'Can I ask God for a job promotion?',
+  ), true);
+});
+
 test('Deep Search uses multiple probes, two adjudications, and returns only verbatim related teachings', async () => {
   const teaching = 'Do your duty without attachment.';
   const calls = { probes: [], reviewers: [] };
@@ -100,7 +151,8 @@ test('Deep Search uses multiple probes, two adjudications, and returns only verb
   assert.equal(completed.result.answerStatus, 'related_teachings');
   assert.deepEqual(completed.result.paragraphs.map((item) => item.text), [teaching]);
   assert.equal(completed.result.evidence[0].text, teaching);
-  assert.equal(completed.result.audit.probes, 4);
+  assert.equal(completed.result.audit.probes, 6);
+  assert.equal(calls.probes.length, 6);
   assert.deepEqual(calls.reviewers, [1, 2]);
   assert.equal(completed.parallelism, 1);
   assert.equal(completed.estimatedTotalSeconds, null);
@@ -111,11 +163,29 @@ test('a direct classification produces the direct outcome without generated teac
   const manager = managerFor('direct_answer');
   const job = manager.start({
     question: 'Is promotion spiritual progress?', model: 'qwen3:14b-q8_0', baseUrl: 'http://127.0.0.1:11434',
-    matches: [match('discourse:2', teaching)], readAnswerUnits: async () => [unit('discourse:2', teaching)],
+    matches: [match('discourse:2', teaching)],
+    readAnswerUnits: async () => [unit('discourse:2', teaching, 'Is promotion spiritual progress?')],
   });
   const completed = await waitForTerminal(manager, job.id);
   assert.equal(completed.result.answerStatus, 'direct');
   assert.equal(completed.result.paragraphs[0].text, teaching);
+});
+
+test('a model direct classification becomes related when the stored question is not literal', async () => {
+  const teaching = 'Love to God without aspiration for any fruit can come only through strong effort.';
+  const manager = managerFor('direct_answer');
+  const job = manager.start({
+    question: 'Can I ask God for a job promotion?', model: 'qwen3:14b-q8_0', baseUrl: 'http://127.0.0.1:11434',
+    matches: [match('discourse:2296', teaching)],
+    readAnswerUnits: async () => [unit(
+      'discourse:2296',
+      teaching,
+      'What should a devotee pray before an interview, test, or medical surgery?',
+    )],
+  });
+  const completed = await waitForTerminal(manager, job.id);
+  assert.equal(completed.result.answerStatus, 'related_teachings');
+  assert.equal(completed.result.evidence[0].classification, 'governing_principle');
 });
 
 test('disagreements use a third adjudication and irrelevant evidence can be discarded', async () => {

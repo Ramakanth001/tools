@@ -11,6 +11,7 @@ const DEFAULT_DEEP_REQUEST_TIMEOUT_MS = 600000;
 const MAX_DEEP_REQUEST_TIMEOUT_MS = 600000;
 const DEEP_JOB_TIMEOUT_MS = 45 * 60 * 1000;
 const ADJUDICATION_BATCH_CHARACTERS = 42000;
+const MAX_ADJUDICATION_CHARACTERS = 84000;
 const MODEL_CALL_ATTEMPTS = 2;
 
 const DEEP_PHASE_DEFINITIONS = [
@@ -24,6 +25,30 @@ const DEEP_PHASE_DEFINITIONS = [
 
 function normalizedText(value) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+}
+
+const DIRECT_MATCH_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'can', 'could', 'do', 'does', 'for', 'from',
+  'give', 'how', 'i', 'in', 'is', 'it', 'me', 'my', 'of', 'on', 'or', 'please', 'should',
+  'that', 'the', 'this', 'to', 'we', 'what', 'when', 'why', 'with', 'you', 'your',
+]);
+
+function directMatchTokens(value) {
+  return normalizedText(value).match(/[\p{L}\p{N}]+/gu)?.filter((token) => (
+    token.length >= 3 && !DIRECT_MATCH_STOP_WORDS.has(token)
+  )) || [];
+}
+
+function isLiteralDirectQuestionMatch(question, sourceQuestion) {
+  const queryText = normalizedText(question);
+  const candidateText = normalizedText(sourceQuestion);
+  if (!queryText || !candidateText) return false;
+  if (queryText === candidateText) return true;
+  const queryTokens = [...new Set(directMatchTokens(queryText))];
+  const candidateTokens = new Set(directMatchTokens(candidateText));
+  if (queryTokens.length < 2) return false;
+  const overlap = queryTokens.filter((token) => candidateTokens.has(token)).length;
+  return overlap / queryTokens.length >= 0.75;
 }
 
 function phasePercent(phase) {
@@ -84,9 +109,17 @@ function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, 
   const evidence = [];
   const seen = new Set();
   const candidateLimit = Math.max(1, Math.min(MAX_DEEP_RECORDS, Math.trunc(Number(maxRecords)) || DEFAULT_DEEP_RECORDS));
-  for (const match of Array.isArray(matches) ? matches : []) {
-    const passages = Array.isArray(match.matchedPassages) ? match.matchedPassages : [];
-    for (const passage of passages) {
+  const sourceMatches = Array.isArray(matches) ? matches : [];
+  const availablePassages = sourceMatches.reduce((total, match) => (
+    total + (Array.isArray(match.matchedPassages) ? match.matchedPassages.length : 0)
+  ), 0);
+  const maximumPassages = sourceMatches.reduce((maximum, match) => (
+    Math.max(maximum, Array.isArray(match.matchedPassages) ? match.matchedPassages.length : 0)
+  ), 0);
+  for (let passageIndex = 0; passageIndex < maximumPassages; passageIndex += 1) {
+    for (const match of sourceMatches) {
+      const passage = Array.isArray(match.matchedPassages) ? match.matchedPassages[passageIndex] : null;
+      if (!passage) continue;
       const exactText = String(passage.citationText || passage.text || '');
       const key = passage.answerUnitId || `${match.sourceId}:${passage.citationStart ?? passage.start}:${passage.citationEnd ?? passage.end}:${normalizedText(exactText)}`;
       if (!exactText.trim() || seen.has(key)) continue;
@@ -107,6 +140,8 @@ function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, 
         relevanceScore: Number(match.relevanceScore ?? match.searchScore ?? match.similarity) || 0,
         semanticSimilarity: Number(passage.semanticSimilarity ?? match.similarity) || 0,
         matchChannels: match.matchChannels || passage.matchChannels || [],
+        bestProbeRank: Number(match.bestProbeRank) || Number.POSITIVE_INFINITY,
+        matchedProbeCount: Number(match.matchedProbeCount) || 0,
       });
       if (evidence.length >= candidateLimit) break;
     }
@@ -115,7 +150,7 @@ function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, 
   return {
     evidence,
     candidateLimit,
-    candidatesTruncated: evidence.length >= candidateLimit && evidence.length < (Array.isArray(matches) ? matches.length : 0),
+    candidatesTruncated: evidence.length >= candidateLimit && evidence.length < availablePassages,
     retrievedCandidates: Array.isArray(matches) ? matches.length : 0,
     exhaustive: Boolean(retrievalCoverage.exhaustive),
     scannedPassages: Number(retrievalCoverage.scannedPassages) || 0,
@@ -124,21 +159,49 @@ function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, 
 
 function fuseMatches(resultSets, maximum) {
   const fused = new Map();
+  const reserved = new Set();
+  const perProbeQuota = Math.max(1, Math.floor(maximum / Math.max(1, resultSets.length)));
   for (const matches of resultSets) {
     for (let rank = 0; rank < matches.length; rank += 1) {
       const match = matches[rank];
       const key = String(match.sourceId);
-      const existing = fused.get(key) || { match, score: 0, ranks: 0 };
+      if (rank < perProbeQuota) reserved.add(key);
+      const existing = fused.get(key) || { match, score: 0, ranks: 0, bestProbeRank: Number.POSITIVE_INFINITY };
       existing.score += 1 / (60 + rank + 1);
       existing.ranks += 1;
+      existing.bestProbeRank = Math.min(existing.bestProbeRank, rank + 1);
       if (Number(match.relevanceScore || 0) > Number(existing.match.relevanceScore || 0)) existing.match = match;
       fused.set(key, existing);
     }
   }
-  return [...fused.values()]
-    .sort((left, right) => right.score - left.score || right.ranks - left.ranks || String(left.match.sourceId).localeCompare(String(right.match.sourceId)))
-    .slice(0, maximum)
-    .map(({ match, score, ranks }) => ({ ...match, fusedProbeScore: score, matchedProbeCount: ranks }));
+  const sorted = [...fused.values()].sort((left, right) => (
+    right.score - left.score || right.ranks - left.ranks ||
+    String(left.match.sourceId).localeCompare(String(right.match.sourceId))
+  ));
+  return [
+    ...sorted.filter((entry) => reserved.has(String(entry.match.sourceId))),
+    ...sorted.filter((entry) => !reserved.has(String(entry.match.sourceId))),
+  ].slice(0, maximum).map(({ match, score, ranks, bestProbeRank }) => ({
+    ...match,
+    fusedProbeScore: score,
+    matchedProbeCount: ranks,
+    bestProbeRank,
+  }));
+}
+
+function augmentDeepSearchProbes(question, planned) {
+  const exactQuestion = String(question || '').trim();
+  const probes = [exactQuestion];
+  if (/\b(?:promotion|career|job|interview|workplace|professional)\b/iu.test(exactQuestion)) {
+    probes.push(
+      'Can a devotee pray to God for success in a job interview, competition, test, or career promotion?',
+      'How can a devotee love God without aspiring for a practical worldly fruit or boon in return?',
+      'Can a devotee ask God for a peaceful worldly life or protection from difficulties at work?',
+      'Does God grant worldly benefits and fulfill desires requested in prayer?',
+    );
+  }
+  probes.push(...(Array.isArray(planned) ? planned : []));
+  return [...new Set(probes.map((value) => String(value || '').trim()).filter(Boolean))].slice(0, 6);
 }
 
 function batchesByCharacters(units, maximumCharacters = ADJUDICATION_BATCH_CHARACTERS) {
@@ -169,6 +232,56 @@ function fallbackUnits(evidence) {
     end: item.text.length,
     contentHash: sha256(item.text),
   }));
+}
+
+function selectAdjudicationUnits(units, evidence, maximumCharacters = MAX_ADJUDICATION_CHARACTERS) {
+  const candidates = new Map();
+  for (const item of Array.isArray(evidence) ? evidence : []) {
+    if (!item.answerUnitId) continue;
+    const key = String(item.answerUnitId);
+    const current = candidates.get(key) || {
+      bestProbeRank: Number.POSITIVE_INFINITY,
+      matchedProbeCount: 0,
+      relevanceScore: 0,
+      semanticSimilarity: 0,
+    };
+    current.bestProbeRank = Math.min(current.bestProbeRank, Number(item.bestProbeRank) || Number.POSITIVE_INFINITY);
+    current.matchedProbeCount = Math.max(current.matchedProbeCount, Number(item.matchedProbeCount) || 0);
+    current.relevanceScore = Math.max(current.relevanceScore, Number(item.relevanceScore) || 0);
+    current.semanticSimilarity = Math.max(current.semanticSimilarity, Number(item.semanticSimilarity) || 0);
+    candidates.set(key, current);
+  }
+  const sourceUnits = Array.isArray(units) ? units : [];
+  const eligible = candidates.size
+    ? sourceUnits.filter((unit) => candidates.has(String(unit.answerUnitId)))
+    : sourceUnits;
+  const ranked = eligible.map((unit) => {
+    const signals = candidates.get(String(unit.answerUnitId)) || {};
+    const length = String(unit.text || '').length;
+    const bestProbeRank = Number(signals.bestProbeRank) || Number.POSITIVE_INFINITY;
+    return {
+      unit,
+      cost: length + 500,
+      priority: bestProbeRank + Math.log2(1 + length / 1000),
+      matchedProbeCount: Number(signals.matchedProbeCount) || 0,
+      relevanceScore: Number(signals.relevanceScore) || 0,
+      semanticSimilarity: Number(signals.semanticSimilarity) || 0,
+    };
+  }).sort((left, right) => (
+    left.priority - right.priority ||
+    right.matchedProbeCount - left.matchedProbeCount ||
+    right.relevanceScore - left.relevanceScore ||
+    right.semanticSimilarity - left.semanticSimilarity ||
+    String(left.unit.answerUnitId).localeCompare(String(right.unit.answerUnitId))
+  ));
+  const selected = [];
+  let characters = 0;
+  for (const item of ranked) {
+    if (selected.length && characters + item.cost > maximumCharacters) continue;
+    selected.push(item.unit);
+    characters += item.cost;
+  }
+  return { units: selected, characters, candidates: eligible.length };
 }
 
 function createDeepSummaryManager({
@@ -278,7 +391,8 @@ function createDeepSummaryManager({
 
       beginPhase(job, 'plan', 1, `Checking thinking capability for ${config.model}`);
       await oneModelCall(job, `Checking thinking capability for ${config.model}`, () => requireThinking(common));
-      const probes = await oneModelCall(job, 'Planning practical, principle, qualification, and counter-teaching probes', () => planProbes({ ...common, question: config.question }));
+      const plannedProbes = await oneModelCall(job, 'Planning practical, principle, qualification, and counter-teaching probes', () => planProbes({ ...common, question: config.question }));
+      const probes = augmentDeepSearchProbes(config.question, plannedProbes);
       advance(job, 1);
       completePhase(job);
       log(job, `Planned ${probes.length} focused probes without changing the user question.`);
@@ -301,9 +415,13 @@ function createDeepSummaryManager({
         : [];
       if (!units.length) units = fallbackUnits(collected.evidence);
       units = units.filter((unit) => String(unit.author || 'Swami') === 'Swami' && ['swami_reply', 'swami_teaching'].includes(unit.unitKind || 'swami_teaching'));
+      const readUnits = units;
+      const sourceIdsRead = [...new Set(readUnits.map((unit) => String(unit.sourceId)))];
+      const selected = selectAdjudicationUnits(readUnits, collected.evidence);
+      units = selected.units;
       advance(job, fusedMatches.length);
       completePhase(job);
-      log(job, `Read ${units.length} complete citable Swami answer units from ${new Set(units.map((unit) => unit.sourceId)).size} sources.`);
+      log(job, `Read ${readUnits.length} complete citable Swami answer units from ${sourceIdsRead.length} sources; shortlisted ${units.length} units (${selected.characters} characters) for bounded adjudication.`);
 
       if (!units.length) {
         skipPending(job);
@@ -362,7 +480,18 @@ function createDeepSummaryManager({
         return { unit, decision };
       });
       const accepted = adjudicated.filter(({ decision }) => decision && decision.classification !== 'irrelevant' && decision.contextComplete === true &&
-        (decision.classification !== 'illustration' || decision.storyComplete === true));
+        (decision.classification !== 'illustration' || decision.storyComplete === true)).map((item) => {
+        const sourceQuestion = item.unit.associatedQuestion || item.unit.title || '';
+        if (item.decision.classification !== 'direct_answer' || isLiteralDirectQuestionMatch(config.question, sourceQuestion)) return item;
+        return {
+          ...item,
+          decision: {
+            ...item.decision,
+            classification: 'governing_principle',
+            relationship: item.decision.relationship || 'This teaching governs the question without literally asking the same thing.',
+          },
+        };
+      });
 
       beginPhase(job, 'cluster', accepted.length, 'Grouping distinct teachings without rewriting them');
       const clusters = new Map();
@@ -469,9 +598,10 @@ function createDeepSummaryManager({
           probes: probes.length,
           retrievedCandidates: resultSets.reduce((total, set) => total + set.length, 0),
           retrievedSourceIds: fusedMatches.map((match) => String(match.sourceId)),
-          sourcesRead: new Set(units.map((unit) => unit.sourceId)).size,
-          sourceIdsRead: [...new Set(units.map((unit) => String(unit.sourceId)))],
-          answerUnitsRead: units.length,
+          sourcesRead: sourceIdsRead.length,
+          sourceIdsRead,
+          answerUnitsRead: readUnits.length,
+          answerUnitsAdjudicated: units.length,
           rejectedEvidence: units.length - verified.length,
           disagreements: disagreements.length,
           finalVerification: verified.length,
@@ -553,7 +683,11 @@ module.exports = {
   DEFAULT_DEEP_REQUEST_TIMEOUT_MS,
   MAX_DEEP_REQUEST_TIMEOUT_MS,
   MAX_DEEP_RECORDS,
+  augmentDeepSearchProbes,
   collectCandidateEvidence,
   createDeepSummaryManager,
+  fuseMatches,
+  isLiteralDirectQuestionMatch,
   publicJob,
+  selectAdjudicationUnits,
 };
