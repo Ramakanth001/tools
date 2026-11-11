@@ -8,6 +8,9 @@ The tool includes a 20-record sample corpus and local-demo preset. It still requ
 
 For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training versus indexing, pgvector, HNSW, cosine similarity, synchronization, multilingual handling, and the complete request flow, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
+> ⚡ **Distance-Based Search Documentation:**  
+> For complete architectural documentation, mathematical formulations, ranking rulesets, IAST diacritic folding, sentence-boundary snippeting, rolling token proximity, and the deep-linking reader engine, see **[DISTANCE_SEARCH_README.md](./DISTANCE_SEARCH_README.md)**.
+
 ## What Is Implemented
 
 - PostgreSQL connection testing and source catalog discovery
