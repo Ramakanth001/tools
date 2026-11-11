@@ -8,6 +8,7 @@ const {
 } = require('./core');
 const { embedTexts, testOllama } = require('./ollama');
 const { buildAnswerPassages, buildDiscoveryTexts, parseAnswerUnits } = require('./corpusStructure');
+const { clearIdfCache } = require('./distanceSearch');
 
 const MAX_SINGLE_PASSAGE_RETRIES = 2;
 
@@ -251,6 +252,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       const normalizedMapping = sourceSnapshot.mapping;
       job.total = sourceSnapshot.total;
       await db.updateSyncRun(indexClient, job);
+      
       log(job, `Validated ${job.total} source records.`);
 
       const fetchSize = Math.max(25, Math.min(1000, Number(config.fetchSize || 250)));
@@ -312,6 +314,7 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       if (job.mode === 'rebuild') await db.commitRebuild(indexClient, commitPayload);
       else await db.commitIncremental(indexClient, commitPayload);
       stageNames = null;
+      try { clearIdfCache(); } catch { /* ignore */ }
 
       job.status = 'completed';
       job.finishedAt = new Date().toISOString();
