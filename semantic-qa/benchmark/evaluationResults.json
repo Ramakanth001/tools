@@ -1,0 +1,981 @@
+{
+  "summary": [
+    {
+      "Configuration": "Prod Baseline (Empty-Title Vectors & Micro-Chunks)",
+      "Recall@1": "46.7%",
+      "Recall@5": "66.7%",
+      "Recall@10": "66.7%",
+      "MRR@10": "0.550",
+      "Avg Latency": "2615.7ms",
+      "Max Neg Score": "0.348"
+    },
+    {
+      "Configuration": "EmbeddingGemma (Context-Injected, Dense-Only)",
+      "Recall@1": "53.3%",
+      "Recall@5": "60.0%",
+      "Recall@10": "66.7%",
+      "MRR@10": "0.578",
+      "Avg Latency": "38.8ms",
+      "Max Neg Score": "0.244"
+    },
+    {
+      "Configuration": "BGE-M3 (Context-Injected, Dense-Only)",
+      "Recall@1": "60.0%",
+      "Recall@5": "66.7%",
+      "Recall@10": "66.7%",
+      "MRR@10": "0.633",
+      "Avg Latency": "43.4ms",
+      "Max Neg Score": "0.438"
+    },
+    {
+      "Configuration": "Hybrid RRF (EmbeddingGemma + Full-Text)",
+      "Recall@1": "46.7%",
+      "Recall@5": "53.3%",
+      "Recall@10": "53.3%",
+      "MRR@10": "0.489",
+      "Avg Latency": "30.2ms",
+      "Max Neg Score": "0.244"
+    },
+    {
+      "Configuration": "Hybrid RRF (BGE-M3 + Full-Text)",
+      "Recall@1": "53.3%",
+      "Recall@5": "60.0%",
+      "Recall@10": "60.0%",
+      "MRR@10": "0.567",
+      "Avg Latency": "31.9ms",
+      "Max Neg Score": "0.438"
+    }
+  ],
+  "detailed": {
+    "Prod Baseline (Empty-Title Vectors & Micro-Chunks)": {
+      "ranks": [
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        4,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "top1Hits": 7,
+      "top5Hits": 10,
+      "top10Hits": 10,
+      "latencies": [
+        31,
+        11,
+        6,
+        8,
+        7,
+        5,
+        6,
+        6,
+        9,
+        3875,
+        7221,
+        4611,
+        3258,
+        5261,
+        4063,
+        7314,
+        5957,
+        5433
+      ],
+      "reciprocalRanks": [
+        0.5,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0.5,
+        0.25,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "negativeScores": [
+        0.21712658593021394,
+        0.34843273777571715,
+        0.20561631385601187
+      ],
+      "queryDetails": [
+        {
+          "query": "Who is Datta Swami?",
+          "category": "Theology",
+          "rank": 2,
+          "topMatch": "Chhandaa Giitam: Datta Swami - The Antaryaami",
+          "topSource": "discourse:4336",
+          "snippet": ""
+        },
+        {
+          "query": "What is the real nature of Datta?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Datta Avatara Sutram: Chapter-12 Part-1",
+          "topSource": "discourse:816",
+          "snippet": ""
+        },
+        {
+          "query": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "topSource": "discourse:2068",
+          "snippet": ""
+        },
+        {
+          "query": "Why do my prayers go unanswered?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "Datta Dharma Sutram: Chapter-4",
+          "topSource": "discourse:782",
+          "snippet": ""
+        },
+        {
+          "query": "Is the world real or an illusion?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "Rohita Gita - X",
+          "topSource": "discourse:708",
+          "snippet": ""
+        },
+        {
+          "query": "What is the difference between Nivrutti and Pravrutti?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "Is it justified if dedicated service to You leads to negligence of worldly life?",
+          "topSource": "discourse:4705",
+          "snippet": ""
+        },
+        {
+          "query": "How can I serve Swami?",
+          "category": "Practice",
+          "rank": 1,
+          "topMatch": "Parabrahma Gita-9: Service of Lord Datta",
+          "topSource": "discourse:728",
+          "snippet": ""
+        },
+        {
+          "query": "should we use oil based lamp?",
+          "category": "Rituals",
+          "rank": 2,
+          "topMatch": "Datta Veda - Chapter-5 Part-1: Human Incarnation of The Unimaginable God",
+          "topSource": "discourse:691",
+          "snippet": ""
+        },
+        {
+          "query": "What is the meaning of Jesus saying \"The light is in me\"?",
+          "category": "Universal",
+          "rank": 4,
+          "topMatch": "MESSAGE ON DEEPAVALI",
+          "topSource": "discourse:89",
+          "snippet": ""
+        },
+        {
+          "query": "Question on test conduted by Lord Datta.",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Rohit Gita - IX",
+          "topSource": "discourse:707",
+          "snippet": ""
+        },
+        {
+          "query": "How does Jñāna lead to Moksha?",
+          "category": "Transliteration (IAST)",
+          "rank": null,
+          "topMatch": "GOD NOT EXISTS IN AWARENESS OF SOUL",
+          "topSource": "discourse:558",
+          "snippet": ""
+        },
+        {
+          "query": "How does Gyana lead to Moksham?",
+          "category": "Transliteration (Phonetic)",
+          "rank": null,
+          "topMatch": "Hinduism Revealed Part-1",
+          "topSource": "discourse:74",
+          "snippet": ""
+        },
+        {
+          "query": "Secret of unimaginable God Datta revealed by Scripture",
+          "category": "Recovered Gita Chapters",
+          "rank": null,
+          "topMatch": "Datta Parabrahma Sutram: Chapter-11 Part-1",
+          "topSource": "discourse:797",
+          "snippet": ""
+        },
+        {
+          "query": "ఆధ్యాత్మిక మార్గంలో గురువు పాత్ర ఏమిటి?",
+          "category": "Telugu",
+          "rank": null,
+          "topMatch": "ശ്രീ അനിലിൻ്റെ ചോദ്യങ്ങൾക്ക് സ്വാമി ഉത്തരം നൽകുന്നു",
+          "topSource": "discourse:5232",
+          "snippet": ""
+        },
+        {
+          "query": "ദൈവത്തിൽ നിന്ന് ആഗ്രഹിക്കുന്നതിനേക്കാൾ ദൈവം നമ്മിൽ നിന്ന് എന്താണ് ആഗ്രഹിക്കുന്നത്?",
+          "category": "Malayalam",
+          "rank": null,
+          "topMatch": "ആത്മാക്കൾ പൂർണമായും ദൈവത്തിൽ ആത്മസമര്‍പ്പണം ചെയ്യുമ്പോൾ എങ്ങനെ ആയിരിക്കണം അവർ പെരുമാറേണ്ടത്?",
+          "topSource": "discourse:3233",
+          "snippet": ""
+        }
+      ]
+    },
+    "EmbeddingGemma (Context-Injected, Dense-Only)": {
+      "ranks": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        null,
+        1,
+        1,
+        2,
+        1,
+        null,
+        null,
+        6,
+        null,
+        null
+      ],
+      "top1Hits": 8,
+      "top5Hits": 9,
+      "top10Hits": 10,
+      "latencies": [
+        61,
+        56,
+        40,
+        35,
+        41,
+        31,
+        37,
+        44,
+        54,
+        34,
+        31,
+        38,
+        29,
+        32,
+        37,
+        31,
+        35,
+        32
+      ],
+      "reciprocalRanks": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        0.5,
+        1,
+        0,
+        0,
+        0.16666666666666666,
+        0,
+        0
+      ],
+      "negativeScores": [
+        0.21470452634719206,
+        0.24406278860756137,
+        0.1529712677001953
+      ],
+      "queryDetails": [
+        {
+          "query": "Who is Datta Swami?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "WHO IS SWAMI?",
+          "topSource": "discourse:738",
+          "snippet": "Shri. C. Bala Krishna Murthy is the founder of this entire Mission. He recognized Swami and declared"
+        },
+        {
+          "query": "What is the real nature of Datta?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the real nature of Datta?",
+          "topSource": "qa:49",
+          "snippet": "Swami replied:- Datta is essentially a teacher. His very nature is the nature of a teacher. If you s"
+        },
+        {
+          "query": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "topSource": "discourse:2068",
+          "snippet": "Datta means the first Energetic Incarnation of the unimaginable God given to the world for meditatio"
+        },
+        {
+          "query": "Why do my prayers go unanswered?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "What should be the motivation for a spiritual aspirant to excel in his career and worldly interactions?",
+          "topSource": "qa:98",
+          "snippet": "However, if you are not bothered about the future and are only particular of the present, such rearr"
+        },
+        {
+          "query": "Is the world real or an illusion?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "What is the difference between real God and unreal world in the light of reality?",
+          "topSource": "discourse:2496",
+          "snippet": "Actually, God is real and world is unreal. But, the unreal world is gifted by God with the absolute "
+        },
+        {
+          "query": "What is the difference between Nivrutti and Pravrutti?",
+          "category": "Philosophy",
+          "rank": null,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Kaalabhairava Khanda: Chapter-16 Part-6",
+          "topSource": "discourse:1067",
+          "snippet": "Nivrutti is the behaviour of a soul with God about which God is not at all bothered and more over di"
+        },
+        {
+          "query": "How can I serve Swami?",
+          "category": "Practice",
+          "rank": 1,
+          "topMatch": "How can I serve Swami?",
+          "topSource": "qa:323",
+          "snippet": "Swami replied: God will neither invite anybody for service nor stipulate the service. Your real love"
+        },
+        {
+          "query": "should we use oil based lamp?",
+          "category": "Rituals",
+          "rank": 1,
+          "topMatch": "Should all people or only scholars light an electric lamp before an idol of God, instead of an oil l",
+          "topSource": "discourse:1841",
+          "snippet": "Neither electric lamp nor the oil lamp is needed for God. It is only just your satisfaction that a l"
+        },
+        {
+          "query": "What is the meaning of Jesus saying \"The light is in me\"?",
+          "category": "Universal",
+          "rank": 2,
+          "topMatch": "MESSAGE ON DEEPAVALI",
+          "topSource": "discourse:89",
+          "snippet": "Christians are also burning candles on Christmas day in the same manner. But what did Lord Jesus tel"
+        },
+        {
+          "query": "Question on test conduted by Lord Datta.",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Why are the tests of Datta so severe?",
+          "topSource": "qa:87",
+          "snippet": "Swami replied:- Datta conducts preliminary tests first and then only conducts the final test. Only t"
+        },
+        {
+          "query": "How does Jñāna lead to Moksha?",
+          "category": "Transliteration (IAST)",
+          "rank": null,
+          "topMatch": "Hinduism Revealed Part-1",
+          "topSource": "discourse:74",
+          "snippet": "So, the Gita gives the shortcut from the 1st step directly to the 4th step. The kindest Lord Krishna"
+        },
+        {
+          "query": "How does Gyana lead to Moksham?",
+          "category": "Transliteration (Phonetic)",
+          "rank": null,
+          "topMatch": "Hinduism Revealed Part-1",
+          "topSource": "discourse:74",
+          "snippet": "So, the Gita gives the shortcut from the 1st step directly to the 4th step. The kindest Lord Krishna"
+        },
+        {
+          "query": "Secret of unimaginable God Datta revealed by Scripture",
+          "category": "Recovered Gita Chapters",
+          "rank": 6,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Brahma Khanda: Chapter-2",
+          "topSource": "discourse:858",
+          "snippet": "• As unimaginable God, I can’t be attained by making journey and by seeing Me with eyes. As mediated"
+        },
+        {
+          "query": "ఆధ్యాత్మిక మార్గంలో గురువు పాత్ర ఏమిటి?",
+          "category": "Telugu",
+          "rank": null,
+          "topMatch": "GURU GURU GURU",
+          "topSource": "discourse:87",
+          "snippet": "So never be a harmful Guru. Do not waste time and energy by becoming a useless Guru. Participate in "
+        },
+        {
+          "query": "ദൈവത്തിൽ നിന്ന് ആഗ്രഹിക്കുന്നതിനേക്കാൾ ദൈവം നമ്മിൽ നിന്ന് എന്താണ് ആഗ്രഹിക്കുന്നത്?",
+          "category": "Malayalam",
+          "rank": null,
+          "topMatch": "SUBMISSION TO THE WILL OF GOD",
+          "topSource": "discourse:122",
+          "snippet": "You always say that you wish something good to happen to yourself or to your friends. You also wish "
+        }
+      ]
+    },
+    "BGE-M3 (Context-Injected, Dense-Only)": {
+      "ranks": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        null,
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        2,
+        null,
+        null
+      ],
+      "top1Hits": 9,
+      "top5Hits": 10,
+      "top10Hits": 10,
+      "latencies": [
+        60,
+        63,
+        43,
+        38,
+        44,
+        37,
+        43,
+        49,
+        47,
+        49,
+        35,
+        39,
+        39,
+        40,
+        38,
+        41,
+        41,
+        36
+      ],
+      "reciprocalRanks": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0.5,
+        0,
+        0
+      ],
+      "negativeScores": [
+        0.40396353948285757,
+        0.43829319649580833,
+        0.3955890621920648
+      ],
+      "queryDetails": [
+        {
+          "query": "Who is Datta Swami?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "SHRI DATTA SWAMI-A BRIEF BIOGRAPHY",
+          "topSource": "discourse:737",
+          "snippet": "Swami the professor. At the age of 30, Swami became a professor in chemistry. Swami leads a simple l"
+        },
+        {
+          "query": "What is the real nature of Datta?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the real nature of Datta?",
+          "topSource": "qa:49",
+          "snippet": "Swami replied:- Datta is essentially a teacher. His very nature is the nature of a teacher. If you s"
+        },
+        {
+          "query": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "topSource": "discourse:2068",
+          "snippet": "Datta means the first Energetic Incarnation of the unimaginable God given to the world for meditatio"
+        },
+        {
+          "query": "Why do my prayers go unanswered?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "Why doesn't the kindest Father respond to devotee's constant prayers?",
+          "topSource": "discourse:3463",
+          "snippet": "In the present life also, did the son listen to the advice of the Father? Before blaming anybody, yo"
+        },
+        {
+          "query": "Is the world real or an illusion?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "What is the difference between real God and unreal world in the light of reality?",
+          "topSource": "discourse:2496",
+          "snippet": "Actually, God is real and world is unreal. But, the unreal world is gifted by God with the absolute "
+        },
+        {
+          "query": "What is the difference between Nivrutti and Pravrutti?",
+          "category": "Philosophy",
+          "rank": null,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Kaalabhairava Khanda: Chapter-16 Part-3",
+          "topSource": "discourse:1007",
+          "snippet": "• This means that many a time Dushpravrutti is more powerful than Pravrutti. The human tendency is m"
+        },
+        {
+          "query": "How can I serve Swami?",
+          "category": "Practice",
+          "rank": 1,
+          "topMatch": "How can I serve Swami?",
+          "topSource": "qa:323",
+          "snippet": "Swami replied: God will neither invite anybody for service nor stipulate the service. Your real love"
+        },
+        {
+          "query": "should we use oil based lamp?",
+          "category": "Rituals",
+          "rank": 1,
+          "topMatch": "Should all people or only scholars light an electric lamp before an idol of God, instead of an oil l",
+          "topSource": "discourse:1841",
+          "snippet": "Neither electric lamp nor the oil lamp is needed for God. It is only just your satisfaction that a l"
+        },
+        {
+          "query": "What is the meaning of Jesus saying \"The light is in me\"?",
+          "category": "Universal",
+          "rank": 1,
+          "topMatch": "DIFFERENT LEVELS OF DEVOTEES VIEW INCARNATION DIFFERENTLY",
+          "topSource": "discourse:228",
+          "snippet": "Every wire need not have the current and hence, every human being is not possessed by God. Again, th"
+        },
+        {
+          "query": "Question on test conduted by Lord Datta.",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Please enlighten me on the cases of passing and failing of candidates in the tests of God Datta.",
+          "topSource": "discourse:4486",
+          "snippet": "Let us take the cases of Saktuprastha and Sudaama who are passing the test. God Datta knows that the"
+        },
+        {
+          "query": "How does Jñāna lead to Moksha?",
+          "category": "Transliteration (IAST)",
+          "rank": null,
+          "topMatch": "MESSAGE ON SHIVARATRI",
+          "topSource": "discourse:96",
+          "snippet": "Sacrifice for Liberation\n\nThe word moksha comes from ‘mo’ (moha) = attachment and ‘ksha’ (kshaya) = "
+        },
+        {
+          "query": "How does Gyana lead to Moksham?",
+          "category": "Transliteration (Phonetic)",
+          "rank": null,
+          "topMatch": "Message On Vijayadashami",
+          "topSource": "discourse:85",
+          "snippet": "Since God comes in human form in every generation, a particular Human Incarnation cannot be represen"
+        },
+        {
+          "query": "Secret of unimaginable God Datta revealed by Scripture",
+          "category": "Recovered Gita Chapters",
+          "rank": 2,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Kaalabhairava Khanda: Chapter-13 Part-1",
+          "topSource": "discourse:935",
+          "snippet": "• Once the space or subtle energy is created by God, the unimaginable God got mediated forever for t"
+        },
+        {
+          "query": "ఆధ్యాత్మిక మార్గంలో గురువు పాత్ర ఏమిటి?",
+          "category": "Telugu",
+          "rank": null,
+          "topMatch": "GURU GURU GURU",
+          "topSource": "discourse:87",
+          "snippet": "[3] Hanuman was an Incarnation of Lord Shiva, who had taken to role of the ideal servant of Lord Ram"
+        },
+        {
+          "query": "ദൈവത്തിൽ നിന്ന് ആഗ്രഹിക്കുന്നതിനേക്കാൾ ദൈവം നമ്മിൽ നിന്ന് എന്താണ് ആഗ്രഹിക്കുന്നത്?",
+          "category": "Malayalam",
+          "rank": null,
+          "topMatch": "SUBMISSION TO THE WILL OF GOD",
+          "topSource": "discourse:122",
+          "snippet": "You always say that you wish something good to happen to yourself or to your friends. You also wish "
+        }
+      ]
+    },
+    "Hybrid RRF (EmbeddingGemma + Full-Text)": {
+      "ranks": [
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        1,
+        1,
+        3,
+        1,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "top1Hits": 7,
+      "top5Hits": 8,
+      "top10Hits": 8,
+      "latencies": [
+        30,
+        26,
+        24,
+        22,
+        104,
+        31,
+        29,
+        27,
+        24,
+        24,
+        20,
+        23,
+        27,
+        23,
+        24,
+        23,
+        41,
+        21
+      ],
+      "reciprocalRanks": [
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        0.3333333333333333,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "negativeScores": [
+        0.21470452634719206,
+        0.24406278860756137,
+        0.1529712677001953
+      ],
+      "queryDetails": [
+        {
+          "query": "Who is Datta Swami?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Parabrahma Gita-8: Only Desire",
+          "topSource": "discourse:727",
+          "snippet": "Once Datta met Vishwamji, very great saint of Lord Datta, who offered lunch\n\nIn the house of his bro"
+        },
+        {
+          "query": "What is the real nature of Datta?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the real nature of Datta?",
+          "topSource": "qa:49",
+          "snippet": "Swami replied:- Datta is essentially a teacher. His very nature is the nature of a teacher. If you s"
+        },
+        {
+          "query": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "THE ABSOLUTE TRUTH",
+          "topSource": "discourse:675",
+          "snippet": "But their external energetic forms reveal the partial duties of God separately. This may mislead dev"
+        },
+        {
+          "query": "Why do my prayers go unanswered?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "What should be the motivation for a spiritual aspirant to excel in his career and worldly interactions?",
+          "topSource": "qa:98",
+          "snippet": "However, if you are not bothered about the future and are only particular of the present, such rearr"
+        },
+        {
+          "query": "Is the world real or an illusion?",
+          "category": "Philosophy",
+          "rank": null,
+          "topMatch": "TRUE PERSPECTIVE OF SHANKARA'S PHILOSOPHY",
+          "topSource": "discourse:113",
+          "snippet": "Imaginary World, Sole Cause of Worldly Problems: Shankara told that the soul is the absolute God and"
+        },
+        {
+          "query": "What is the difference between Nivrutti and Pravrutti?",
+          "category": "Philosophy",
+          "rank": null,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Kaalabhairava Khanda: Chapter-16 Part-6",
+          "topSource": "discourse:1067",
+          "snippet": "Nivrutti is the behaviour of a soul with God about which God is not at all bothered and more over di"
+        },
+        {
+          "query": "How can I serve Swami?",
+          "category": "Practice",
+          "rank": 1,
+          "topMatch": "Parabrahma Gita-9: Service of Lord Datta",
+          "topSource": "discourse:728",
+          "snippet": "Please don’t ask me to let You leave, I am the greatest fool;\n\nBut other than You, O Swami, none els"
+        },
+        {
+          "query": "should we use oil based lamp?",
+          "category": "Rituals",
+          "rank": 1,
+          "topMatch": "Should all people or only scholars light an electric lamp before an idol of God, instead of an oil l",
+          "topSource": "discourse:1841",
+          "snippet": "Neither electric lamp nor the oil lamp is needed for God. It is only just your satisfaction that a l"
+        },
+        {
+          "query": "What is the meaning of Jesus saying \"The light is in me\"?",
+          "category": "Universal",
+          "rank": 3,
+          "topMatch": "MESSAGE ON DEEPAVALI",
+          "topSource": "discourse:89",
+          "snippet": "Christians are also burning candles on Christmas day in the same manner. But what did Lord Jesus tel"
+        },
+        {
+          "query": "Question on test conduted by Lord Datta.",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Why are the tests of Datta so severe?",
+          "topSource": "qa:87",
+          "snippet": "Swami replied:- Datta conducts preliminary tests first and then only conducts the final test. Only t"
+        },
+        {
+          "query": "How does Jñāna lead to Moksha?",
+          "category": "Transliteration (IAST)",
+          "rank": null,
+          "topMatch": "Hinduism Revealed Part-1",
+          "topSource": "discourse:74",
+          "snippet": "So, the Gita gives the shortcut from the 1st step directly to the 4th step. The kindest Lord Krishna"
+        },
+        {
+          "query": "How does Gyana lead to Moksham?",
+          "category": "Transliteration (Phonetic)",
+          "rank": null,
+          "topMatch": "Hinduism Revealed Part-1",
+          "topSource": "discourse:74",
+          "snippet": "So, the Gita gives the shortcut from the 1st step directly to the 4th step. The kindest Lord Krishna"
+        },
+        {
+          "query": "Secret of unimaginable God Datta revealed by Scripture",
+          "category": "Recovered Gita Chapters",
+          "rank": null,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Brahma Khanda: Chapter-2",
+          "topSource": "discourse:858",
+          "snippet": "• As unimaginable God, I can’t be attained by making journey and by seeing Me with eyes. As mediated"
+        },
+        {
+          "query": "ఆధ్యాత్మిక మార్గంలో గురువు పాత్ర ఏమిటి?",
+          "category": "Telugu",
+          "rank": null,
+          "topMatch": "GURU GURU GURU",
+          "topSource": "discourse:87",
+          "snippet": "So never be a harmful Guru. Do not waste time and energy by becoming a useless Guru. Participate in "
+        },
+        {
+          "query": "ദൈവത്തിൽ നിന്ന് ആഗ്രഹിക്കുന്നതിനേക്കാൾ ദൈവം നമ്മിൽ നിന്ന് എന്താണ് ആഗ്രഹിക്കുന്നത്?",
+          "category": "Malayalam",
+          "rank": null,
+          "topMatch": "SUBMISSION TO THE WILL OF GOD",
+          "topSource": "discourse:122",
+          "snippet": "You always say that you wish something good to happen to yourself or to your friends. You also wish "
+        }
+      ]
+    },
+    "Hybrid RRF (BGE-M3 + Full-Text)": {
+      "ranks": [
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        1,
+        1,
+        1,
+        1,
+        null,
+        null,
+        2,
+        null,
+        null
+      ],
+      "top1Hits": 8,
+      "top5Hits": 9,
+      "top10Hits": 9,
+      "latencies": [
+        30,
+        38,
+        34,
+        29,
+        61,
+        37,
+        30,
+        36,
+        27,
+        25,
+        25,
+        27,
+        33,
+        36,
+        24,
+        28,
+        30,
+        24
+      ],
+      "reciprocalRanks": [
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0.5,
+        0,
+        0
+      ],
+      "negativeScores": [
+        0.40396353948285757,
+        0.43829319649580833,
+        0.3955890621920648
+      ],
+      "queryDetails": [
+        {
+          "query": "Who is Datta Swami?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Divine Experiences of Shri. Ajay",
+          "topSource": "discourse:2865",
+          "snippet": "This miracle clearly proves that Shri. Datta Swami is none other than Lord Datta Himself under whose"
+        },
+        {
+          "query": "What is the real nature of Datta?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "What is the real nature of Datta?",
+          "topSource": "qa:49",
+          "snippet": "Swami replied:- Datta is essentially a teacher. His very nature is the nature of a teacher. If you s"
+        },
+        {
+          "query": "What is the difference between Lord Datta and Lord Dattatreya?",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "THE ABSOLUTE TRUTH",
+          "topSource": "discourse:675",
+          "snippet": "[4] Datta is the energetic form of God with three faces (Brahma, Vishnu and Shiva). This indicates t"
+        },
+        {
+          "query": "Why do my prayers go unanswered?",
+          "category": "Philosophy",
+          "rank": 1,
+          "topMatch": "Why doesn't the kindest Father respond to devotee's constant prayers?",
+          "topSource": "discourse:3463",
+          "snippet": "In the present life also, did the son listen to the advice of the Father? Before blaming anybody, yo"
+        },
+        {
+          "query": "Is the world real or an illusion?",
+          "category": "Philosophy",
+          "rank": null,
+          "topMatch": "TRUE PERSPECTIVE OF SHANKARA'S PHILOSOPHY",
+          "topSource": "discourse:113",
+          "snippet": "This concept of Shankara has lot of practical utility. Actually, the imaginary world is the sole cau"
+        },
+        {
+          "query": "What is the difference between Nivrutti and Pravrutti?",
+          "category": "Philosophy",
+          "rank": null,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Kaalabhairava Khanda: Chapter-16 Part-3",
+          "topSource": "discourse:1007",
+          "snippet": "• This means that many a time Dushpravrutti is more powerful than Pravrutti. The human tendency is m"
+        },
+        {
+          "query": "How can I serve Swami?",
+          "category": "Practice",
+          "rank": 1,
+          "topMatch": "Parabrahma Gita-9: Service of Lord Datta",
+          "topSource": "discourse:728",
+          "snippet": "Please don’t ask me to let You leave, I am the greatest fool;\n\nBut other than You, O Swami, none els"
+        },
+        {
+          "query": "should we use oil based lamp?",
+          "category": "Rituals",
+          "rank": 1,
+          "topMatch": "Should all people or only scholars light an electric lamp before an idol of God, instead of an oil l",
+          "topSource": "discourse:1841",
+          "snippet": "Neither electric lamp nor the oil lamp is needed for God. It is only just your satisfaction that a l"
+        },
+        {
+          "query": "What is the meaning of Jesus saying \"The light is in me\"?",
+          "category": "Universal",
+          "rank": 1,
+          "topMatch": "DIFFERENT LEVELS OF DEVOTEES VIEW INCARNATION DIFFERENTLY",
+          "topSource": "discourse:228",
+          "snippet": "Every wire need not have the current and hence, every human being is not possessed by God. Again, th"
+        },
+        {
+          "query": "Question on test conduted by Lord Datta.",
+          "category": "Theology",
+          "rank": 1,
+          "topMatch": "Please enlighten me on the cases of passing and failing of candidates in the tests of God Datta.",
+          "topSource": "discourse:4486",
+          "snippet": "Let us take the cases of Saktuprastha and Sudaama who are passing the test. God Datta knows that the"
+        },
+        {
+          "query": "How does Jñāna lead to Moksha?",
+          "category": "Transliteration (IAST)",
+          "rank": null,
+          "topMatch": "MESSAGE ON SHIVARATRI",
+          "topSource": "discourse:96",
+          "snippet": "Sacrifice for Liberation\n\nThe word moksha comes from ‘mo’ (moha) = attachment and ‘ksha’ (kshaya) = "
+        },
+        {
+          "query": "How does Gyana lead to Moksham?",
+          "category": "Transliteration (Phonetic)",
+          "rank": null,
+          "topMatch": "Message On Vijayadashami",
+          "topSource": "discourse:85",
+          "snippet": "Since God comes in human form in every generation, a particular Human Incarnation cannot be represen"
+        },
+        {
+          "query": "Secret of unimaginable God Datta revealed by Scripture",
+          "category": "Recovered Gita Chapters",
+          "rank": 2,
+          "topMatch": "Shri Dattaguru Bhagavat Gita: Kaalabhairava Khanda: Chapter-13 Part-1",
+          "topSource": "discourse:935",
+          "snippet": "• Once the space or subtle energy is created by God, the unimaginable God got mediated forever for t"
+        },
+        {
+          "query": "ఆధ్యాత్మిక మార్గంలో గురువు పాత్ర ఏమిటి?",
+          "category": "Telugu",
+          "rank": null,
+          "topMatch": "GURU GURU GURU",
+          "topSource": "discourse:87",
+          "snippet": "[3] Hanuman was an Incarnation of Lord Shiva, who had taken to role of the ideal servant of Lord Ram"
+        },
+        {
+          "query": "ദൈവത്തിൽ നിന്ന് ആഗ്രഹിക്കുന്നതിനേക്കാൾ ദൈവം നമ്മിൽ നിന്ന് എന്താണ് ആഗ്രഹിക്കുന്നത്?",
+          "category": "Malayalam",
+          "rank": null,
+          "topMatch": "SUBMISSION TO THE WILL OF GOD",
+          "topSource": "discourse:122",
+          "snippet": "You always say that you wish something good to happen to yourself or to your friends. You also wish "
+        }
+      ]
+    }
+  }
+}
