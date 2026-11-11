@@ -41,6 +41,7 @@ async function withServer(callback, overrides = {}) {
     ollama,
     syncManager,
     ...(overrides.deepSummaryManager ? { deepSummaryManager: overrides.deepSummaryManager } : {}),
+    ...(overrides.distanceSearch ? { distanceSearch: overrides.distanceSearch } : {}),
   } });
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -691,4 +692,79 @@ test('v4 remains available only for ordinary search during the role-aware rebuil
       searchTextIndex: async () => ({ rows: [asPassage({ sourceId: 'v4:1', question: 'Question', answer: 'Legacy exact text.' })] }),
     },
   });
+});
+
+
+test('distance search route delegates cleanly to distance engine and honors topK', async () => {
+  let calledQuery;
+  let calledLimit;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' },
+        question: 'meaning of gayatri mantra',
+        searchMode: 'distance',
+        topK: 15,
+      }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.searchMode, 'distance');
+    assert.equal(payload.matches.length, 1);
+    assert.equal(payload.matches[0].title, 'Meaning of the Gayatri Mantra');
+  }, {
+    distanceSearch: {
+      searchDistanceCorpus: async (_pool, { query, limit }) => {
+        calledQuery = query;
+        calledLimit = limit;
+        return {
+          query,
+          totalFound: 1,
+          executionTimeMs: 42,
+          matches: [{
+            sourceId: 'discourse:388',
+            title: 'Meaning of the Gayatri Mantra',
+            score: 95.5,
+          }],
+        };
+      },
+    },
+  });
+  assert.equal(calledQuery, 'meaning of gayatri mantra');
+  assert.equal(calledLimit, 15);
+});
+
+test('distance search route defaults topK to 35 when omitted by direct API callers', async () => {
+  let calledLimit;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indexConnection: { host: 'db', user: 'writer', database: 'index' },
+        question: 'meaning of gayatri mantra',
+        searchMode: 'distance',
+      }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.searchMode, 'distance');
+  }, {
+    distanceSearch: {
+      searchDistanceCorpus: async (_pool, { limit }) => {
+        calledLimit = limit;
+        return {
+          query: 'meaning of gayatri mantra',
+          totalFound: 0,
+          executionTimeMs: 10,
+          matches: [],
+        };
+      },
+    },
+  });
+  assert.equal(calledLimit, 35, 'Omitted topK must default to 35 for distance search');
 });
