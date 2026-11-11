@@ -1,0 +1,709 @@
+const fs = require('node:fs');
+const path = require('node:path');
+
+const EXPANDED_TEST_CASES = [
+  // 1. Core Theology & Identity of Datta (12)
+  {
+    id: "theo_01",
+    query: "Who is Datta Swami?",
+    targets: ["discourse:737", "discourse:891", "discourse:702", "discourse:1322", "discourse:738", "discourse:2865", "discourse:727", "discourse:4345", "qa:233"],
+    category: "Theology"
+  },
+  {
+    id: "theo_02",
+    query: "What is the real nature of Datta?",
+    targets: ["qa:49", "discourse:550", "discourse:879", "discourse:816"],
+    category: "Theology"
+  },
+  {
+    id: "theo_03",
+    query: "What is the difference between Lord Datta and Lord Dattatreya?",
+    targets: ["discourse:2068", "discourse:675", "discourse:415", "discourse:5173"],
+    category: "Theology"
+  },
+  {
+    id: "theo_04",
+    query: "Who is the human incarnation of God?",
+    targets: ["discourse:75", "discourse:67", "discourse:71", "discourse:857", "discourse:867"],
+    category: "Theology"
+  },
+  {
+    id: "theo_05",
+    query: "What does Dattam Chhinnam mean?",
+    targets: ["discourse:72"],
+    category: "Theology"
+  },
+  {
+    id: "theo_06",
+    query: "Why did Lord Datta appear as Guru?",
+    targets: ["discourse:702", "discourse:71", "discourse:80"],
+    category: "Theology"
+  },
+  {
+    id: "theo_07",
+    query: "How is Datta the source of Brahma, Vishnu, and Shiva?",
+    targets: ["discourse:857", "discourse:867", "discourse:879", "discourse:67"],
+    category: "Theology"
+  },
+  {
+    id: "theo_08",
+    query: "Is Datta Swami an avatar of Lord Dattatreya?",
+    targets: ["discourse:702", "qa:49", "discourse:737"],
+    category: "Theology"
+  },
+  {
+    id: "theo_09",
+    query: "What is the form of God Datta in Kali Yuga?",
+    targets: ["discourse:702", "discourse:75", "discourse:79"],
+    category: "Theology"
+  },
+  {
+    id: "theo_10",
+    query: "Secret of unimaginable God Datta revealed by Scripture",
+    targets: ["discourse:879"],
+    category: "Theology"
+  },
+  {
+    id: "theo_11",
+    query: "What is Parabrahma Gita?",
+    targets: ["discourse:702", "discourse:727", "discourse:728"],
+    category: "Theology"
+  },
+  {
+    id: "theo_12",
+    query: "Sai Baba and Datta Swami preaching",
+    targets: ["discourse:79"],
+    category: "Theology"
+  },
+
+  // 2. Core Philosophy & Metaphysics (15)
+  {
+    id: "phil_01",
+    query: "Is this world real or unreal?",
+    targets: ["qa:60", "discourse:2496", "discourse:1526", "discourse:4034", "discourse:708", "discourse:1523"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_02",
+    query: "What is the difference between Nivrutti and Pravrutti?",
+    targets: ["discourse:4705", "discourse:713", "discourse:5706", "discourse:1153", "discourse:66", "discourse:75"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_03",
+    query: "What is the definition of Parabrahman?",
+    targets: ["discourse:702", "discourse:67", "discourse:857", "qa:49"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_04",
+    query: "Can the human mind imagine the unimaginable God?",
+    targets: ["discourse:879", "discourse:67", "discourse:857", "qa:49"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_05",
+    query: "What is the role of Maya in creation?",
+    targets: ["qa:60", "discourse:858", "discourse:870", "discourse:708"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_06",
+    query: "Why did God create this universe?",
+    targets: ["discourse:857", "discourse:858", "qa:60", "discourse:66"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_07",
+    query: "What happens to the soul after physical death?",
+    targets: ["qa:233", "discourse:67", "discourse:75"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_08",
+    query: "Is awareness or nervous energy itself God?",
+    targets: ["discourse:857", "discourse:858", "discourse:67"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_09",
+    query: "What is the relationship between Creator and creation?",
+    targets: ["discourse:857", "discourse:858", "qa:60"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_10",
+    query: "How does Advaita philosophy relate to Vishishtadvaita and Dvaita?",
+    targets: ["discourse:71", "discourse:67", "discourse:76"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_11",
+    query: "What is the purpose of human birth?",
+    targets: ["discourse:66", "discourse:67", "discourse:75", "qa:98"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_12",
+    query: "Why do good people suffer in this world?",
+    targets: ["qa:159", "discourse:870", "discourse:80"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_13",
+    query: "What is the cosmic energy that constitutes space?",
+    targets: ["discourse:857", "discourse:858", "discourse:437"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_14",
+    query: "What is the meaning of nothing of energy in Shri Dattaguru Bhagavat Gita?",
+    targets: ["discourse:437", "discourse:857"],
+    category: "Philosophy"
+  },
+  {
+    id: "phil_15",
+    query: "Why is absolute reality beyond all logic and science?",
+    targets: ["discourse:879", "discourse:67", "discourse:857"],
+    category: "Philosophy"
+  },
+
+  // 3. Practical Spiritual Sadhana & Ethics (15)
+  {
+    id: "sadh_01",
+    query: "Why do our prayers not yield any fruit?",
+    targets: ["qa:159", "discourse:3463", "discourse:4513", "qa:98", "discourse:782"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_02",
+    query: "Why do my prayers go unanswered?",
+    targets: ["qa:159", "discourse:3463", "discourse:4513", "qa:98", "discourse:782"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_03",
+    query: "How can I serve Swami?",
+    targets: ["qa:323", "discourse:728", "discourse:5594", "discourse:3037"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_04",
+    query: "How do I stop watching adult movies and pornography?",
+    targets: ["qa:396", "discourse:4531"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_05",
+    query: "What should I do about my anxiety to get a child and good health?",
+    targets: ["qa:208"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_06",
+    query: "How to get direction in my life?",
+    targets: ["qa:430"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_07",
+    query: "Why should we attain homogeneity in action, words and mind?",
+    targets: ["qa:144"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_08",
+    query: "What should be the motivation for a spiritual aspirant in career?",
+    targets: ["qa:98"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_09",
+    query: "The path of selfless service to God",
+    targets: ["discourse:69", "discourse:728", "qa:323"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_10",
+    query: "The only technique for spiritual success",
+    targets: ["discourse:68", "discourse:67"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_11",
+    query: "Question on test conduted by Lord Datta.",
+    targets: ["qa:421", "discourse:707", "qa:87", "discourse:4486", "discourse:80"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_12",
+    query: "Why are the tests of Datta so severe?",
+    targets: ["qa:87", "qa:421", "discourse:707", "discourse:80"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_13",
+    query: "Question on rigidity in spirituality",
+    targets: ["qa:434"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_14",
+    query: "Where can I meet Shri Datta Swami?",
+    targets: ["discourse:2854", "qa:320"],
+    category: "Practice"
+  },
+  {
+    id: "sadh_15",
+    query: "Approach to God and devotion",
+    targets: ["discourse:75", "discourse:67", "discourse:727"],
+    category: "Practice"
+  },
+
+  // 4. Rituals, Traditions & Temples (12)
+  {
+    id: "rit_01",
+    query: "should we use oil based lamp?",
+    targets: ["discourse:1841", "discourse:533", "discourse:1118", "qa:144", "discourse:1690", "discourse:383"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_02",
+    query: "Basis of traditional Hindu customs and rituals",
+    targets: ["discourse:108"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_03",
+    query: "Symbolism of temples and rituals",
+    targets: ["discourse:78"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_04",
+    query: "What concept do the statues of the Lord and Divine Mother indicate?",
+    targets: ["qa:100"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_05",
+    query: "Why does the body of a Yogi not emit a bad smell for days after death?",
+    targets: ["qa:233"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_06",
+    query: "Hinduism Revealed Part 1",
+    targets: ["discourse:74"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_07",
+    query: "Hinduism Revealed Part 2",
+    targets: ["discourse:77"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_08",
+    query: "Rejuvenation of Hinduism through true philosophy",
+    targets: ["discourse:73"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_09",
+    query: "Gospel on Guru Purnima 2003",
+    targets: ["discourse:80"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_10",
+    query: "Book of Spirituality by Datta Swami",
+    targets: ["discourse:66"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_11",
+    query: "Knowledge of God and the spiritual path",
+    targets: ["discourse:67"],
+    category: "Rituals"
+  },
+  {
+    id: "rit_12",
+    query: "Message at Kaladi on Shankara preaching",
+    targets: ["discourse:71"],
+    category: "Rituals"
+  },
+
+  // 5. Universal Spirituality & World Religions (12)
+  {
+    id: "univ_01",
+    query: "What is the meaning of Jesus saying \"The light is in me\"?",
+    targets: ["discourse:1199", "discourse:1322", "discourse:228", "discourse:1008", "discourse:3427"],
+    category: "Universal"
+  },
+  {
+    id: "univ_02",
+    query: "Unity of Religions in the Universe",
+    targets: ["discourse:76", "discourse:3119"],
+    category: "Universal"
+  },
+  {
+    id: "univ_03",
+    query: "How are different world religions unified in one God?",
+    targets: ["discourse:76", "discourse:71", "discourse:3119"],
+    category: "Universal"
+  },
+  {
+    id: "univ_04",
+    query: "Universal spirituality for world peace",
+    targets: ["discourse:76", "discourse:3229"],
+    category: "Universal"
+  },
+  {
+    id: "univ_05",
+    query: "Common foundation of Hinduism and Christianity",
+    targets: ["discourse:76", "discourse:3227"],
+    category: "Universal"
+  },
+  {
+    id: "univ_06",
+    query: "Is Jesus Christ a messenger or Son of God?",
+    targets: ["discourse:3427", "discourse:76"],
+    category: "Universal"
+  },
+  {
+    id: "univ_07",
+    query: "Why do religions clash if there is only one Creator?",
+    targets: ["discourse:76", "discourse:71"],
+    category: "Universal"
+  },
+  {
+    id: "univ_08",
+    query: "Shankara preaching at Kaladi on non-dual Brahman",
+    targets: ["discourse:71"],
+    category: "Universal"
+  },
+  {
+    id: "univ_09",
+    query: "The universal religion of Swami",
+    targets: ["discourse:76", "discourse:1867"],
+    category: "Universal"
+  },
+  {
+    id: "univ_10",
+    query: "Spiritual harmony between east and west",
+    targets: ["discourse:76", "discourse:74"],
+    category: "Universal"
+  },
+  {
+    id: "univ_11",
+    query: "Are temple statues equal to living God?",
+    targets: ["discourse:78", "qa:100", "discourse:3231"],
+    category: "Universal"
+  },
+  {
+    id: "univ_12",
+    query: "Position of women in spiritual life and Hinduism",
+    targets: ["discourse:3230", "discourse:74"],
+    category: "Universal"
+  },
+
+  // 6. Transliteration Variations & Sanskrit Terminology (16)
+  {
+    id: "trans_01",
+    query: "How does Jñāna lead to Moksha?",
+    targets: ["discourse:879", "discourse:67", "discourse:857"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_02",
+    query: "How does Gyana lead to Moksham?",
+    targets: ["discourse:879", "discourse:67", "discourse:857"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_03",
+    query: "What is the true swarupam of Parabrahman?",
+    targets: ["discourse:702", "discourse:857", "qa:49"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_04",
+    query: "Difference between Saadhana and Nivritti",
+    targets: ["discourse:66", "discourse:75", "discourse:67"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_05",
+    query: "What is Upādhi of the unimaginable God?",
+    targets: ["discourse:857", "discourse:867", "discourse:879"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_06",
+    query: "How does Bhakthi differ from Jnaana?",
+    targets: ["discourse:67", "discourse:75", "discourse:80"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_07",
+    query: "Role of Sadguru in attaining Moksh",
+    targets: ["discourse:71", "discourse:702", "discourse:80"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_08",
+    query: "Definition of Atman and Jeeva in Vedanta",
+    targets: ["discourse:67", "discourse:857", "discourse:858"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_09",
+    query: "Concept of Maaya as the power of God",
+    targets: ["qa:60", "discourse:858", "discourse:870"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_10",
+    query: "Karmam and practical sacrifice of fruits of work",
+    targets: ["discourse:69", "discourse:728", "qa:323"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_11",
+    query: "Nivritti marga vs Pravritti marga in spirituality",
+    targets: ["discourse:66", "discourse:75"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_12",
+    query: "What is Ishvara in relation to Parabrahma?",
+    targets: ["discourse:702", "discourse:857", "discourse:867"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_13",
+    query: "Avatara of God in human medium",
+    targets: ["discourse:75", "discourse:857", "discourse:867"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_14",
+    query: "Why is Sevaa superior to mere chanting?",
+    targets: ["discourse:69", "discourse:728", "qa:323"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_15",
+    query: "How does Shraddhā lead to spiritual wisdom?",
+    targets: ["discourse:67", "discourse:80"],
+    category: "Transliteration"
+  },
+  {
+    id: "trans_16",
+    query: "Brahmajñāna revealed by Datta",
+    targets: ["discourse:879", "discourse:857", "discourse:702"],
+    category: "Transliteration"
+  },
+
+  // 7. Native Indian Scripts - Telugu & Malayalam (12)
+  {
+    id: "nat_tel_01",
+    query: "సాధన అనగా నేమి?",
+    targets: ["discourse:4908"],
+    category: "Telugu"
+  },
+  {
+    id: "nat_tel_02",
+    query: "క్షణికమైన మానవ జీవితములో శాశ్వత ఆనందప్రాప్తి ఎట్లు కలుగును?",
+    targets: ["discourse:4907"],
+    category: "Telugu"
+  },
+  {
+    id: "nat_tel_03",
+    query: "సీతాదేవి స్వామి సన్నిధిని ఏల కోల్పోయెను?",
+    targets: ["discourse:4913"],
+    category: "Telugu"
+  },
+  {
+    id: "nat_tel_04",
+    query: "గురుదత్తుని పొందే మార్గము",
+    targets: ["discourse:4914"],
+    category: "Telugu"
+  },
+  {
+    id: "nat_tel_05",
+    query: "ఆధ్యాత్మ జ్ఞానమే వేదము",
+    targets: ["discourse:4916"],
+    category: "Telugu"
+  },
+  {
+    id: "nat_tel_06",
+    query: "దత్తస్వామి త్రిసూత్ర మతము",
+    targets: ["discourse:1867"],
+    category: "Telugu"
+  },
+  {
+    id: "nat_mam_01",
+    query: "സ്വാമി ആരാണു്?",
+    targets: ["discourse:3228"],
+    category: "Malayalam"
+  },
+  {
+    id: "nat_mam_02",
+    query: "പ്രപഞ്ചത്തിലെ മതങ്ങളുടെ ഐക്യം",
+    targets: ["discourse:3119"],
+    category: "Malayalam"
+  },
+  {
+    id: "nat_mam_03",
+    query: "ദൈവത്തെ പ്രീതിപ്പെടുത്താനുള്ള മാർഗം",
+    targets: ["discourse:3120"],
+    category: "Malayalam"
+  },
+  {
+    id: "nat_mam_04",
+    query: "ഹിന്ദുമതവും ക്രിസ്തുമതവും തമ്മിലുള്ള ബന്ധങ്ങൾ",
+    targets: ["discourse:3227"],
+    category: "Malayalam"
+  },
+  {
+    id: "nat_mam_05",
+    query: "യേശു ഒരു ദൂതനോ ദൈവപുത്രനോ?",
+    targets: ["discourse:3427"],
+    category: "Malayalam"
+  },
+  {
+    id: "nat_mam_06",
+    query: "ദത്ത സ്വാമിയുടെ ഫിലോസഫിയുടെ മൂന്ന് ഭാഗങ്ങള്‍",
+    targets: ["discourse:3232"],
+    category: "Malayalam"
+  },
+
+  // 8. Recovered Gita Chapters (8)
+  {
+    id: "gita_01",
+    query: "Shri Dattaguru Bhagavat Gita Brahma Khanda Chapter 1",
+    targets: ["discourse:857"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_02",
+    query: "Shri Dattaguru Bhagavat Gita Brahma Khanda Chapter 2",
+    targets: ["discourse:858"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_03",
+    query: "Shri Dattaguru Bhagavat Gita Brahma Khanda Chapter 3",
+    targets: ["discourse:859"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_04",
+    query: "Shri Dattaguru Bhagavat Gita Vishnu Khanda Chapter 5",
+    targets: ["discourse:867"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_05",
+    query: "Shri Dattaguru Bhagavat Gita Shiva Khanda Chapter 9",
+    targets: ["discourse:879"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_06",
+    query: "Shri Dattaguru Bhagavat Gita Shiva Khanda Chapter 12",
+    targets: ["discourse:903"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_07",
+    query: "Parabrahma Gita The Divine Life of Shri Datta Swami",
+    targets: ["discourse:702"],
+    category: "Recovered Gita"
+  },
+  {
+    id: "gita_08",
+    query: "Rohit Gita discourse on testing devotees",
+    targets: ["discourse:707"],
+    category: "Recovered Gita"
+  },
+
+  // 9. Negative Controls (Out-of-Domain Rejection) (10)
+  {
+    id: "neg_01",
+    query: "What is the capital of France?",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_02",
+    query: "How do I bake a chocolate cake?",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_03",
+    query: "Who won the 2026 FIFA World Cup?",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_04",
+    query: "Latest stock price of Microsoft and Apple",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_05",
+    query: "How to install python on windows using powershell",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_06",
+    query: "Symptoms and treatment of common cold",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_07",
+    query: "Quantum electrodynamics and Feynman diagrams",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_08",
+    query: "Best hotels to stay in New York City",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_09",
+    query: "Formula 1 Grand Prix calendar and standings",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  },
+  {
+    id: "neg_10",
+    query: "asdfghjkl qwertyuiop zxcvbnm",
+    targets: [],
+    isNegative: true,
+    category: "Negative Control"
+  }
+];
+
+fs.writeFileSync(path.join(__dirname, 'expandedTestCases.json'), JSON.stringify(EXPANDED_TEST_CASES, null, 2));
+console.log(`Saved ${EXPANDED_TEST_CASES.length} test cases to expandedTestCases.json`);
+console.log(`Positive test cases: ${EXPANDED_TEST_CASES.filter(c => !c.isNegative).length}`);
+console.log(`Negative control cases: ${EXPANDED_TEST_CASES.filter(c => c.isNegative).length}`);
