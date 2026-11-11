@@ -2,9 +2,16 @@ node_modules/
 
 # macOS
 .DS_Store
+__MACOSX/
 
 # Logs
 *.log
+
+# Scratch and temporary testing files
+scratch/
+**/scratch/
+*.tmp
+*.bak
 
 # Generated backups / dumps
 **/backups/
@@ -15,6 +22,9 @@ mysql-pg-migrate/state
 **/public/assets/*
 !public/assets/
 !public/assets/*
+
+# Sub-tool build outputs
+transcriber/public/
 
 # Local Transcriber runtime, model cache, uploads, and artifacts
 transcriber/.venv/
