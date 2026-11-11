@@ -201,67 +201,177 @@ function HighlightedDocument({ text, highlights }) {
   safe.forEach((highlight, index) => {
     if (highlight.start < cursor) return;
     parts.push(text.slice(cursor, highlight.start));
-    parts.push(<mark id={`evidence-highlight-${index}`} key={`${highlight.start}:${highlight.end}`} title={highlight.label}>{text.slice(highlight.start, highlight.end)}</mark>);
+    parts.push(
+      <mark
+        id={index === 0 ? 'target-discourse-passage' : `evidence-highlight-${index}`}
+        key={`${highlight.start}:${highlight.end}`}
+        className={`qa-doc-highlight ${highlight.isTargetSnippet ? 'qa-target-passage-highlight' : ''}`}
+        title={highlight.label}
+      >
+        {text.slice(highlight.start, highlight.end)}
+      </mark>
+    );
     cursor = highlight.end;
   });
   parts.push(text.slice(cursor));
   return <div className="qa-full-document">{parts}</div>;
 }
 
-function DocumentViewer({ runtime, indexConnection, request, onClose }) {
+function DiscourseReaderView({ runtime, indexConnection, request, onBack }) {
   const [documentResult, setDocumentResult] = useState(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
+
   useEffect(() => {
     if (!request) return undefined;
     let active = true;
-    setDocumentResult(null); setError('');
-    api(runtime, '/documents/get', { body: { indexConnection, reference: request.reference, highlights: request.highlights || [] }, timeoutMs: 60000 })
-      .then((value) => { if (active) setDocumentResult(value.document); })
-      .catch((loadError) => { if (active) setError(loadError.message); });
+    setDocumentResult(null);
+    setError('');
+    setBusy(true);
+    api(runtime, '/documents/get', {
+      body: {
+        indexConnection,
+        reference: request.reference,
+        highlights: request.highlights || [],
+      },
+      timeoutMs: 60000,
+    })
+      .then((value) => {
+        if (active) {
+          let doc = value.document;
+          // Fallback: If no highlights mapped, locate targetText in full reconstructed text
+          if (doc && (!doc.highlights || doc.highlights.length === 0) && request.targetText && doc.text) {
+            const rawTarget = request.targetText.replace(/\.\.\./g, ' ').replace(/\s+/g, ' ').trim();
+            let idx = doc.text.indexOf(rawTarget);
+            let matchLen = rawTarget.length;
+            if (idx === -1 && rawTarget.length > 50) {
+              const prefix = rawTarget.slice(0, 50);
+              idx = doc.text.indexOf(prefix);
+              matchLen = prefix.length;
+            }
+            if (idx !== -1) {
+              doc = {
+                ...doc,
+                highlights: [{
+                  start: idx,
+                  end: idx + matchLen,
+                  label: 'Matching snippet passage',
+                  isTargetSnippet: true,
+                }]
+              };
+            }
+          } else if (doc && doc.highlights && doc.highlights.length > 0) {
+            doc = {
+              ...doc,
+              highlights: doc.highlights.map((h, i) => i === 0 ? { ...h, isTargetSnippet: true } : h)
+            };
+          }
+          setDocumentResult(doc);
+          setBusy(false);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setError(loadError.message);
+          setBusy(false);
+        }
+      });
     return () => { active = false; };
   }, [request, runtime.apiBasePath, indexConnection]);
+
   useEffect(() => {
     if (!documentResult?.highlights?.length) return;
-    requestAnimationFrame(() => document.getElementById('evidence-highlight-0')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    const timer = setTimeout(() => {
+      const el = document.getElementById('target-discourse-passage') ||
+                 document.getElementById('evidence-highlight-0') ||
+                 document.querySelector('.qa-doc-highlight');
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
   }, [documentResult]);
-  useEffect(() => {
-    if (!request) return undefined;
-    const previousOverflow = document.body.style.overflow;
-    const closeOnEscape = (event) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [request, onClose]);
+
   if (!request) return null;
-  return createPortal(
-    <div className="semantic-qa qa-document-portal">
-      <div className="qa-modal-backdrop">
-        <section className="qa-document-viewer" role="dialog" aria-modal="true" aria-label="Full discourse reader">
-          <header className="qa-document-header">
-            <div className="qa-document-heading"><span className="badge">Full discourse</span><h2>{documentResult?.title || request.title || 'Loading source…'}</h2></div>
-            <button className="btn" type="button" onClick={onClose}>Back to discourses</button>
-          </header>
-          <div className="qa-document-body">
-            {error ? <div className="alert warn">{error}</div> : null}
-            {!documentResult && !error ? <div className="hint qa-document-loading">Reconstructing all available discourse chunks…</div> : null}
-            {documentResult ? <>
-              <div className="toolbar qa-document-meta">
-                <span className="badge">{documentResult.sourceGroup}</span>
-                <span className="badge">{documentResult.chunks.length} chunk{documentResult.chunks.length === 1 ? '' : 's'}</span>
-                <span className="badge">{documentResult.highlights.length} highlighted passage{documentResult.highlights.length === 1 ? '' : 's'}</span>
-              </div>
-              <HighlightedDocument text={documentResult.text} highlights={documentResult.highlights} />
-            </> : null}
+
+  return (
+    <article className="qa-reader-page" aria-label="Full discourse reader">
+      {/* Top navigation bar */}
+      <nav className="qa-reader-top-bar" aria-label="Reader navigation">
+        <button
+          type="button"
+          className="qa-reader-back-btn"
+          onClick={onBack}
+        >
+          ← Back to search results
+        </button>
+        <div className="qa-reader-top-meta">
+          <span className="qa-reader-pill">📖 Full Discourse</span>
+          {documentResult?.sourceGroup ? (
+            <span className="qa-reader-subpill">{documentResult.sourceGroup}</span>
+          ) : null}
+          {documentResult?.chunks ? (
+            <span className="qa-reader-subpill">
+              {documentResult.chunks.length} section{documentResult.chunks.length === 1 ? '' : 's'}
+            </span>
+          ) : null}
+        </div>
+      </nav>
+
+      {/* Reader Content Sheet */}
+      <div className="qa-reader-container">
+        {busy ? (
+          <div className="qa-reader-loading">
+            <p>Loading full discourse…</p>
           </div>
-        </section>
+        ) : null}
+
+        {error ? <div className="alert warn" style={{ marginTop: 24 }}>{error}</div> : null}
+
+        {documentResult ? (
+          <>
+            <header className="qa-reader-header">
+              <div className="qa-reader-header-meta">
+                <span className="qa-reader-badge">Universal-Spirituality</span>
+                {documentResult.sourceGroup ? (
+                  <span className="qa-reader-id-tag">{documentResult.sourceGroup}</span>
+                ) : null}
+              </div>
+              <h1 className="qa-reader-title">
+                {documentResult.title || request.title || 'Discourse'}
+              </h1>
+              <div className="qa-reader-divider" />
+            </header>
+
+            <HighlightedDocument text={documentResult.text} highlights={documentResult.highlights} />
+
+            <footer className="qa-reader-footer">
+              <div className="qa-reader-divider" />
+              <div className="qa-reader-footer-actions">
+                <button
+                  type="button"
+                  className="qa-reader-back-btn large"
+                  onClick={onBack}
+                >
+                  ← Back to search results
+                </button>
+                <button
+                  type="button"
+                  className="qa-reader-scroll-top-btn"
+                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                >
+                  ↑ Top of discourse
+                </button>
+              </div>
+            </footer>
+          </>
+        ) : null}
       </div>
-    </div>,
-    document.body,
+    </article>
   );
 }
 
@@ -438,20 +548,79 @@ function GroundedSummary({ summary, relevantMatches, onOpenDocument, searchMode 
   );
 }
 
+function useColumnCount() {
+  const [columns, setColumns] = useState(() => {
+    if (typeof window === 'undefined') return 3;
+    if (window.innerWidth < 720) return 1;
+    if (window.innerWidth < 1100) return 2;
+    return 3;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      const count = width < 720 ? 1 : width < 1100 ? 2 : 3;
+      setColumns((prev) => (prev !== count ? count : prev));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return columns;
+}
+
 function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState('what is the real meaning of Gayatri mantra?');
   const [result, setResult] = useState(null);
   const [deepJob, setDeepJob] = useState(null);
   const [viewerRequest, setViewerRequest] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [latencyMs, setLatencyMs] = useState(null);
   const deepEvents = useRef(null);
-  const readyForSearch = connectionConfigured(settings.indexConnection);
+
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem('semantic-qa.searchTheme') || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  const switchTheme = (nextTheme) => {
+    setTheme(nextTheme);
+    try {
+      localStorage.setItem('semantic-qa.searchTheme', nextTheme);
+    } catch { /* ignore */ }
+  };
+
+  const columnCount = useColumnCount();
+
+  const columnsData = useMemo(() => {
+    const cols = Array.from({ length: columnCount }, () => []);
+    (result?.matches || []).forEach((match, idx) => {
+      cols[idx % columnCount].push({ match, originalIdx: idx });
+    });
+    return cols;
+  }, [result?.matches, columnCount]);
+
+  const isSemantic = settings.searchMode === 'semantic';
 
   useEffect(() => () => deepEvents.current?.close(), []);
 
+  const readyForSearch = connectionConfigured(settings.indexConnection);
+
   if (!readyForSearch) {
-    return <div className="card qa-empty-state"><h3>Index database credentials are required</h3><div className="hint">Configure the index PostgreSQL connection, initialize it, and complete a first sync before searching.</div><div className="toolbar"><button className="btn primary" onClick={() => onNavigate('setup')}>Open setup</button><button className="btn" onClick={() => onNavigate('settings')}>Open Settings</button></div></div>;
+    return (
+      <div className="card qa-empty-state">
+        <h3>Index database credentials are required</h3>
+        <div className="hint">Configure the index PostgreSQL connection, initialize it, and complete a first sync before searching.</div>
+        <div className="toolbar">
+          <button className="btn primary" onClick={() => onNavigate('setup')}>Open setup</button>
+          <button className="btn" onClick={() => onNavigate('settings')}>Open Settings</button>
+        </div>
+      </div>
+    );
   }
 
   const followDeepJob = (jobId) => {
@@ -468,21 +637,25 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
     ['status', 'progress', 'log'].forEach((name) => source.addEventListener(name, update));
   };
 
-  const search = async (event) => {
-    event.preventDefault();
-    if (!question.trim()) return;
+  // 1. Semantic Search Execution (1024-d Vectors + HNSW + Ollama / Deep AI)
+  const searchSemantic = async (event) => {
+    if (event) event.preventDefault();
+    const text = String(question || '').trim();
+    if (!text) return;
     setBusy(true);
     setError('');
     setResult(null);
     setDeepJob(null);
+    setLatencyMs(null);
     deepEvents.current?.close();
+    const start = Date.now();
     try {
       const response = await api(runtime, '/search', {
         body: {
           indexConnection: settings.indexConnection,
           ollamaBaseUrl: settings.ollamaBaseUrl,
-          question,
-          searchMode: settings.searchMode,
+          question: text,
+          searchMode: 'semantic',
           topK: settings.topK,
           threshold: settings.threshold,
           summary: {
@@ -501,6 +674,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
         },
         timeoutMs: 180000,
       });
+      setLatencyMs(Date.now() - start);
       setResult(response);
       if (response.deepSummaryJob?.id) {
         setDeepJob(response.deepSummaryJob);
@@ -521,6 +695,35 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
     } catch (cancelError) { setError(cancelError.message); }
   };
 
+  // 2. Distance Search Execution (Lexical proximity + GIN indices + Exact phrases)
+  const searchDistance = async (queryText = question) => {
+    const text = String(queryText || '').trim();
+    if (!text) return;
+    setBusy(true);
+    setError('');
+    setResult(null);
+    setLatencyMs(null);
+    const start = Date.now();
+    try {
+      const response = await api(runtime, '/search', {
+        body: {
+          indexConnection: settings.indexConnection,
+          ollamaBaseUrl: settings.ollamaBaseUrl,
+          question: text,
+          searchMode: 'distance',
+          topK: 35,
+        },
+        timeoutMs: 60000,
+      });
+      setLatencyMs(Date.now() - start);
+      setResult(response);
+    } catch (searchError) {
+      setError(searchError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const acceptedMatch = result?.acceptedMatch || null;
   const deepReady = deepJob?.status === 'completed' && deepJob?.result?.status === 'ready';
   const summaryEvidenceIds = new Set(
@@ -539,63 +742,342 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
       (result.relevantMatches || []).some((match) => String(match.sourceId) === String(item.sourceId)))
   );
 
+  if (viewerRequest) {
+    return (
+      <div className={`qa-stack qa-search-theme-${theme}`}>
+        <DiscourseReaderView
+          runtime={runtime}
+          indexConnection={settings.indexConnection}
+          request={viewerRequest}
+          onBack={() => {
+            setViewerRequest(null);
+            window.scrollTo({ top: 0, behavior: 'instant' });
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="qa-stack">
-      <form className="card qa-search-card" onSubmit={search}>
-        <div className="qa-card-title"><div><h3>{settings.searchMode === 'semantic' ? 'Semantic Search' : 'Search'}</h3><div className="hint">{settings.searchMode === 'semantic' ? 'Meaning-first retrieval over independently indexed answer passages.' : 'Exact phrase, PostgreSQL full-text, and trigram-distance ranking fused together.'}</div></div><div className="qa-mode-toggle" role="group" aria-label="Search mode"><button type="button" className={`btn ${settings.searchMode === 'semantic' ? 'primary' : ''}`} onClick={() => setSettings((current) => ({ ...current, searchMode: 'semantic' }))}>Semantic Search</button><button type="button" className={`btn ${settings.searchMode === 'search' ? 'primary' : ''}`} onClick={() => setSettings((current) => ({ ...current, searchMode: 'search' }))}>Search</button></div></div>
-        <div className="hint">
-          Verbatim Selection returns exact Swami passages quickly. Deep Search reads complete answers and independently adjudicates related teachings.
-        </div>
-        <textarea className="qa-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Enter a question…" />
-        <div className="toolbar">
-          <button className="btn primary" type="submit" disabled={busy || !question.trim()}>
-            {busy ? 'Searching…' : settings.summaryMode === 'deep' ? 'Run Deep Search' : settings.summaryMode === 'standard' ? 'Select verbatim teachings' : 'Search'}
-          </button>
-          <label className="field qa-summary-select"><span className="field-label">Answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Verbatim Selection</option><option value="deep">Deep Search</option></select></label>
-          {settings.summaryMode === 'deep' ? <label className="field qa-summary-select qa-device-choice"><span className="field-label">Deep Search processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select></label> : null}
-          <span className="badge">Top {settings.topK}</span>
-          <span className="badge">{settings.searchMode === 'semantic' ? `Threshold ${Number(settings.threshold).toFixed(2)}` : 'Exact + full-text + fuzzy RRF'}</span>
-          {settings.summaryMode === 'standard' ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
-          {settings.summaryMode === 'deep' ? <span className="badge">{settings.searchMode === 'semantic' ? `Score corpus · process top ${settings.deepSummaryMaxRecords}` : `Verify up to ${settings.deepSummaryMaxRecords} text matches`}</span> : null}
-        </div>
-      </form>
-      {error ? <div className="alert warn">{error}</div> : null}
-      {!acceptedMatch && result?.message && !deepReady ? <div className="alert warn qa-no-match">{result.message}</div> : null}
-      {!summaryCitationValid ? (
-        <div className="alert warn qa-no-match">The summary was withheld because its evidence citations did not pass relevance validation.</div>
-      ) : null}
-      {summaryCitationValid ? <GroundedSummary summary={result?.summary} relevantMatches={result?.relevantMatches} searchMode={result?.searchMode || settings.searchMode} onOpenDocument={setViewerRequest} /> : null}
-      <DeepSummary question={question} searchMode={result?.searchMode || settings.searchMode} job={deepJob} onOpenDocument={setViewerRequest} onCancel={cancelDeepSummary} />
-      {acceptedMatch && result?.summary?.status === 'unavailable' ? (
-        <div className="alert warn qa-no-match">Relevant evidence was found, but its semantic summary could not be prepared. The stored answer remains available below.</div>
-      ) : null}
-      {acceptedMatch ? (
-        <div className="qa-results">
-          <MatchRecord match={acceptedMatch} searchMode={result?.searchMode || settings.searchMode} onOpenDocument={setViewerRequest} label={result?.summary?.status === 'ready' ? 'Primary stored source' : 'Best answer'} />
-        </div>
-      ) : null}
-      {remainingMatches.length ? (
-        <details className="card qa-results-inspector">
-          <summary style={{ cursor: 'pointer', fontWeight: 800 }}>
-            {inspectorLabel} ({remainingMatches.length}) — inspection only
-          </summary>
-          <div className="hint" style={{ margin: '10px 0 14px' }}>
-            {settings.summaryMode === 'deep' ? 'Deep Search reads complete Swami units from these neighbors and may discard any of them.' : 'These are retrieval neighbors, not accepted answers and not Verbatim Selection evidence.'}
+    <div className={`qa-stack qa-search-theme-${theme}`}>
+      {/* Top Search Mode Selector: Semantic Search vs Distance Search */}
+      <div className="qa-search-mode-selector" role="tablist" aria-label="Search Mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isSemantic}
+          className={`qa-mode-btn ${isSemantic ? 'active' : ''}`}
+          onClick={() => {
+            setSettings((current) => ({ ...current, searchMode: 'semantic' }));
+            setResult(null);
+            setError('');
+          }}
+        >
+          <div className="qa-mode-title">✨ Semantic Search</div>
+          <div className="qa-mode-subtitle">1,024-d Vector Embeddings · HNSW Cosine Index · Ollama &amp; Deep AI</div>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!isSemantic}
+          className={`qa-mode-btn ${!isSemantic ? 'active' : ''}`}
+          onClick={() => {
+            setSettings((current) => ({ ...current, searchMode: 'distance' }));
+            setResult(null);
+            setError('');
+          }}
+        >
+          <div className="qa-mode-title">⚡ Distance Search</div>
+          <div className="qa-mode-subtitle">Lexical Proximity · Exact Phrases · GIN Indices &amp; .org Grid</div>
+        </button>
+      </div>
+
+      {/* =========================================================================
+          MODE 1: SEMANTIC SEARCH (Vector Embeddings, HNSW, Ollama, Deep Search)
+          ========================================================================= */}
+      {isSemantic ? (
+        <>
+          <form className="card qa-search-card" onSubmit={searchSemantic}>
+            <div className="qa-card-title">
+              <div>
+                <h3>Semantic Search</h3>
+                <div className="hint">
+                  Meaning-first retrieval over independently indexed answer passages using 1,024-dimensional vector embeddings, HNSW index cosine distance, and reciprocal rank fusion.
+                </div>
+              </div>
+            </div>
+            <div className="hint">
+              Verbatim Selection returns exact Swami passages quickly. Deep Search reads complete answers and independently adjudicates related teachings.
+            </div>
+            <textarea
+              className="qa-question"
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              placeholder="Enter a spiritual or philosophical question to search semantically…"
+            />
+            <div className="toolbar">
+              <button className="btn primary" type="submit" disabled={busy || !question.trim()}>
+                {busy ? 'Searching…' : settings.summaryMode === 'deep' ? 'Run Deep Search' : settings.summaryMode === 'standard' ? 'Select verbatim teachings' : 'Semantic Search'}
+              </button>
+              <label className="field qa-summary-select">
+                <span className="field-label">Answer mode</span>
+                <select
+                  value={settings.summaryMode}
+                  onChange={(event) => setSettings((current) => ({
+                    ...current,
+                    summaryMode: event.target.value,
+                    summaryEnabled: event.target.value === 'standard',
+                  }))}
+                >
+                  <option value="off">No Summary</option>
+                  <option value="standard">Verbatim Selection</option>
+                  <option value="deep">Deep Search</option>
+                </select>
+              </label>
+              {settings.summaryMode === 'deep' ? (
+                <label className="field qa-summary-select qa-device-choice">
+                  <span className="field-label">Deep Search processor</span>
+                  <select
+                    value={settings.summaryHardwarePreference}
+                    onChange={(event) => setSettings((current) => ({
+                      ...current,
+                      summaryHardwarePreference: event.target.value,
+                    }))}
+                  >
+                    <option value="auto">Auto (recommended)</option>
+                    <option value="gpu">Prefer GPU</option>
+                    <option value="cpu">CPU only</option>
+                  </select>
+                </label>
+              ) : null}
+              <span className="badge">Top {settings.topK}</span>
+              <span className="badge">Threshold {Number(settings.threshold).toFixed(2)}</span>
+              <span className="badge">1,024-d HNSW</span>
+              {settings.summaryMode === 'standard' ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
+              {settings.summaryMode === 'deep' ? <span className="badge">Score corpus · process top {settings.deepSummaryMaxRecords}</span> : null}
+            </div>
+          </form>
+
+          {error ? <div className="alert warn">{error}</div> : null}
+          {!acceptedMatch && result?.message && !deepReady ? <div className="alert warn qa-no-match">{result.message}</div> : null}
+          {!summaryCitationValid ? (
+            <div className="alert warn qa-no-match">The summary was withheld because its evidence citations did not pass relevance validation.</div>
+          ) : null}
+          {summaryCitationValid ? (
+            <GroundedSummary summary={result?.summary} relevantMatches={result?.relevantMatches} searchMode="semantic" onOpenDocument={setViewerRequest} />
+          ) : null}
+          <DeepSummary question={question} searchMode="semantic" job={deepJob} onOpenDocument={setViewerRequest} onCancel={cancelDeepSummary} />
+          {acceptedMatch && result?.summary?.status === 'unavailable' ? (
+            <div className="alert warn qa-no-match">Relevant evidence was found, but its semantic summary could not be prepared. The stored answer remains available below.</div>
+          ) : null}
+          {acceptedMatch ? (
+            <div className="qa-results">
+              <MatchRecord match={acceptedMatch} searchMode="semantic" onOpenDocument={setViewerRequest} label={result?.summary?.status === 'ready' ? 'Primary stored source' : 'Best answer'} />
+            </div>
+          ) : null}
+          {remainingMatches.length ? (
+            <details className="card qa-results-inspector">
+              <summary style={{ cursor: 'pointer', fontWeight: 800 }}>
+                {inspectorLabel} ({remainingMatches.length}) — inspection only
+              </summary>
+              <div className="hint" style={{ margin: '10px 0 14px' }}>
+                {settings.summaryMode === 'deep' ? 'Deep Search reads complete Swami units from these neighbors and may discard any of them.' : 'These are retrieval neighbors, not accepted answers and not Verbatim Selection evidence.'}
+              </div>
+              <div className="qa-results">
+                {remainingMatches.map((match, index) => (
+                  <MatchRecord
+                    match={match}
+                    searchMode="semantic"
+                    onOpenDocument={setViewerRequest}
+                    label={acceptedMatch ? 'Related / nearest source' : 'Nearest source'}
+                    key={`${match.sourceId ?? 'match'}:${match.relevanceRank ?? index}`}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </>
+      ) : (
+        /* =========================================================================
+           MODE 2: DISTANCE SEARCH (Lexical Proximity, Exact Phrases, .org Grid)
+           ========================================================================= */
+        <>
+          <div className="qa-distance-search-card">
+            <div className="qa-search-brand-row">
+              <div className="qa-brand-left">
+                <span className="qa-brand-tag">
+                  <span className="qa-brand-dot"></span>
+                  Universal-Spirituality
+                </span>
+                <span className="qa-brand-sep">•</span>
+                <span className="qa-corpus-meta">Deterministic Proximity Scoring · GIN Indexed</span>
+              </div>
+
+              {/* Theme Toggle Switch */}
+              <div className="qa-theme-switch-wrapper" role="radiogroup" aria-label="Page Theme">
+                <button
+                  type="button"
+                  className={`qa-theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}
+                  onClick={() => switchTheme('dark')}
+                  aria-checked={theme === 'dark'}
+                  role="radio"
+                >
+                  🌙 Dark (Blue)
+                </button>
+                <button
+                  type="button"
+                  className={`qa-theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}
+                  onClick={() => switchTheme('light')}
+                  aria-checked={theme === 'light'}
+                  role="radio"
+                >
+                  ☀️ Light
+                </button>
+              </div>
+            </div>
+
+            <form
+              className="qa-distance-search-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                searchDistance();
+              }}
+            >
+              <div className="qa-distance-input-wrapper">
+                <svg className="qa-distance-search-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="text"
+                  className="qa-distance-input"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="what is the real meaning of Gayatri mantra?"
+                  autoComplete="off"
+                  spellCheck="false"
+                />
+                {question ? (
+                  <button
+                    type="button"
+                    className="qa-distance-clear-btn"
+                    onClick={() => {
+                      setQuestion('');
+                      setResult(null);
+                    }}
+                    title="Clear search"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+
+              <button
+                type="submit"
+                className="qa-distance-submit-btn"
+                disabled={busy || !question.trim()}
+              >
+                {busy ? 'SEARCHING...' : 'SEARCH'}
+              </button>
+            </form>
+
+            <div className="qa-distance-suggestions">
+              <span className="qa-suggestion-label">SUGGESTED:</span>
+              <div className="qa-suggestion-chips-list">
+                {[
+                  'what is the real meaning of Gayatri mantra?',
+                  'What is the specialty of the Gayatri Mantra?',
+                  'Meaning of the Gayatri Mantra',
+                  'Clarifications on Gayathri Mantra',
+                  'Is the So-Called Gayatri Mantra, Actually the Savitri Mantra?',
+                ].map((queryText, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="qa-suggestion-chip"
+                    onClick={() => {
+                      setQuestion(queryText);
+                      searchDistance(queryText);
+                    }}
+                  >
+                    {queryText}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="qa-results">
-            {remainingMatches.map((match, index) => (
-              <MatchRecord
-                match={match}
-                searchMode={result?.searchMode || settings.searchMode}
-                onOpenDocument={setViewerRequest}
-                label={acceptedMatch ? 'Related / nearest source' : 'Nearest source'}
-                key={`${match.sourceId ?? 'match'}:${match.relevanceRank ?? index}`}
-              />
-            ))}
-          </div>
-        </details>
-      ) : null}
-      <DocumentViewer runtime={runtime} indexConnection={settings.indexConnection} request={viewerRequest} onClose={() => setViewerRequest(null)} />
+
+          {error ? <div className="alert warn" style={{ marginTop: 16 }}>{error}</div> : null}
+
+          {/* Grid Based Results: Theme-Aware (Dark = Blue Gradient with White Text, Light = White with Dark Text) */}
+          {result && (result.matches || []).length > 0 ? (
+            <div className="qa-distance-results-container">
+              <div className="qa-distance-results-meta">
+                <div className="qa-meta-left">
+                  Found <strong>{result.totalFound || result.matches?.length || 0}</strong> discourses in <strong>{latencyMs || result.executionTimeMs || 0} ms</strong>
+                </div>
+                <div className="qa-meta-right">
+                  Ranked by token proximity, exact phrase density &amp; title match
+                </div>
+              </div>
+
+              <div className="us-masonry-container">
+                {columnsData.map((colItems, colIdx) => (
+                  <div className="us-masonry-col" key={colIdx}>
+                    {colItems.map(({ match, originalIdx }) => (
+                      <article className="us-card" key={match.sourceId || originalIdx}>
+                        <header className="us-card-header">
+                          <div className="us-card-meta-bar">
+                            <span className="us-card-rank-badge">#{originalIdx + 1}</span>
+                            <div className="us-card-date">{match.formattedDate || match.date}</div>
+                          </div>
+                          <h4 className="us-card-title">{match.title}</h4>
+                        </header>
+
+                        <div className="us-card-body">
+                          <div
+                            className="us-card-snippet"
+                            dangerouslySetInnerHTML={{ __html: match.highlightedSnippet || match.snippet }}
+                          />
+
+                          {match.decisionSummary ? (
+                            <div className="us-card-decision" title="Ranking decision factors">
+                              🎯 {match.decisionSummary}
+                            </div>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            className="us-read-more"
+                            onClick={() =>
+                              setViewerRequest({
+                                reference: match.sourceId,
+                                title: match.title,
+                                targetText: match.targetPassage || match.snippet,
+                                highlights: match.passageOffset && match.passageOffset.end > match.passageOffset.start ? [{
+                                  sourceId: String(match.sourceId),
+                                  start: match.passageOffset.start,
+                                  end: match.passageOffset.end,
+                                  label: 'Matching snippet passage',
+                                }] : [],
+                              })
+                            }
+                          >
+                            Read More →
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -618,6 +1100,23 @@ function DiscoursesScreen({ runtime, settings, onNavigate }) {
     finally { setBusy(false); }
   };
   useEffect(() => { void load(page, submittedQuery); }, [page, submittedQuery, ready]);
+
+  if (viewerRequest) {
+    return (
+      <div className="qa-stack">
+        <DiscourseReaderView
+          runtime={runtime}
+          indexConnection={settings.indexConnection}
+          request={viewerRequest}
+          onBack={() => {
+            setViewerRequest(null);
+            window.scrollTo({ top: 0, behavior: 'instant' });
+          }}
+        />
+      </div>
+    );
+  }
+
   if (!ready) return <div className="card qa-empty-state"><h3>Index database credentials are required</h3><button className="btn primary" onClick={() => onNavigate('settings')}>Open Settings</button></div>;
   const pages = Math.max(1, Math.ceil(Number(result?.total || 0) / Number(result?.pageSize || 50)));
   return <div className="qa-stack">
@@ -638,7 +1137,6 @@ function DiscoursesScreen({ runtime, settings, onNavigate }) {
       </button>;
     })}</div>
     <div className="toolbar qa-pagination"><button className="btn" disabled={busy || page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button><span className="badge">Page {page} of {pages}</span><button className="btn" disabled={busy || page >= pages} onClick={() => setPage((value) => value + 1)}>Next</button></div>
-    <DocumentViewer runtime={runtime} indexConnection={settings.indexConnection} request={viewerRequest} onClose={() => setViewerRequest(null)} />
   </div>;
 }
 
@@ -900,7 +1398,7 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
 export default function SemanticQaTool({ runtime: providedRuntime }) {
   const runtime = { ...STANDALONE_RUNTIME, ...(providedRuntime || {}) };
   const storageKey = `${runtime.storagePrefix}.settings`;
-  const [tab, setTab] = useState('setup');
+  const [tab, setTab] = useState('search');
   const [settings, setSettings] = useState(() => {
     try { return mergeSettings(JSON.parse(localStorage.getItem(storageKey) || '{}')); }
     catch { return { ...DEFAULT_SETTINGS }; }
