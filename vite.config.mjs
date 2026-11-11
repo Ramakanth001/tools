@@ -1,11 +1,13 @@
-const path = require('node:path');
-const { createRequire } = require('node:module');
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const toolRequire = createRequire(path.resolve(__dirname, 'pg-backup/package.json'));
-const { defineConfig } = toolRequire('vite');
-const react = toolRequire('@vitejs/plugin-react');
 
-module.exports = defineConfig({
+export default defineConfig({
   plugins: [react()],
   publicDir: false,
   resolve: {
@@ -18,10 +20,37 @@ module.exports = defineConfig({
     ],
     dedupe: ['react', 'react-dom'],
   },
+  optimizeDeps: {
+    entries: ['src/ui/main.jsx'],
+    include: [
+      'react',
+      'react/jsx-runtime',
+      'react/jsx-dev-runtime',
+      'react-dom',
+      'react-dom/client',
+    ],
+  },
   server: {
+    host: '127.0.0.1',
     port: 5173,
+    watch: {
+      ignored: [
+        '**/backups/**',
+        '**/.venv/**',
+        '**/venv/**',
+        '**/node_modules/**',
+        '**/.git/**',
+        '**/public/**',
+        '**/models/**',
+        '**/whisper_models/**',
+        '**/output/**',
+        '**/exports/**',
+        '**/*.dump',
+        '**/*.sql*',
+      ],
+    },
     proxy: {
-      '/api': 'http://localhost:8787',
+      '/api': 'http://127.0.0.1:8787',
     },
   },
   build: {
