@@ -1,17 +1,26 @@
 export const DEFAULT_SETTINGS = {
-  settingsVersion: 4,
-  sourceConnection: { connectionString: '', host: '127.0.0.1', port: 5432, user: '', password: '', database: 'postgres', sslMode: 'disable' },
-  indexConnection: { connectionString: '', host: '127.0.0.1', port: 5432, user: '', password: '', database: 'postgres', sslMode: 'disable' },
+  settingsVersion: 6,
+  sourceConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'postgres', password: '', database: 'universal_qa_v2', sslMode: 'disable' },
+  indexConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'postgres', password: '', database: 'universal_qa_v2', sslMode: 'disable' },
   ollamaBaseUrl: 'http://127.0.0.1:11434',
-  model: 'embeddinggemma',
+  model: 'bge-m3',
   summaryModel: 'gemma3:4b',
-  deepSummaryModel: 'qwen3:14b-q8_0',
+  deepSummaryModel: 'qwen3:14b-q4_K_M',
   deepSummaryDeliberation: 'maximum',
   summaryHardwarePreference: 'auto',
-  mapping: { schema: '', table: '', idColumn: '', questionColumn: '', answerColumn: '', metadataColumns: [], groupColumn: '', orderColumn: '' },
-  topK: 5,
-  threshold: 0.60,
-  searchMode: 'semantic',
+  mapping: {
+    schema: 'public',
+    table: 'corpus_documents',
+    idColumn: 'document_id',
+    questionColumn: 'title',
+    answerColumn: 'display_text',
+    metadataColumns: ['source_type', 'original_record_id', 'master_id', 'question_context', 'raw_content_hash', 'display_text_hash', 'author', 'default_unit_kind', 'language', 'record_date', 'multimedia_filename', 'answer_unit_count', 'ambiguous', 'parser_report', 'legacy_aliases'],
+    groupColumn: 'source_group',
+    orderColumn: '',
+  },
+  topK: 35,
+  threshold: 0.45,
+  searchMode: 'search',
   summaryMode: 'standard',
   summaryEnabled: true,
   summaryMaxRecords: 15,
@@ -58,6 +67,8 @@ export const LOCAL_DEMO_SETTINGS = {
 export const UNIVERSAL_QA_SETTINGS = {
   ...LOCAL_DEMO_SETTINGS,
   threshold: 0.49,
+  model: 'bge-m3',
+  deepSummaryModel: 'qwen3:14b-q8_0',
   sourceConnection: {
     ...LOCAL_DEMO_SETTINGS.sourceConnection,
     database: 'universal_qa_source',
@@ -124,6 +135,24 @@ export function mergeSettings(value = {}) {
   const storedVersion = Math.max(1, Math.trunc(Number(value.settingsVersion) || 1));
   const timeoutValue = storedVersion < 3 ? DEFAULT_SETTINGS.deepSummaryTimeoutSeconds : value.deepSummaryTimeoutSeconds;
   const storedSource = { ...DEFAULT_SETTINGS.sourceConnection, ...(value.sourceConnection || {}) };
+  const storedIndex = { ...DEFAULT_SETTINGS.indexConnection, ...(value.indexConnection || {}) };
+  if (!storedIndex.user || !storedIndex.database || Number(storedIndex.port) === 5432) {
+    storedIndex.host = '127.0.0.1';
+    storedIndex.port = 5433;
+    storedIndex.user = 'postgres';
+    storedIndex.database = 'universal_qa_v2';
+  }
+  if (!storedSource.user || !storedSource.database || Number(storedSource.port) === 5432) {
+    storedSource.host = '127.0.0.1';
+    storedSource.port = 5433;
+    storedSource.user = 'postgres';
+    storedSource.database = 'universal_qa_v2';
+  }
+  if (storedVersion < 5 && (storedIndex.database === 'universal_qa_index' || !storedIndex.database)) {
+    storedIndex.database = 'universal_qa_v2';
+  }
+  const modelToUse = (storedVersion < 5 && value.model === 'embeddinggemma') ? 'bge-m3' : (value.model || DEFAULT_SETTINGS.model);
+  const thresholdToUse = storedVersion < 5 && (value.threshold === 0.49 || value.threshold === 0.60) ? 0.45 : (value.threshold ?? DEFAULT_SETTINGS.threshold);
   const storedMapping = { ...DEFAULT_SETTINGS.mapping, ...(value.mapping || {}) };
   const migrateUniversalChunks = storedSource.database === 'universal_qa_source' &&
     (!storedMapping.table || storedMapping.table === 'qa_records');
@@ -131,7 +160,9 @@ export function mergeSettings(value = {}) {
     ...DEFAULT_SETTINGS,
     ...value,
     settingsVersion: DEFAULT_SETTINGS.settingsVersion,
-    searchMode: ['semantic', 'search'].includes(value.searchMode) ? value.searchMode : DEFAULT_SETTINGS.searchMode,
+    model: modelToUse,
+    threshold: thresholdToUse,
+    searchMode: ['semantic', 'search', 'distance'].includes(value.searchMode) ? value.searchMode : DEFAULT_SETTINGS.searchMode,
     summaryMode: ['off', 'standard', 'deep'].includes(summaryMode) ? summaryMode : DEFAULT_SETTINGS.summaryMode,
     summaryHardwarePreference: ['auto', 'gpu', 'cpu'].includes(value.summaryHardwarePreference) ? value.summaryHardwarePreference : DEFAULT_SETTINGS.summaryHardwarePreference,
     deepSummaryMaxRecords: Math.max(1, Math.min(100, Math.trunc(Number(value.deepSummaryMaxRecords) || DEFAULT_SETTINGS.deepSummaryMaxRecords))),
@@ -140,7 +171,7 @@ export function mergeSettings(value = {}) {
     deepSummaryParallelRequests: 1,
     deepSummaryTimeoutSeconds: Math.max(60, Math.min(900, Math.trunc(Number(timeoutValue) || DEFAULT_SETTINGS.deepSummaryTimeoutSeconds))),
     sourceConnection: { ...storedSource, password: '', connectionString: '' },
-    indexConnection: { ...DEFAULT_SETTINGS.indexConnection, ...(value.indexConnection || {}), password: '', connectionString: '' },
+    indexConnection: { ...storedIndex, password: '', connectionString: '' },
     mapping: migrateUniversalChunks ? { ...UNIVERSAL_QA_SETTINGS.mapping } : storedMapping,
   };
 }
