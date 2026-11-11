@@ -275,18 +275,32 @@ function rerankPassageMatches(rows, query, limit = 5) {
     if (!passages.length) continue;
 
     const best = passages[0];
-    const exactQaDiscovery = sourceRows[0]?.metadata?.source_type === 'qa' &&
-      passages.some((passage) => passage.discoveryExact);
+    const cleanQuery = normalizedComparableText(query).toLocaleLowerCase().replace(/[?.,!;:\s-]+/gu, ' ').trim();
+    const cleanTitle = normalizedComparableText(sourceRows[0]?.question || '').toLocaleLowerCase().replace(/[?.,!;:\s-]+/gu, ' ').trim();
+    const exactQuestionMatch = Boolean(cleanQuery && cleanTitle && cleanQuery === cleanTitle);
+    const discoveryExactMatch = passages.some((passage) => passage.discoveryExact);
+    const titlePhraseMatch = Boolean(
+      cleanQuery && cleanTitle && cleanQuery.length >= 8 && (cleanTitle.includes(cleanQuery) || cleanQuery.includes(cleanTitle))
+    );
     const supportingPassages = passages.filter((passage, index) => (
       index > 0 && passage.semanticSimilarity >= Math.max(0.35, best.semanticSimilarity - 0.12)
     )).length;
-    // Passage meaning is the acceptance signal. Independent semantic support can
-    // only add a small bonus; word overlap and stored titles add nothing.
+
+    // Both whole discourse content and title are evaluated.
+    // Whole content is searched across all passages; if the question/title is an
+    // exact match or strong phrase match, give a decisive relative score boost.
+    let titleBoost = 0;
+    if (exactQuestionMatch || discoveryExactMatch) {
+      titleBoost = 0.10;
+    } else if (titlePhraseMatch) {
+      titleBoost = 0.05;
+    } else if (best.discoverySimilarity > 0.70) {
+      titleBoost = (best.discoverySimilarity - 0.70) * 0.08;
+    }
+    const supportBonus = Math.min(0.04, supportingPassages * 0.015);
     const relevanceScore = Math.min(
       1,
-      exactQaDiscovery
-        ? 1
-        : Math.max(best.semanticSimilarity, best.discoverySimilarity * 0.92) + Math.min(0.03, supportingPassages * 0.015),
+      Math.max(best.semanticSimilarity, best.discoverySimilarity) + titleBoost + supportBonus,
     );
     const representative = sourceRows.find((row) => Number(row.passageIndex) === best.passageIndex) || sourceRows[0];
     rankedRecords.push({
@@ -298,9 +312,9 @@ function rerankPassageMatches(rows, query, limit = 5) {
       rankingSignals: {
         supportingPassages,
         lexicalWeight: 0,
-        titleWeight: 0,
-        questionWeight: 0,
-        exactQaDiscovery,
+        titleWeight: titleBoost,
+        questionWeight: exactQuestionMatch ? 1 : 0,
+        exactQaDiscovery: exactQuestionMatch || discoveryExactMatch,
       },
     });
   }
