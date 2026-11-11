@@ -81,6 +81,14 @@ app.get(/.*/, async (_req, res) => {
   }
 });
 
+app.use((err, _req, res, _next) => {
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || 'Internal Server Error';
+  if (!res.headersSent) {
+    res.status(status).json({ ok: false, error: message });
+  }
+});
+
 const server = app.listen(port, host, () => {
   const shownHost = host === '127.0.0.1' ? 'localhost' : host;
   if (host !== '127.0.0.1' && host !== '::1') {

@@ -47,7 +47,15 @@ if (!binPath) {
   process.exit(127);
 }
 
-const result = spawnSync(process.execPath, [binPath, ...args], { stdio: 'inherit', cwd: process.cwd() });
+const nodeOptions = process.env.NODE_OPTIONS || '';
+const env = {
+  ...process.env,
+  NODE_OPTIONS: nodeOptions.includes('--experimental-require-module')
+    ? nodeOptions
+    : `${nodeOptions} --experimental-require-module`.trim(),
+};
+
+const result = spawnSync(process.execPath, [binPath, ...args], { stdio: 'inherit', cwd: process.cwd(), env });
 if (result.error) {
   console.error(result.error.message);
   process.exit(1);

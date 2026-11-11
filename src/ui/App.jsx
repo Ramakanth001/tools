@@ -67,6 +67,57 @@ function usePathname() {
   return [pathname, setPathname];
 }
 
+
+class ToolErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Tool rendering error:', error, errorInfo);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.toolId !== this.props.toolId && this.state.hasError) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="panel" style={{ margin: '24px 0', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
+          <div className="panel-header" style={{ background: 'rgba(239, 68, 68, 0.1)' }}>
+            <h3 style={{ color: '#ef4444', margin: 0 }}>⚠️ Error loading {this.props.toolName || 'tool'}</h3>
+          </div>
+          <div className="panel-body">
+            <p className="hint" style={{ color: '#fca5a5' }}>
+              An unexpected client-side error occurred while rendering this tool.
+            </p>
+            <pre style={{ background: '#0f172a', color: '#fca5a5', padding: 14, borderRadius: 8, overflowX: 'auto', fontSize: 13 }}>
+              {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
+            </pre>
+            <div className="toolbar" style={{ marginTop: 16 }}>
+              <button className="btn primary" type="button" onClick={() => this.setState({ hasError: false, error: null })}>
+                Try Again
+              </button>
+              <button className="btn" type="button" onClick={() => (window.location.href = '/')}>
+                Back to All Tools
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function navigate(to, setPathname) {
   if (typeof window === 'undefined') return;
   if (window.location.pathname === to) return;
@@ -112,7 +163,7 @@ export default function App() {
           </div>
         </div>
 
-        <ToolComponent runtime={activeTool.runtime} />
+        <ToolErrorBoundary toolId={activeTool.id} toolName={activeTool.name}><ToolComponent runtime={activeTool.runtime} /></ToolErrorBoundary>
       </div>
     );
   }
