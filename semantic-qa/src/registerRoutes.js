@@ -12,6 +12,7 @@ const {
   MAX_DEEP_REQUEST_TIMEOUT_MS,
 } = require('./deepSummaryManager');
 const { reconstructDocument, mapDocumentHighlights } = require('./documentService');
+const distanceSearch = require('./distanceSearch');
 const {
   buildLexicalQuery,
   buildQueryEmbeddingText,
@@ -67,7 +68,7 @@ const OllamaSchema = z.object({
 
 const SummaryModelSchema = z.object({
   summaryModel: z.string().trim().min(1).default('gemma3:4b'),
-  deepSummaryModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q8_0'),
+  deepSummaryModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q4_K_M'),
   hardwarePreference: z.enum(['auto', 'gpu', 'cpu']).default('auto'),
 });
 
@@ -119,6 +120,7 @@ function indexCompatibility(status) {
 function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', deps = {} } = {}) {
   const db = deps.database || database;
   const embedding = deps.ollama || ollama;
+  const distanceEngine = deps.distanceSearch || distanceSearch;
   const syncManager = deps.syncManager || createSyncManager({ db, embed: embedding.embedTexts, probe: embedding.testOllama });
   const deepSummaryManager = deps.deepSummaryManager || createDeepSummaryManager({
     requireThinking: embedding.requireThinkingModel,
@@ -338,14 +340,14 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       indexConnection: ConnectionSchema,
       ollamaBaseUrl: z.string().url().default('http://127.0.0.1:11434'),
       question: z.string().trim().min(1).max(20000),
-      searchMode: z.enum(['semantic', 'search']).default('semantic'),
-      topK: z.coerce.number().int().min(1).max(20).default(5),
+      searchMode: z.enum(['semantic', 'search', 'distance']).default('semantic'),
+      topK: z.coerce.number().int().min(1).max(100).optional(),
       threshold: z.coerce.number().min(-1).max(1).default(0.60),
       summary: z.object({
         enabled: z.boolean().default(false),
         mode: z.enum(['off', 'standard', 'deep']).optional(),
         model: z.string().trim().min(1).default('gemma3:4b'),
-        deepModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q8_0'),
+        deepModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q4_K_M'),
         deliberation: z.enum(['maximum']).default('maximum'),
         maxRecords: z.coerce.number().int().min(1).max(MAX_RECORDS).default(DEFAULT_MAX_RECORDS),
         maxLines: z.coerce.number().int().min(1).max(MAX_LINES).default(DEFAULT_MAX_LINES),
@@ -357,7 +359,7 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         enabled: false,
         mode: 'off',
         model: 'gemma3:4b',
-        deepModel: 'qwen3:14b-q8_0',
+        deepModel: 'qwen3:14b-q4_K_M',
         deliberation: 'maximum',
         maxRecords: DEFAULT_MAX_RECORDS,
         maxLines: DEFAULT_MAX_LINES,
@@ -370,6 +372,37 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
     const data = parseOrReply(schema, req.body, res);
     if (!data) return;
     try {
+      if (data.searchMode === 'distance') {
+        const targetLimit = Math.max(1, Math.min(100, Number(data.topK != null ? data.topK : 35)));
+        if (typeof db.withPool === 'function') {
+          return await db.withPool(data.indexConnection, async (pool) => {
+            const distanceResult = await distanceEngine.searchDistanceCorpus(pool, {
+              query: data.question,
+              limit: targetLimit,
+            });
+            return res.json({
+              ok: true,
+              searchMode: 'distance',
+              executionTimeMs: distanceResult.executionTimeMs,
+              totalFound: distanceResult.totalFound,
+              matches: distanceResult.matches,
+              query: data.question,
+            });
+          });
+        }
+        const distanceResult = await distanceEngine.searchDistanceCorpus(null, {
+          query: data.question,
+          limit: targetLimit,
+        });
+        return res.json({
+          ok: true,
+          searchMode: 'distance',
+          executionTimeMs: distanceResult?.executionTimeMs || 0,
+          totalFound: distanceResult?.totalFound || 0,
+          matches: distanceResult?.matches || [],
+          query: data.question,
+        });
+      }
       const summaryMode = data.summary.mode || (data.summary.enabled ? 'standard' : 'off');
       const status = await db.getIndexStatus(data.indexConnection);
       if (!status.initialized || !status.corpus || !status.recordCount) {
@@ -451,11 +484,12 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           return res.status(409).json({ ok: false, error: 'Embedding dimension changed; run a full rebuild.' });
         }
       }
+      const effectiveTopK = Math.max(1, Math.min(100, Number(data.topK != null ? data.topK : 5)));
       const rankedRecordLimit = summaryMode === 'deep'
-        ? Math.max(data.topK, data.summary.deepMaxRecords)
+        ? Math.max(effectiveTopK, data.summary.deepMaxRecords)
         : summaryMode === 'standard'
-          ? Math.max(data.topK, data.summary.maxRecords * 4)
-        : data.topK;
+          ? Math.max(effectiveTopK, data.summary.maxRecords * 4)
+        : effectiveTopK;
       // The visible result count must not shrink discovery recall. Exact source
       // questions can lead to answer passages whose own embedding is much less
       // similar than the question, so always fuse a broad bounded candidate pool.
@@ -489,7 +523,7 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       );
       const effectiveThreshold = needsSemanticVector ? data.threshold : SEARCH_THRESHOLD;
       const rankedResponse = buildSearchResponse(
-        rankedMatches.slice(0, data.topK),
+        rankedMatches.slice(0, effectiveTopK),
         effectiveThreshold,
         data.question,
       );
