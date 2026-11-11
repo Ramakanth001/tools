@@ -7,7 +7,7 @@ This repository is a local web workspace for developer utilities. It has a share
 | `pg-backup` | PostgreSQL backup runner, schema snapshot, schema visualizer, history, settings | `http://localhost:5173` | `http://localhost:8787/api` | `/tools/pg-backup` |
 | `mysql-tool` | MySQL backup runner, history, settings | `http://localhost:5174` | `http://localhost:8788/api` | `/tools/mysql-tool` |
 | `mysql-pg-migrate` | MySQL-to-PostgreSQL migration workbench | `http://localhost:5175` | `http://localhost:8789/api` | `/tools/mysql-pg-migrate` |
-| `semantic-qa` | Verbatim semantic retrieval over a PostgreSQL Q&A corpus | `http://localhost:5176` | `http://localhost:8790/api` | `/tools/semantic-qa` |
+| `semantic-qa` | Verbatim semantic retrieval & deterministic distance-based search over a PostgreSQL Q&A corpus ([Distance Search Guide](./semantic-qa/DISTANCE_SEARCH_README.md)) | `http://localhost:5176` | `http://localhost:8790/api` | `/tools/semantic-qa` |
 | `gpt` | Private conversational research over the local spiritual corpus | `http://localhost:5178` | `http://localhost:8793/api` | `/tools/gpt` |
 | `transcriber` | Local Whisper audio/video transcription with TXT/SRT exports | `http://localhost:5177` | `http://localhost:8791/api` | `/tools/transcriber` |
 | `self-voice-clone` | Personal voice enrollment, diagnostics, adaptation, and local synthesis | Shared UI | `http://localhost:8792/v1` | `/tools/self-voice-clone` |
