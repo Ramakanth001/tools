@@ -2,7 +2,8 @@ const path = require('node:path');
 const { requireToolDep, resolveToolDep } = require('./requireToolDep');
 
 const { defineConfig } = requireToolDep('vite');
-const react = requireToolDep('@vitejs/plugin-react');
+const reactPlugin = requireToolDep('@vitejs/plugin-react');
+const react = reactPlugin.default || reactPlugin;
 module.exports = defineConfig({
   plugins: [react()],
   publicDir: false,
