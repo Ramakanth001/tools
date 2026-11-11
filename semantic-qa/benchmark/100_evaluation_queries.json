@@ -1,0 +1,802 @@
+[
+  {
+    "id": 1,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "what is the real meaning of Gayatri mantra?",
+    "primaryTopic": "gayatri",
+    "expectedPattern": "gayatri|gayathri",
+    "description": "Foundational definition of Gayatri as devotional song"
+  },
+  {
+    "id": 2,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "Gāyatrī mantra",
+    "primaryTopic": "gayatri",
+    "expectedPattern": "gayatri|gayathri",
+    "description": "IAST transliterated form of Gayatri mantra"
+  },
+  {
+    "id": 3,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "Is Gayatri a Vedic meter or a specific deity?",
+    "primaryTopic": "gayatri",
+    "expectedPattern": "gayatri|gayathri|meter",
+    "description": "Gayatri chandas vs deity distinction"
+  },
+  {
+    "id": 4,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "Can women chant the Gayatri mantra?",
+    "primaryTopic": "gayatri",
+    "expectedPattern": "women|ladies|g[aā]+y[aā]t[h]?r[iī]",
+    "description": "Universal eligibility of women for Gayatri"
+  },
+  {
+    "id": 5,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "Is the so-called Gayatri Mantra actually the Savitri Mantra?",
+    "primaryTopic": "savitri",
+    "expectedPattern": "s[aā]v[iī]t[h]?r[iī]|g[aā]+y[aā]t[h]?r[iī]",
+    "description": "Rigvedic verse dedicated to Savita"
+  },
+  {
+    "id": 6,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "what is the real meaning of Sandhyavandanam?",
+    "primaryTopic": "sandhyavandanam",
+    "expectedPattern": "sandhya.*vandan|sandhyavandan",
+    "description": "Daily worship practice of twilight contemplation"
+  },
+  {
+    "id": 7,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "What is the importance of Sandhyaa Vandanam?",
+    "primaryTopic": "sandhyavandanam",
+    "expectedPattern": "importance.*sandhya|sandhya.*vandan",
+    "description": "Core spiritual significance of Sandhyavandanam"
+  },
+  {
+    "id": 8,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "Can a cinema song become the Gayatri Mantra?",
+    "primaryTopic": "gayatri",
+    "expectedPattern": "cinema song|movie song|g[aā]+y[aā]t[h]?r[iī]",
+    "description": "Devotional emotion turning songs into Gayatri"
+  },
+  {
+    "id": 9,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "Adiparaashakti relationship with Savita devatha",
+    "primaryTopic": "adiparashakti",
+    "expectedPattern": "s[aā]v[iī]t[h]?[aā]|[aā]+d[iī]p[aā]r[aā]s?[h]?akt[h]?[iī]",
+    "description": "Supreme energy relationship with solar deity"
+  },
+  {
+    "id": 10,
+    "domain": "Gayatri Mantra & Rituals",
+    "query": "meaning of the upasthana mantras chanted in Sandhyavandana",
+    "primaryTopic": "sandhyavandanam",
+    "expectedPattern": "upasthana|sandhya|g[aā]+y[aā]t[h]?r[iī]",
+    "description": "Prayer to Sun in Sandhyavandanam"
+  },
+  {
+    "id": 11,
+    "domain": "Upanayanam & Rituals",
+    "query": "what is the real meaning of Upanayanam?",
+    "primaryTopic": "upanayanam",
+    "expectedPattern": "upanayana",
+    "description": "True definition of Upanayanam as coming close to God"
+  },
+  {
+    "id": 12,
+    "domain": "Upanayanam & Rituals",
+    "query": "significance of three strings in holy cross belt in Upanayanam",
+    "primaryTopic": "upanayanam",
+    "expectedPattern": "three strings|cross belt|holy thread|upanayanam",
+    "description": "Symbolism of Brahma Sutra strings"
+  },
+  {
+    "id": 13,
+    "domain": "Upanayanam & Rituals",
+    "query": "What is the true inner meaning of Yajna or sacrifice?",
+    "primaryTopic": "yajna",
+    "expectedPattern": "yajna|yagna|sacrifice",
+    "description": "Offering food to hungry living beings vs ghee in fire"
+  },
+  {
+    "id": 14,
+    "domain": "Upanayanam & Rituals",
+    "query": "Why do we burn valuable food and ghee in physical fire during Yajna?",
+    "primaryTopic": "yajna",
+    "expectedPattern": "burning.*ghee|food.*fire|yajna",
+    "description": "Rebuking physical wastage in sacrificial rituals"
+  },
+  {
+    "id": 15,
+    "domain": "Upanayanam & Rituals",
+    "query": "What is the real symbolism of temples and ritual worship?",
+    "primaryTopic": "temple",
+    "expectedPattern": "symbolism.*temple|rituals|temple",
+    "description": "Physical temple as school for developing devotion"
+  },
+  {
+    "id": 16,
+    "domain": "Upanayanam & Rituals",
+    "query": "Why is idol worship or Pratika Upasana practiced in Hinduism?",
+    "primaryTopic": "worship",
+    "expectedPattern": "statue|idol|pratika|upasana",
+    "description": "Representative models for preliminary devotion"
+  },
+  {
+    "id": 17,
+    "domain": "Upanayanam & Rituals",
+    "query": "Is the sacred thread Yajnopavitam restricted by caste or gender?",
+    "primaryTopic": "yajnopavitam",
+    "expectedPattern": "thread|yajnopavitam|caste|upanayanam",
+    "description": "Eligibility for sacred thread based on guna and karma"
+  },
+  {
+    "id": 18,
+    "domain": "Upanayanam & Rituals",
+    "query": "Can a person perform spiritual rituals without knowing the meaning of mantras?",
+    "primaryTopic": "mantra",
+    "expectedPattern": "meaning.*mantra|without knowing",
+    "description": "Importance of jnana over blind recitation"
+  },
+  {
+    "id": 19,
+    "domain": "Upanayanam & Rituals",
+    "query": "What is the purpose of ringing bells and lighting camphor during Arati?",
+    "primaryTopic": "arati",
+    "expectedPattern": "arati|bell|camphor|ritual|swami answers",
+    "description": "Inner psychological symbolism of temple worship steps"
+  },
+  {
+    "id": 20,
+    "domain": "Upanayanam & Rituals",
+    "query": "Should spiritual seekers perform Shraddha ceremony for departed ancestors?",
+    "primaryTopic": "shraddha",
+    "expectedPattern": "shraddha|ancestor|departed|death ritual|cremation",
+    "description": "True philosophical meaning of feeding in Shraddha"
+  },
+  {
+    "id": 21,
+    "domain": "Vedantic Philosophy",
+    "query": "true interpretation of Shankara Advaita philosophy",
+    "primaryTopic": "shankara",
+    "expectedPattern": "shankara|sankara|advaita",
+    "description": "Context and purpose of Shankara monism"
+  },
+  {
+    "id": 22,
+    "domain": "Vedantic Philosophy",
+    "query": "Why did Shankara say that the individual soul is God Himself?",
+    "primaryTopic": "shankara",
+    "expectedPattern": "shankara|advaita|soul.*god",
+    "description": "Atheistic context in Shankara time and beginner psychology"
+  },
+  {
+    "id": 23,
+    "domain": "Vedantic Philosophy",
+    "query": "Why is there a contradiction between the philosophies of Shankara, Ramanuja and Madhva?",
+    "primaryTopic": "philosophy",
+    "expectedPattern": "shankara.*ramanuja|contradiction.*philosoph",
+    "description": "Reconciling three Vedantic masters as three steps"
+  },
+  {
+    "id": 24,
+    "domain": "Vedantic Philosophy",
+    "query": "What is the difference between Maya and Mula Maya?",
+    "primaryTopic": "maya",
+    "expectedPattern": "maya.*mula maya|mula maayaa",
+    "description": "Cosmic illusion vs root primordial energy"
+  },
+  {
+    "id": 25,
+    "domain": "Vedantic Philosophy",
+    "query": "Is the world real or unreal according to Mithya?",
+    "primaryTopic": "mithya",
+    "expectedPattern": "mithya|world.*unreal|real",
+    "description": "Relative reality of creation for God vs soul"
+  },
+  {
+    "id": 26,
+    "domain": "Vedantic Philosophy",
+    "query": "What is the nature of the Unimaginable God or Parabrahman?",
+    "primaryTopic": "parabrahman",
+    "expectedPattern": "unimaginable|parabrahman|parabrahma",
+    "description": "Beyond human intellect, space, and time"
+  },
+  {
+    "id": 27,
+    "domain": "Vedantic Philosophy",
+    "query": "How does pure awareness differ from the ultimate Creator God?",
+    "primaryTopic": "awareness",
+    "expectedPattern": "awareness|soul|creator",
+    "description": "Refutation of awareness being original God"
+  },
+  {
+    "id": 28,
+    "domain": "Vedantic Philosophy",
+    "query": "What is the concept of vivartavada vs parinamavada?",
+    "primaryTopic": "vivarta",
+    "expectedPattern": "vivarta|parinama|creation",
+    "description": "Apparent modification vs real transformation theories"
+  },
+  {
+    "id": 29,
+    "domain": "Vedantic Philosophy",
+    "query": "How does Datta Swami correlate Advaita, Vishishtadvaita and Dvaita?",
+    "primaryTopic": "samanvaya",
+    "expectedPattern": "samanvaya|correlation|advaita.*dvaita",
+    "description": "Three stages of spiritual student education"
+  },
+  {
+    "id": 30,
+    "domain": "Vedantic Philosophy",
+    "query": "Can the individual soul ever become the absolute Creator of the universe?",
+    "primaryTopic": "soul",
+    "expectedPattern": "soul.*creator|creation.*universe|unimaginable god.*imaginable soul|every soul not god",
+    "description": "Impossibility of individual soul creating cosmos"
+  },
+  {
+    "id": 31,
+    "domain": "Human Incarnation",
+    "query": "What is the real identity mark for recognizing the human incarnation of the Lord?",
+    "primaryTopic": "incarnation",
+    "expectedPattern": "identity mark|human incarnation|recognizing",
+    "description": "True sign is spiritual knowledge (Prajnanam Brahma)"
+  },
+  {
+    "id": 32,
+    "domain": "Human Incarnation",
+    "query": "Why is the worship of a human incarnation better than that of a statue?",
+    "primaryTopic": "incarnation",
+    "expectedPattern": "statue|human incarnation.*better",
+    "description": "Clarifying doubts and receiving live spiritual guidance"
+  },
+  {
+    "id": 33,
+    "domain": "Human Incarnation",
+    "query": "Why do people easily accept past incarnations but neglect the contemporary human incarnation?",
+    "primaryTopic": "incarnation",
+    "expectedPattern": "past incarnation|contemporary|neglect",
+    "description": "Repulsion between common media (human ego and jealousy)"
+  },
+  {
+    "id": 34,
+    "domain": "Human Incarnation",
+    "query": "How to distinguish between Sadguru and Guru?",
+    "primaryTopic": "sadguru",
+    "expectedPattern": "sadguru.*guru|distinguish.*guru",
+    "description": "Guru teaches worldly/scriptural texts; Sadguru is God in human form"
+  },
+  {
+    "id": 35,
+    "domain": "Human Incarnation",
+    "query": "What are the causes for failing in the tests of Lord Datta?",
+    "primaryTopic": "datta",
+    "expectedPattern": "tests of datta|failing.*tests",
+    "description": "Ego, jealousy, and attachment to money and family"
+  },
+  {
+    "id": 36,
+    "domain": "Human Incarnation",
+    "query": "How does God enter into the human body to become an Incarnation?",
+    "primaryTopic": "incarnation",
+    "expectedPattern": "enter.*human|entry of god|medium|contemporary human incarnation|god enters",
+    "description": "Electric current pervading wire metaphor"
+  },
+  {
+    "id": 37,
+    "domain": "Human Incarnation",
+    "query": "Can two contemporary human incarnations exist at the same time?",
+    "primaryTopic": "incarnation",
+    "expectedPattern": "two.*incarnation|contemporary",
+    "description": "Parashurama and Rama coexistence explanation"
+  },
+  {
+    "id": 38,
+    "domain": "Human Incarnation",
+    "query": "Why did Lord Krishna act like an ordinary human being at times?",
+    "primaryTopic": "krishna",
+    "expectedPattern": "krishna|human role|ordinary",
+    "description": "Preserving the human role without horrifying devotees"
+  },
+  {
+    "id": 39,
+    "domain": "Human Incarnation",
+    "query": "What is the role of miracles performed by the Human Incarnation?",
+    "primaryTopic": "miracle",
+    "expectedPattern": "miracle.*incarnation|miracles|identifying characteristic",
+    "description": "Visiting card proof of unimaginable power"
+  },
+  {
+    "id": 40,
+    "domain": "Human Incarnation",
+    "query": "How to avoid ego and jealousy towards the contemporary human incarnation?",
+    "primaryTopic": "jealousy",
+    "expectedPattern": "ego.*jealousy|contemporary",
+    "description": "Conquering repulsive forces towards the physical medium"
+  },
+  {
+    "id": 41,
+    "domain": "Pravritti & Nivritti",
+    "query": "difference between pravritti and nivritti",
+    "primaryTopic": "pravritti",
+    "expectedPattern": "pravr[iu]tti|nivr[iu]tti",
+    "description": "Social morality in the world vs personal devotion to God"
+  },
+  {
+    "id": 42,
+    "domain": "Pravritti & Nivritti",
+    "query": "Is Nivritti mandatory for all human beings or only an option?",
+    "primaryTopic": "nivritti",
+    "expectedPattern": "nivr[iu]tti.*mandatory|discouraged|pravrutti and nivrutti",
+    "description": "Pravritti is compulsory syllabus; Nivritti is voluntary research"
+  },
+  {
+    "id": 43,
+    "domain": "Pravritti & Nivritti",
+    "query": "Why does God always discourage devotees from taking up Nivritti?",
+    "primaryTopic": "nivritti",
+    "expectedPattern": "nivr[iu]tti.*discourage|discourage.*nivr[iu]tti|god.*discourage",
+    "description": "Testing devotion and warning about immense tribulations"
+  },
+  {
+    "id": 44,
+    "domain": "Pravritti & Nivritti",
+    "query": "How to balance worldly family responsibilities with spiritual devotion?",
+    "primaryTopic": "pravritti",
+    "expectedPattern": "family.*responsibilit|balance.*world|balance between pravrutti and nivrutti|worldly responsibilities",
+    "description": "Pravritti duties as non-negotiable prerequisite"
+  },
+  {
+    "id": 45,
+    "domain": "Pravritti & Nivritti",
+    "query": "What happens if someone fails in Pravritti while pursuing Nivritti?",
+    "primaryTopic": "pravritti",
+    "expectedPattern": "fail.*pravr[iu]tti|punishment|duty of a woman|swami answers|maintaining nivritti and pravr[iu]tti",
+    "description": "Violation of basic morality leads to hell"
+  },
+  {
+    "id": 46,
+    "domain": "Pravritti & Nivritti",
+    "query": "What are the three strongest worldly bonds described as Eshanas?",
+    "primaryTopic": "eshana",
+    "expectedPattern": "eshana|bonds|wealth.*children|worldly justice and devotion",
+    "description": "Attachment to wealth, children, and partner"
+  },
+  {
+    "id": 47,
+    "domain": "Pravritti & Nivritti",
+    "query": "How did Gopikas conquer all worldly bonds in Nivritti?",
+    "primaryTopic": "gopika",
+    "expectedPattern": "gopika|gopis|nivr[iu]tti|worldly responsibilities",
+    "description": "Highest pinnacle of devotion transcending social bonds"
+  },
+  {
+    "id": 48,
+    "domain": "Pravritti & Nivritti",
+    "query": "Is justice in Pravritti rewarded with heaven or spiritual liberation?",
+    "primaryTopic": "pravritti",
+    "expectedPattern": "heaven|swarga|justice",
+    "description": "Pravritti grants heaven; Nivritti grants God Himself"
+  },
+  {
+    "id": 49,
+    "domain": "Pravritti & Nivritti",
+    "query": "Can a person achieve God while cheating people in society?",
+    "primaryTopic": "pravritti",
+    "expectedPattern": "cheat|injustice|pravr[iu]tti",
+    "description": "Impossibility of pleasing God by breaking worldly righteousness"
+  },
+  {
+    "id": 50,
+    "domain": "Pravritti & Nivritti",
+    "query": "Why did Rama prioritize Pravritti while Krishna showed Nivritti?",
+    "primaryTopic": "rama",
+    "expectedPattern": "rama.*krishna|ideal human|prav[rṛ]tti",
+    "description": "Rama demonstrating ideal conduct; Krishna testing devotion"
+  },
+  {
+    "id": 51,
+    "domain": "Bhakti Yoga",
+    "query": "what is the highest form of Bhakti?",
+    "primaryTopic": "bhakti",
+    "expectedPattern": "bhakti|devotion|karma yoga",
+    "description": "Unconditional love without expecting any fruit"
+  },
+  {
+    "id": 52,
+    "domain": "Bhakti Yoga",
+    "query": "What is the relationship between spiritual knowledge, devotion, and practice?",
+    "primaryTopic": "bhakti",
+    "expectedPattern": "jnaana.*bhakti|knowledge.*devotion",
+    "description": "Jnana produces Bhakti, Bhakti produces Karma Yoga"
+  },
+  {
+    "id": 53,
+    "domain": "Bhakti Yoga",
+    "query": "Can emotion or crying in front of God be considered genuine devotion?",
+    "primaryTopic": "bhakti",
+    "expectedPattern": "emotion|crying|tears|devotion",
+    "description": "Theoretical devotion vs practical sacrifice"
+  },
+  {
+    "id": 54,
+    "domain": "Bhakti Yoga",
+    "query": "What is Madhura Bhakti and how is it misinterpreted regarding Radha and Krishna?",
+    "primaryTopic": "madhura",
+    "expectedPattern": "madhura bhakti|radha.*krishna",
+    "description": "Sweet devotion free from lust, pure surrender"
+  },
+  {
+    "id": 55,
+    "domain": "Bhakti Yoga",
+    "query": "Why is devotion towards God often selfish and business-minded?",
+    "primaryTopic": "bhakti",
+    "expectedPattern": "business|bargain|selfish|devotion|vision of god|donating money",
+    "description": "Vaishya-bhakti bartering prayers for material benefits"
+  },
+  {
+    "id": 56,
+    "domain": "Bhakti Yoga",
+    "query": "How did Hanuman represent the pinnacle of selfless devotional service?",
+    "primaryTopic": "hanuman",
+    "expectedPattern": "hanuman|service|seva|inner meaning",
+    "description": "Karma Samnyasa and continuous service to contemporary Incarnation"
+  },
+  {
+    "id": 57,
+    "domain": "Bhakti Yoga",
+    "query": "What is the difference between love and lust in spiritual devotion?",
+    "primaryTopic": "kama",
+    "expectedPattern": "lust.*love|love.*lust|kama|prema",
+    "description": "Sacrifice for beloved vs exploiting for selfish pleasure"
+  },
+  {
+    "id": 58,
+    "domain": "Bhakti Yoga",
+    "query": "Should we love God more than our own family members and children?",
+    "primaryTopic": "devotion",
+    "expectedPattern": "children|family.*god|highest love|serving god.*family|family members",
+    "description": "Jesus and Gita mandate on loving God above all"
+  },
+  {
+    "id": 59,
+    "domain": "Bhakti Yoga",
+    "query": "What are the nine stages of devotion called Navavidha Bhakti?",
+    "primaryTopic": "navavidha",
+    "expectedPattern": "navavidha|nine forms|shravanam|rainbow of devotion|developing devotion|nine stages",
+    "description": "From listening (Shravana) to complete surrender (Atmanivedanam)"
+  },
+  {
+    "id": 60,
+    "domain": "Bhakti Yoga",
+    "query": "Why does God test the intensity of devotion of His closest devotees?",
+    "primaryTopic": "test",
+    "expectedPattern": "test.*devotee|suffering.*devotee|closest",
+    "description": "Proving devotion to the world and purifying gold in fire"
+  },
+  {
+    "id": 61,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "sacrifice of fruit of work karma phala tyaga",
+    "primaryTopic": "karma",
+    "expectedPattern": "karma phala tyaga|fruit of work",
+    "description": "Sacrificing hard-earned money for divine mission"
+  },
+  {
+    "id": 62,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "What is the difference between Karma Samnyasa and Karma Phala Tyaga?",
+    "primaryTopic": "karma",
+    "expectedPattern": "karma samnyasa|karma phala|difference|karma chakra",
+    "description": "Sacrifice of energy/time vs sacrifice of wealth"
+  },
+  {
+    "id": 63,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "Why does Swami emphasize the sacrifice of hard-earned money over words and mind?",
+    "primaryTopic": "sacrifice",
+    "expectedPattern": "money|wealth.*sacrifice|hard-earned",
+    "description": "Money is solidified energy and practical measure of love"
+  },
+  {
+    "id": 64,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "What is the true meaning of Guru Dakshina in the spiritual path?",
+    "primaryTopic": "gurudakshina",
+    "expectedPattern": "guru dakshina",
+    "description": "Offering practical donation of wealth to the Sadguru"
+  },
+  {
+    "id": 65,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "Should donations be given indiscriminately to beggars on the street?",
+    "primaryTopic": "donation",
+    "expectedPattern": "beggar|indiscriminat",
+    "description": "Warning against funding laziness and vice"
+  },
+  {
+    "id": 66,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "Who is the eligible vessel or Satpatra for offering spiritual donation?",
+    "primaryTopic": "satpatra",
+    "expectedPattern": "satpatra|eligible|recipient|deserving|human incarnation",
+    "description": "Donating only to true devotees spreading divine knowledge"
+  },
+  {
+    "id": 67,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "Can a poor person who has no wealth practice Karma Yoga?",
+    "primaryTopic": "karma",
+    "expectedPattern": "poor|capacity|karma samnyasa|karma yoga",
+    "description": "Poor person offering physical service (Karma Samnyasa)"
+  },
+  {
+    "id": 68,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "Why do scriptures say that charity without discrimination leads to sin?",
+    "primaryTopic": "charity",
+    "expectedPattern": "sin.*charity|charity.*sin|discrimination|wipe out sins",
+    "description": "Sharing sins of corrupt recipients"
+  },
+  {
+    "id": 69,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "What percentage of income should an ordinary householder sacrifice to God?",
+    "primaryTopic": "income",
+    "expectedPattern": "percentage|tithe|income.*sacrifice|donating money",
+    "description": "Appropriate allocation between family and divine work"
+  },
+  {
+    "id": 70,
+    "domain": "Karma Yoga & Sacrifice",
+    "query": "How does practical service prove the reality of theoretical devotion?",
+    "primaryTopic": "service",
+    "expectedPattern": "practical.*theoretical|fruit.*service|service of lord datta|service",
+    "description": "Parent analogy of sweet words vs feeding hungry child"
+  },
+  {
+    "id": 71,
+    "domain": "Law of Karma",
+    "query": "Why do good people suffer in life while wicked people prosper?",
+    "primaryTopic": "karma",
+    "expectedPattern": "good.*suffer|suffer.*good|wicked.*prosper|karma|prosper",
+    "description": "Fixed deposits of past good deeds vs current debit of sins"
+  },
+  {
+    "id": 72,
+    "domain": "Law of Karma",
+    "query": "Can astrological remedies and gemstone rings cancel our past sins?",
+    "primaryTopic": "astrology",
+    "expectedPattern": "astrolog|remed|cancel.*sin|numerology|wearing stones",
+    "description": "Astrology as diagnosis, not cure for karma"
+  },
+  {
+    "id": 73,
+    "domain": "Law of Karma",
+    "query": "Is there any scriptural authority for the cancellation of sins?",
+    "primaryTopic": "sin",
+    "expectedPattern": "scriptural authority.*cancellation|sin",
+    "description": "Only genuine repentance and transformation cancels sins"
+  },
+  {
+    "id": 74,
+    "domain": "Law of Karma",
+    "query": "What happens to the soul immediately after death?",
+    "primaryTopic": "death",
+    "expectedPattern": "after death|soul.*death|yamaloka",
+    "description": "Journey to energetic subtle body and upper worlds"
+  },
+  {
+    "id": 75,
+    "domain": "Law of Karma",
+    "query": "Why is human rebirth said to be extremely rare in the creation?",
+    "primaryTopic": "rebirth",
+    "expectedPattern": "human rebirth|rare|durlabha",
+    "description": "Precious opportunity of human birth for spiritual ascent"
+  },
+  {
+    "id": 76,
+    "domain": "Law of Karma",
+    "query": "Does God transfer the suffering of a devotee onto His own human body?",
+    "primaryTopic": "suffering",
+    "expectedPattern": "transfer.*suffering|god.*suffer|same phase as the devotee",
+    "description": "Sadguru taking over sins out of extreme divine love"
+  },
+  {
+    "id": 77,
+    "domain": "Law of Karma",
+    "query": "Why did God create hell and painful punishments for souls?",
+    "primaryTopic": "hell",
+    "expectedPattern": "hell|naraka|punishment|compassion in punishment",
+    "description": "Reformatory surgical punishment for spiritual rehabilitation"
+  },
+  {
+    "id": 78,
+    "domain": "Law of Karma",
+    "query": "What is the role of prarabdha karma vs sanchita karma vs agami karma?",
+    "primaryTopic": "prarabdha",
+    "expectedPattern": "prarabdha|sanchita|karma",
+    "description": "Three categories of accumulated and active destiny"
+  },
+  {
+    "id": 79,
+    "domain": "Law of Karma",
+    "query": "Can a person escape the law of karma by taking holy dips in sacred rivers?",
+    "primaryTopic": "karma",
+    "expectedPattern": "holy dip|river|ganga|sin",
+    "description": "External water cleansing dirt vs internal mental transformation"
+  },
+  {
+    "id": 80,
+    "domain": "Law of Karma",
+    "query": "Why do innocent children sometimes suffer with terminal illnesses?",
+    "primaryTopic": "karma",
+    "expectedPattern": "children.*suffer|innocent|datta veda",
+    "description": "Carryover of previous birth karmic accounts"
+  },
+  {
+    "id": 81,
+    "domain": "Universal Religion",
+    "query": "What is the central concept of the Universal Religion of Shri Datta Swami?",
+    "primaryTopic": "universal",
+    "expectedPattern": "universal religion|datta swami",
+    "description": "All world religions revealing the same single God"
+  },
+  {
+    "id": 82,
+    "domain": "Universal Religion",
+    "query": "Do Hinduism and Christianity agree on the concept of Human Incarnation?",
+    "primaryTopic": "christianity",
+    "expectedPattern": "hinduism.*christianity|christianity.*hinduism|confluence",
+    "description": "Son of God as Human Incarnation identical across faiths"
+  },
+  {
+    "id": 83,
+    "domain": "Universal Religion",
+    "query": "Why do religious fanatics claim that only their religion leads to salvation?",
+    "primaryTopic": "fanaticism",
+    "expectedPattern": "fanatic|only religion|hell|world peace.*terrorism|religious intolerance",
+    "description": "Exposing religious ego and geographic bias of God"
+  },
+  {
+    "id": 84,
+    "domain": "Universal Religion",
+    "query": "How does the message of Prophet Muhammad harmonize with the Gita and Bible?",
+    "primaryTopic": "islam",
+    "expectedPattern": "muhammad|islam|prophet|gita",
+    "description": "Emphasis on justice, equality, and one formless God"
+  },
+  {
+    "id": 85,
+    "domain": "Universal Religion",
+    "query": "Why did Jesus say that I and my Father are one and the Father is greater than I?",
+    "primaryTopic": "jesus",
+    "expectedPattern": "father.*one|greater than i|jesus|father",
+    "description": "Explaining Advaita and Dvaita perspectives of Incarnation"
+  },
+  {
+    "id": 86,
+    "domain": "Universal Religion",
+    "query": "Is conversion from one religion to another religion necessary to reach God?",
+    "primaryTopic": "conversion",
+    "expectedPattern": "conversion|change religion|another religion|criticize.*religion",
+    "description": "Changing clothes vs changing spiritual character"
+  },
+  {
+    "id": 87,
+    "domain": "Universal Religion",
+    "query": "Why did God give scriptures in different languages and cultures across the world?",
+    "primaryTopic": "scripture",
+    "expectedPattern": "different languages|cultures|scripture|many religions",
+    "description": "Universal Father addressing children in regional mother tongues"
+  },
+  {
+    "id": 88,
+    "domain": "Universal Religion",
+    "query": "How does Lord Buddha fit into the ten avatars of Lord Vishnu?",
+    "primaryTopic": "buddha",
+    "expectedPattern": "buddha|avatar",
+    "description": "Buddha preaching practical ethics (Pravritti) and silence on God"
+  },
+  {
+    "id": 89,
+    "domain": "Universal Religion",
+    "query": "What is the meaning of the Holy Spirit in Christian theology?",
+    "primaryTopic": "holyspirit",
+    "expectedPattern": "holy spirit|trinity|christian|holy prophet",
+    "description": "Energy/awareness medium of divine manifestation"
+  },
+  {
+    "id": 90,
+    "domain": "Universal Religion",
+    "query": "Can a person follow universal spirituality without leaving their birth religion?",
+    "primaryTopic": "universal",
+    "expectedPattern": "birth religion|leave religion|universal",
+    "description": "Inner appreciation of all faiths while staying in home tradition"
+  },
+  {
+    "id": 91,
+    "domain": "Ethics & Society",
+    "query": "What is the true basis of the caste system according to the Bhagavad Gita?",
+    "primaryTopic": "caste",
+    "expectedPattern": "caste|varna|guna.*karma|bhagavad gita",
+    "description": "Varna determined by qualities and deeds, not by biological birth"
+  },
+  {
+    "id": 92,
+    "domain": "Ethics & Society",
+    "query": "Why does Swami strongly condemn the killing of animals and eating non-vegetarian food?",
+    "primaryTopic": "vegetarian",
+    "expectedPattern": "non-vegetarian|animal.*killing|non vegetarian|condemn",
+    "description": "Grossest sin against innocent creatures created by God"
+  },
+  {
+    "id": 93,
+    "domain": "Ethics & Society",
+    "query": "Why does India suffer with poverty despite having rich spiritual knowledge?",
+    "primaryTopic": "poverty",
+    "expectedPattern": "india.*poverty|why does india suffer",
+    "description": "Misunderstanding spiritual knowledge and neglecting practical work"
+  },
+  {
+    "id": 94,
+    "domain": "Ethics & Society",
+    "query": "Are women spiritually equal to men according to the true Vedic scriptures?",
+    "primaryTopic": "women",
+    "expectedPattern": "women|status of women|gender|spiritually",
+    "description": "Soul has no gender; equal spiritual eligibility"
+  },
+  {
+    "id": 95,
+    "domain": "Ethics & Society",
+    "query": "What spiritual advice is given to a person suffering under worldly depression?",
+    "primaryTopic": "depression",
+    "expectedPattern": "depression|mental agony|sorrow",
+    "description": "Shifting focus from temporary worldly illusions to eternal God"
+  },
+  {
+    "id": 96,
+    "domain": "Ethics & Society",
+    "query": "Does a person incur sin by purchasing non-vegetarian food for family members?",
+    "primaryTopic": "nonveg",
+    "expectedPattern": "non-vegetarian.*family|purchasing.*meat|incur sin.*non-vegetarian",
+    "description": "Indirect complicity in animal slaughter"
+  },
+  {
+    "id": 97,
+    "domain": "Ethics & Society",
+    "query": "What is the role of science and technology in the spiritual evolution of humanity?",
+    "primaryTopic": "science",
+    "expectedPattern": "science|technology|evolution",
+    "description": "Science analyzing creation while spirituality understands Creator"
+  },
+  {
+    "id": 98,
+    "domain": "Ethics & Society",
+    "query": "How to control the wavering mind during meditation and prayer?",
+    "primaryTopic": "mind",
+    "expectedPattern": "mind|meditation|control",
+    "description": "Attraction to divine knowledge automatically tames the mind"
+  },
+  {
+    "id": 99,
+    "domain": "Ethics & Society",
+    "query": "What is the spiritual solution for overcoming fear of death and illness?",
+    "primaryTopic": "death",
+    "expectedPattern": "fear of death|illness|death|nervousness|overcoming",
+    "description": "Recognizing eternal soul and surrendering to God"
+  },
+  {
+    "id": 100,
+    "domain": "Ethics & Society",
+    "query": "Why is sacrifice of ego the most difficult of all sacrifices in spirituality?",
+    "primaryTopic": "ego",
+    "expectedPattern": "ego|ahankara|pride|sacrifice",
+    "description": "Ego as the ultimate inner demon blocking communion with God"
+  }
+]

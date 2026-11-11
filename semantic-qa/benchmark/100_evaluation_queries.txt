@@ -1,0 +1,664 @@
+=====================================================================================
+UNIVERSAL SPIRITUALITY: 100 UNIQUE BENCHMARK EVALUATION QUERIES
+Corpus: universal_qa_v2 (6,010 documents) | Distance-Based Search Engine Evaluation
+=====================================================================================
+
+
+#####################################################################################
+### DOMAIN: GAYATRI MANTRA & RITUALS
+#####################################################################################
+
+[Q001] "what is the real meaning of Gayatri mantra?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: gayatri
+       Scope & Intent: Foundational definition of Gayatri as devotional song
+       Expected Target Pattern: /gayatri|gayathri/i
+
+[Q002] "Gāyatrī mantra"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: gayatri
+       Scope & Intent: IAST transliterated form of Gayatri mantra
+       Expected Target Pattern: /gayatri|gayathri/i
+
+[Q003] "Is Gayatri a Vedic meter or a specific deity?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: gayatri
+       Scope & Intent: Gayatri chandas vs deity distinction
+       Expected Target Pattern: /gayatri|gayathri|meter/i
+
+[Q004] "Can women chant the Gayatri mantra?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: gayatri
+       Scope & Intent: Universal eligibility of women for Gayatri
+       Expected Target Pattern: /women|ladies|g[aā]+y[aā]t[h]?r[iī]/i
+
+[Q005] "Is the so-called Gayatri Mantra actually the Savitri Mantra?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: savitri
+       Scope & Intent: Rigvedic verse dedicated to Savita
+       Expected Target Pattern: /s[aā]v[iī]t[h]?r[iī]|g[aā]+y[aā]t[h]?r[iī]/i
+
+[Q006] "what is the real meaning of Sandhyavandanam?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: sandhyavandanam
+       Scope & Intent: Daily worship practice of twilight contemplation
+       Expected Target Pattern: /sandhya.*vandan|sandhyavandan/i
+
+[Q007] "What is the importance of Sandhyaa Vandanam?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: sandhyavandanam
+       Scope & Intent: Core spiritual significance of Sandhyavandanam
+       Expected Target Pattern: /importance.*sandhya|sandhya.*vandan/i
+
+[Q008] "Can a cinema song become the Gayatri Mantra?"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: gayatri
+       Scope & Intent: Devotional emotion turning songs into Gayatri
+       Expected Target Pattern: /cinema song|movie song|g[aā]+y[aā]t[h]?r[iī]/i
+
+[Q009] "Adiparaashakti relationship with Savita devatha"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: adiparashakti
+       Scope & Intent: Supreme energy relationship with solar deity
+       Expected Target Pattern: /s[aā]v[iī]t[h]?[aā]|[aā]+d[iī]p[aā]r[aā]s?[h]?akt[h]?[iī]/i
+
+[Q010] "meaning of the upasthana mantras chanted in Sandhyavandana"
+       Domain: Gayatri Mantra & Rituals
+       Primary Topic: sandhyavandanam
+       Scope & Intent: Prayer to Sun in Sandhyavandanam
+       Expected Target Pattern: /upasthana|sandhya|g[aā]+y[aā]t[h]?r[iī]/i
+
+
+
+#####################################################################################
+### DOMAIN: UPANAYANAM & RITUALS
+#####################################################################################
+
+[Q011] "what is the real meaning of Upanayanam?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: upanayanam
+       Scope & Intent: True definition of Upanayanam as coming close to God
+       Expected Target Pattern: /upanayana/i
+
+[Q012] "significance of three strings in holy cross belt in Upanayanam"
+       Domain: Upanayanam & Rituals
+       Primary Topic: upanayanam
+       Scope & Intent: Symbolism of Brahma Sutra strings
+       Expected Target Pattern: /three strings|cross belt|holy thread|upanayanam/i
+
+[Q013] "What is the true inner meaning of Yajna or sacrifice?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: yajna
+       Scope & Intent: Offering food to hungry living beings vs ghee in fire
+       Expected Target Pattern: /yajna|yagna|sacrifice/i
+
+[Q014] "Why do we burn valuable food and ghee in physical fire during Yajna?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: yajna
+       Scope & Intent: Rebuking physical wastage in sacrificial rituals
+       Expected Target Pattern: /burning.*ghee|food.*fire|yajna/i
+
+[Q015] "What is the real symbolism of temples and ritual worship?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: temple
+       Scope & Intent: Physical temple as school for developing devotion
+       Expected Target Pattern: /symbolism.*temple|rituals|temple/i
+
+[Q016] "Why is idol worship or Pratika Upasana practiced in Hinduism?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: worship
+       Scope & Intent: Representative models for preliminary devotion
+       Expected Target Pattern: /statue|idol|pratika|upasana/i
+
+[Q017] "Is the sacred thread Yajnopavitam restricted by caste or gender?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: yajnopavitam
+       Scope & Intent: Eligibility for sacred thread based on guna and karma
+       Expected Target Pattern: /thread|yajnopavitam|caste|upanayanam/i
+
+[Q018] "Can a person perform spiritual rituals without knowing the meaning of mantras?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: mantra
+       Scope & Intent: Importance of jnana over blind recitation
+       Expected Target Pattern: /meaning.*mantra|without knowing/i
+
+[Q019] "What is the purpose of ringing bells and lighting camphor during Arati?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: arati
+       Scope & Intent: Inner psychological symbolism of temple worship steps
+       Expected Target Pattern: /arati|bell|camphor|ritual|swami answers/i
+
+[Q020] "Should spiritual seekers perform Shraddha ceremony for departed ancestors?"
+       Domain: Upanayanam & Rituals
+       Primary Topic: shraddha
+       Scope & Intent: True philosophical meaning of feeding in Shraddha
+       Expected Target Pattern: /shraddha|ancestor|departed|death ritual|cremation/i
+
+
+
+#####################################################################################
+### DOMAIN: VEDANTIC PHILOSOPHY
+#####################################################################################
+
+[Q021] "true interpretation of Shankara Advaita philosophy"
+       Domain: Vedantic Philosophy
+       Primary Topic: shankara
+       Scope & Intent: Context and purpose of Shankara monism
+       Expected Target Pattern: /shankara|sankara|advaita/i
+
+[Q022] "Why did Shankara say that the individual soul is God Himself?"
+       Domain: Vedantic Philosophy
+       Primary Topic: shankara
+       Scope & Intent: Atheistic context in Shankara time and beginner psychology
+       Expected Target Pattern: /shankara|advaita|soul.*god/i
+
+[Q023] "Why is there a contradiction between the philosophies of Shankara, Ramanuja and Madhva?"
+       Domain: Vedantic Philosophy
+       Primary Topic: philosophy
+       Scope & Intent: Reconciling three Vedantic masters as three steps
+       Expected Target Pattern: /shankara.*ramanuja|contradiction.*philosoph/i
+
+[Q024] "What is the difference between Maya and Mula Maya?"
+       Domain: Vedantic Philosophy
+       Primary Topic: maya
+       Scope & Intent: Cosmic illusion vs root primordial energy
+       Expected Target Pattern: /maya.*mula maya|mula maayaa/i
+
+[Q025] "Is the world real or unreal according to Mithya?"
+       Domain: Vedantic Philosophy
+       Primary Topic: mithya
+       Scope & Intent: Relative reality of creation for God vs soul
+       Expected Target Pattern: /mithya|world.*unreal|real/i
+
+[Q026] "What is the nature of the Unimaginable God or Parabrahman?"
+       Domain: Vedantic Philosophy
+       Primary Topic: parabrahman
+       Scope & Intent: Beyond human intellect, space, and time
+       Expected Target Pattern: /unimaginable|parabrahman|parabrahma/i
+
+[Q027] "How does pure awareness differ from the ultimate Creator God?"
+       Domain: Vedantic Philosophy
+       Primary Topic: awareness
+       Scope & Intent: Refutation of awareness being original God
+       Expected Target Pattern: /awareness|soul|creator/i
+
+[Q028] "What is the concept of vivartavada vs parinamavada?"
+       Domain: Vedantic Philosophy
+       Primary Topic: vivarta
+       Scope & Intent: Apparent modification vs real transformation theories
+       Expected Target Pattern: /vivarta|parinama|creation/i
+
+[Q029] "How does Datta Swami correlate Advaita, Vishishtadvaita and Dvaita?"
+       Domain: Vedantic Philosophy
+       Primary Topic: samanvaya
+       Scope & Intent: Three stages of spiritual student education
+       Expected Target Pattern: /samanvaya|correlation|advaita.*dvaita/i
+
+[Q030] "Can the individual soul ever become the absolute Creator of the universe?"
+       Domain: Vedantic Philosophy
+       Primary Topic: soul
+       Scope & Intent: Impossibility of individual soul creating cosmos
+       Expected Target Pattern: /soul.*creator|creation.*universe|unimaginable god.*imaginable soul|every soul not god/i
+
+
+
+#####################################################################################
+### DOMAIN: HUMAN INCARNATION
+#####################################################################################
+
+[Q031] "What is the real identity mark for recognizing the human incarnation of the Lord?"
+       Domain: Human Incarnation
+       Primary Topic: incarnation
+       Scope & Intent: True sign is spiritual knowledge (Prajnanam Brahma)
+       Expected Target Pattern: /identity mark|human incarnation|recognizing/i
+
+[Q032] "Why is the worship of a human incarnation better than that of a statue?"
+       Domain: Human Incarnation
+       Primary Topic: incarnation
+       Scope & Intent: Clarifying doubts and receiving live spiritual guidance
+       Expected Target Pattern: /statue|human incarnation.*better/i
+
+[Q033] "Why do people easily accept past incarnations but neglect the contemporary human incarnation?"
+       Domain: Human Incarnation
+       Primary Topic: incarnation
+       Scope & Intent: Repulsion between common media (human ego and jealousy)
+       Expected Target Pattern: /past incarnation|contemporary|neglect/i
+
+[Q034] "How to distinguish between Sadguru and Guru?"
+       Domain: Human Incarnation
+       Primary Topic: sadguru
+       Scope & Intent: Guru teaches worldly/scriptural texts; Sadguru is God in human form
+       Expected Target Pattern: /sadguru.*guru|distinguish.*guru/i
+
+[Q035] "What are the causes for failing in the tests of Lord Datta?"
+       Domain: Human Incarnation
+       Primary Topic: datta
+       Scope & Intent: Ego, jealousy, and attachment to money and family
+       Expected Target Pattern: /tests of datta|failing.*tests/i
+
+[Q036] "How does God enter into the human body to become an Incarnation?"
+       Domain: Human Incarnation
+       Primary Topic: incarnation
+       Scope & Intent: Electric current pervading wire metaphor
+       Expected Target Pattern: /enter.*human|entry of god|medium|contemporary human incarnation|god enters/i
+
+[Q037] "Can two contemporary human incarnations exist at the same time?"
+       Domain: Human Incarnation
+       Primary Topic: incarnation
+       Scope & Intent: Parashurama and Rama coexistence explanation
+       Expected Target Pattern: /two.*incarnation|contemporary/i
+
+[Q038] "Why did Lord Krishna act like an ordinary human being at times?"
+       Domain: Human Incarnation
+       Primary Topic: krishna
+       Scope & Intent: Preserving the human role without horrifying devotees
+       Expected Target Pattern: /krishna|human role|ordinary/i
+
+[Q039] "What is the role of miracles performed by the Human Incarnation?"
+       Domain: Human Incarnation
+       Primary Topic: miracle
+       Scope & Intent: Visiting card proof of unimaginable power
+       Expected Target Pattern: /miracle.*incarnation|miracles|identifying characteristic/i
+
+[Q040] "How to avoid ego and jealousy towards the contemporary human incarnation?"
+       Domain: Human Incarnation
+       Primary Topic: jealousy
+       Scope & Intent: Conquering repulsive forces towards the physical medium
+       Expected Target Pattern: /ego.*jealousy|contemporary/i
+
+
+
+#####################################################################################
+### DOMAIN: PRAVRITTI & NIVRITTI
+#####################################################################################
+
+[Q041] "difference between pravritti and nivritti"
+       Domain: Pravritti & Nivritti
+       Primary Topic: pravritti
+       Scope & Intent: Social morality in the world vs personal devotion to God
+       Expected Target Pattern: /pravr[iu]tti|nivr[iu]tti/i
+
+[Q042] "Is Nivritti mandatory for all human beings or only an option?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: nivritti
+       Scope & Intent: Pravritti is compulsory syllabus; Nivritti is voluntary research
+       Expected Target Pattern: /nivr[iu]tti.*mandatory|discouraged|pravrutti and nivrutti/i
+
+[Q043] "Why does God always discourage devotees from taking up Nivritti?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: nivritti
+       Scope & Intent: Testing devotion and warning about immense tribulations
+       Expected Target Pattern: /nivr[iu]tti.*discourage|discourage.*nivr[iu]tti|god.*discourage/i
+
+[Q044] "How to balance worldly family responsibilities with spiritual devotion?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: pravritti
+       Scope & Intent: Pravritti duties as non-negotiable prerequisite
+       Expected Target Pattern: /family.*responsibilit|balance.*world|balance between pravrutti and nivrutti|worldly responsibilities/i
+
+[Q045] "What happens if someone fails in Pravritti while pursuing Nivritti?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: pravritti
+       Scope & Intent: Violation of basic morality leads to hell
+       Expected Target Pattern: /fail.*pravr[iu]tti|punishment|duty of a woman|swami answers|maintaining nivritti and pravr[iu]tti/i
+
+[Q046] "What are the three strongest worldly bonds described as Eshanas?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: eshana
+       Scope & Intent: Attachment to wealth, children, and partner
+       Expected Target Pattern: /eshana|bonds|wealth.*children|worldly justice and devotion/i
+
+[Q047] "How did Gopikas conquer all worldly bonds in Nivritti?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: gopika
+       Scope & Intent: Highest pinnacle of devotion transcending social bonds
+       Expected Target Pattern: /gopika|gopis|nivr[iu]tti|worldly responsibilities/i
+
+[Q048] "Is justice in Pravritti rewarded with heaven or spiritual liberation?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: pravritti
+       Scope & Intent: Pravritti grants heaven; Nivritti grants God Himself
+       Expected Target Pattern: /heaven|swarga|justice/i
+
+[Q049] "Can a person achieve God while cheating people in society?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: pravritti
+       Scope & Intent: Impossibility of pleasing God by breaking worldly righteousness
+       Expected Target Pattern: /cheat|injustice|pravr[iu]tti/i
+
+[Q050] "Why did Rama prioritize Pravritti while Krishna showed Nivritti?"
+       Domain: Pravritti & Nivritti
+       Primary Topic: rama
+       Scope & Intent: Rama demonstrating ideal conduct; Krishna testing devotion
+       Expected Target Pattern: /rama.*krishna|ideal human|prav[rṛ]tti/i
+
+
+
+#####################################################################################
+### DOMAIN: BHAKTI YOGA
+#####################################################################################
+
+[Q051] "what is the highest form of Bhakti?"
+       Domain: Bhakti Yoga
+       Primary Topic: bhakti
+       Scope & Intent: Unconditional love without expecting any fruit
+       Expected Target Pattern: /bhakti|devotion|karma yoga/i
+
+[Q052] "What is the relationship between spiritual knowledge, devotion, and practice?"
+       Domain: Bhakti Yoga
+       Primary Topic: bhakti
+       Scope & Intent: Jnana produces Bhakti, Bhakti produces Karma Yoga
+       Expected Target Pattern: /jnaana.*bhakti|knowledge.*devotion/i
+
+[Q053] "Can emotion or crying in front of God be considered genuine devotion?"
+       Domain: Bhakti Yoga
+       Primary Topic: bhakti
+       Scope & Intent: Theoretical devotion vs practical sacrifice
+       Expected Target Pattern: /emotion|crying|tears|devotion/i
+
+[Q054] "What is Madhura Bhakti and how is it misinterpreted regarding Radha and Krishna?"
+       Domain: Bhakti Yoga
+       Primary Topic: madhura
+       Scope & Intent: Sweet devotion free from lust, pure surrender
+       Expected Target Pattern: /madhura bhakti|radha.*krishna/i
+
+[Q055] "Why is devotion towards God often selfish and business-minded?"
+       Domain: Bhakti Yoga
+       Primary Topic: bhakti
+       Scope & Intent: Vaishya-bhakti bartering prayers for material benefits
+       Expected Target Pattern: /business|bargain|selfish|devotion|vision of god|donating money/i
+
+[Q056] "How did Hanuman represent the pinnacle of selfless devotional service?"
+       Domain: Bhakti Yoga
+       Primary Topic: hanuman
+       Scope & Intent: Karma Samnyasa and continuous service to contemporary Incarnation
+       Expected Target Pattern: /hanuman|service|seva|inner meaning/i
+
+[Q057] "What is the difference between love and lust in spiritual devotion?"
+       Domain: Bhakti Yoga
+       Primary Topic: kama
+       Scope & Intent: Sacrifice for beloved vs exploiting for selfish pleasure
+       Expected Target Pattern: /lust.*love|love.*lust|kama|prema/i
+
+[Q058] "Should we love God more than our own family members and children?"
+       Domain: Bhakti Yoga
+       Primary Topic: devotion
+       Scope & Intent: Jesus and Gita mandate on loving God above all
+       Expected Target Pattern: /children|family.*god|highest love|serving god.*family|family members/i
+
+[Q059] "What are the nine stages of devotion called Navavidha Bhakti?"
+       Domain: Bhakti Yoga
+       Primary Topic: navavidha
+       Scope & Intent: From listening (Shravana) to complete surrender (Atmanivedanam)
+       Expected Target Pattern: /navavidha|nine forms|shravanam|rainbow of devotion|developing devotion|nine stages/i
+
+[Q060] "Why does God test the intensity of devotion of His closest devotees?"
+       Domain: Bhakti Yoga
+       Primary Topic: test
+       Scope & Intent: Proving devotion to the world and purifying gold in fire
+       Expected Target Pattern: /test.*devotee|suffering.*devotee|closest/i
+
+
+
+#####################################################################################
+### DOMAIN: KARMA YOGA & SACRIFICE
+#####################################################################################
+
+[Q061] "sacrifice of fruit of work karma phala tyaga"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: karma
+       Scope & Intent: Sacrificing hard-earned money for divine mission
+       Expected Target Pattern: /karma phala tyaga|fruit of work/i
+
+[Q062] "What is the difference between Karma Samnyasa and Karma Phala Tyaga?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: karma
+       Scope & Intent: Sacrifice of energy/time vs sacrifice of wealth
+       Expected Target Pattern: /karma samnyasa|karma phala|difference|karma chakra/i
+
+[Q063] "Why does Swami emphasize the sacrifice of hard-earned money over words and mind?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: sacrifice
+       Scope & Intent: Money is solidified energy and practical measure of love
+       Expected Target Pattern: /money|wealth.*sacrifice|hard-earned/i
+
+[Q064] "What is the true meaning of Guru Dakshina in the spiritual path?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: gurudakshina
+       Scope & Intent: Offering practical donation of wealth to the Sadguru
+       Expected Target Pattern: /guru dakshina/i
+
+[Q065] "Should donations be given indiscriminately to beggars on the street?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: donation
+       Scope & Intent: Warning against funding laziness and vice
+       Expected Target Pattern: /beggar|indiscriminat/i
+
+[Q066] "Who is the eligible vessel or Satpatra for offering spiritual donation?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: satpatra
+       Scope & Intent: Donating only to true devotees spreading divine knowledge
+       Expected Target Pattern: /satpatra|eligible|recipient|deserving|human incarnation/i
+
+[Q067] "Can a poor person who has no wealth practice Karma Yoga?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: karma
+       Scope & Intent: Poor person offering physical service (Karma Samnyasa)
+       Expected Target Pattern: /poor|capacity|karma samnyasa|karma yoga/i
+
+[Q068] "Why do scriptures say that charity without discrimination leads to sin?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: charity
+       Scope & Intent: Sharing sins of corrupt recipients
+       Expected Target Pattern: /sin.*charity|charity.*sin|discrimination|wipe out sins/i
+
+[Q069] "What percentage of income should an ordinary householder sacrifice to God?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: income
+       Scope & Intent: Appropriate allocation between family and divine work
+       Expected Target Pattern: /percentage|tithe|income.*sacrifice|donating money/i
+
+[Q070] "How does practical service prove the reality of theoretical devotion?"
+       Domain: Karma Yoga & Sacrifice
+       Primary Topic: service
+       Scope & Intent: Parent analogy of sweet words vs feeding hungry child
+       Expected Target Pattern: /practical.*theoretical|fruit.*service|service of lord datta|service/i
+
+
+
+#####################################################################################
+### DOMAIN: LAW OF KARMA
+#####################################################################################
+
+[Q071] "Why do good people suffer in life while wicked people prosper?"
+       Domain: Law of Karma
+       Primary Topic: karma
+       Scope & Intent: Fixed deposits of past good deeds vs current debit of sins
+       Expected Target Pattern: /good.*suffer|suffer.*good|wicked.*prosper|karma|prosper/i
+
+[Q072] "Can astrological remedies and gemstone rings cancel our past sins?"
+       Domain: Law of Karma
+       Primary Topic: astrology
+       Scope & Intent: Astrology as diagnosis, not cure for karma
+       Expected Target Pattern: /astrolog|remed|cancel.*sin|numerology|wearing stones/i
+
+[Q073] "Is there any scriptural authority for the cancellation of sins?"
+       Domain: Law of Karma
+       Primary Topic: sin
+       Scope & Intent: Only genuine repentance and transformation cancels sins
+       Expected Target Pattern: /scriptural authority.*cancellation|sin/i
+
+[Q074] "What happens to the soul immediately after death?"
+       Domain: Law of Karma
+       Primary Topic: death
+       Scope & Intent: Journey to energetic subtle body and upper worlds
+       Expected Target Pattern: /after death|soul.*death|yamaloka/i
+
+[Q075] "Why is human rebirth said to be extremely rare in the creation?"
+       Domain: Law of Karma
+       Primary Topic: rebirth
+       Scope & Intent: Precious opportunity of human birth for spiritual ascent
+       Expected Target Pattern: /human rebirth|rare|durlabha/i
+
+[Q076] "Does God transfer the suffering of a devotee onto His own human body?"
+       Domain: Law of Karma
+       Primary Topic: suffering
+       Scope & Intent: Sadguru taking over sins out of extreme divine love
+       Expected Target Pattern: /transfer.*suffering|god.*suffer|same phase as the devotee/i
+
+[Q077] "Why did God create hell and painful punishments for souls?"
+       Domain: Law of Karma
+       Primary Topic: hell
+       Scope & Intent: Reformatory surgical punishment for spiritual rehabilitation
+       Expected Target Pattern: /hell|naraka|punishment|compassion in punishment/i
+
+[Q078] "What is the role of prarabdha karma vs sanchita karma vs agami karma?"
+       Domain: Law of Karma
+       Primary Topic: prarabdha
+       Scope & Intent: Three categories of accumulated and active destiny
+       Expected Target Pattern: /prarabdha|sanchita|karma/i
+
+[Q079] "Can a person escape the law of karma by taking holy dips in sacred rivers?"
+       Domain: Law of Karma
+       Primary Topic: karma
+       Scope & Intent: External water cleansing dirt vs internal mental transformation
+       Expected Target Pattern: /holy dip|river|ganga|sin/i
+
+[Q080] "Why do innocent children sometimes suffer with terminal illnesses?"
+       Domain: Law of Karma
+       Primary Topic: karma
+       Scope & Intent: Carryover of previous birth karmic accounts
+       Expected Target Pattern: /children.*suffer|innocent|datta veda/i
+
+
+
+#####################################################################################
+### DOMAIN: UNIVERSAL RELIGION
+#####################################################################################
+
+[Q081] "What is the central concept of the Universal Religion of Shri Datta Swami?"
+       Domain: Universal Religion
+       Primary Topic: universal
+       Scope & Intent: All world religions revealing the same single God
+       Expected Target Pattern: /universal religion|datta swami/i
+
+[Q082] "Do Hinduism and Christianity agree on the concept of Human Incarnation?"
+       Domain: Universal Religion
+       Primary Topic: christianity
+       Scope & Intent: Son of God as Human Incarnation identical across faiths
+       Expected Target Pattern: /hinduism.*christianity|christianity.*hinduism|confluence/i
+
+[Q083] "Why do religious fanatics claim that only their religion leads to salvation?"
+       Domain: Universal Religion
+       Primary Topic: fanaticism
+       Scope & Intent: Exposing religious ego and geographic bias of God
+       Expected Target Pattern: /fanatic|only religion|hell|world peace.*terrorism|religious intolerance/i
+
+[Q084] "How does the message of Prophet Muhammad harmonize with the Gita and Bible?"
+       Domain: Universal Religion
+       Primary Topic: islam
+       Scope & Intent: Emphasis on justice, equality, and one formless God
+       Expected Target Pattern: /muhammad|islam|prophet|gita/i
+
+[Q085] "Why did Jesus say that I and my Father are one and the Father is greater than I?"
+       Domain: Universal Religion
+       Primary Topic: jesus
+       Scope & Intent: Explaining Advaita and Dvaita perspectives of Incarnation
+       Expected Target Pattern: /father.*one|greater than i|jesus|father/i
+
+[Q086] "Is conversion from one religion to another religion necessary to reach God?"
+       Domain: Universal Religion
+       Primary Topic: conversion
+       Scope & Intent: Changing clothes vs changing spiritual character
+       Expected Target Pattern: /conversion|change religion|another religion|criticize.*religion/i
+
+[Q087] "Why did God give scriptures in different languages and cultures across the world?"
+       Domain: Universal Religion
+       Primary Topic: scripture
+       Scope & Intent: Universal Father addressing children in regional mother tongues
+       Expected Target Pattern: /different languages|cultures|scripture|many religions/i
+
+[Q088] "How does Lord Buddha fit into the ten avatars of Lord Vishnu?"
+       Domain: Universal Religion
+       Primary Topic: buddha
+       Scope & Intent: Buddha preaching practical ethics (Pravritti) and silence on God
+       Expected Target Pattern: /buddha|avatar/i
+
+[Q089] "What is the meaning of the Holy Spirit in Christian theology?"
+       Domain: Universal Religion
+       Primary Topic: holyspirit
+       Scope & Intent: Energy/awareness medium of divine manifestation
+       Expected Target Pattern: /holy spirit|trinity|christian|holy prophet/i
+
+[Q090] "Can a person follow universal spirituality without leaving their birth religion?"
+       Domain: Universal Religion
+       Primary Topic: universal
+       Scope & Intent: Inner appreciation of all faiths while staying in home tradition
+       Expected Target Pattern: /birth religion|leave religion|universal/i
+
+
+
+#####################################################################################
+### DOMAIN: ETHICS & SOCIETY
+#####################################################################################
+
+[Q091] "What is the true basis of the caste system according to the Bhagavad Gita?"
+       Domain: Ethics & Society
+       Primary Topic: caste
+       Scope & Intent: Varna determined by qualities and deeds, not by biological birth
+       Expected Target Pattern: /caste|varna|guna.*karma|bhagavad gita/i
+
+[Q092] "Why does Swami strongly condemn the killing of animals and eating non-vegetarian food?"
+       Domain: Ethics & Society
+       Primary Topic: vegetarian
+       Scope & Intent: Grossest sin against innocent creatures created by God
+       Expected Target Pattern: /non-vegetarian|animal.*killing|non vegetarian|condemn/i
+
+[Q093] "Why does India suffer with poverty despite having rich spiritual knowledge?"
+       Domain: Ethics & Society
+       Primary Topic: poverty
+       Scope & Intent: Misunderstanding spiritual knowledge and neglecting practical work
+       Expected Target Pattern: /india.*poverty|why does india suffer/i
+
+[Q094] "Are women spiritually equal to men according to the true Vedic scriptures?"
+       Domain: Ethics & Society
+       Primary Topic: women
+       Scope & Intent: Soul has no gender; equal spiritual eligibility
+       Expected Target Pattern: /women|status of women|gender|spiritually/i
+
+[Q095] "What spiritual advice is given to a person suffering under worldly depression?"
+       Domain: Ethics & Society
+       Primary Topic: depression
+       Scope & Intent: Shifting focus from temporary worldly illusions to eternal God
+       Expected Target Pattern: /depression|mental agony|sorrow/i
+
+[Q096] "Does a person incur sin by purchasing non-vegetarian food for family members?"
+       Domain: Ethics & Society
+       Primary Topic: nonveg
+       Scope & Intent: Indirect complicity in animal slaughter
+       Expected Target Pattern: /non-vegetarian.*family|purchasing.*meat|incur sin.*non-vegetarian/i
+
+[Q097] "What is the role of science and technology in the spiritual evolution of humanity?"
+       Domain: Ethics & Society
+       Primary Topic: science
+       Scope & Intent: Science analyzing creation while spirituality understands Creator
+       Expected Target Pattern: /science|technology|evolution/i
+
+[Q098] "How to control the wavering mind during meditation and prayer?"
+       Domain: Ethics & Society
+       Primary Topic: mind
+       Scope & Intent: Attraction to divine knowledge automatically tames the mind
+       Expected Target Pattern: /mind|meditation|control/i
+
+[Q099] "What is the spiritual solution for overcoming fear of death and illness?"
+       Domain: Ethics & Society
+       Primary Topic: death
+       Scope & Intent: Recognizing eternal soul and surrendering to God
+       Expected Target Pattern: /fear of death|illness|death|nervousness|overcoming/i
+
+[Q100] "Why is sacrifice of ego the most difficult of all sacrifices in spirituality?"
+       Domain: Ethics & Society
+       Primary Topic: ego
+       Scope & Intent: Ego as the ultimate inner demon blocking communion with God
+       Expected Target Pattern: /ego|ahankara|pride|sacrifice/i
+
