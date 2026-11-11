@@ -46,6 +46,10 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(mergeSettings({ deepSummaryTimeoutSeconds: 300 }).deepSummaryTimeoutSeconds, 600);
   assert.equal(mergeSettings({ settingsVersion: 3, deepSummaryTimeoutSeconds: 300 }).deepSummaryTimeoutSeconds, 300);
   assert.equal(mergeSettings({ summaryHardwarePreference: 'invalid' }).summaryHardwarePreference, 'auto');
+  assert.equal(mergeSettings({ searchMode: 'distance' }).searchMode, 'distance');
+  assert.equal(mergeSettings({ searchMode: 'semantic' }).searchMode, 'semantic');
+  assert.equal(mergeSettings({ searchMode: 'search' }).searchMode, 'search');
+  assert.equal(mergeSettings({ searchMode: 'invalid' }).searchMode, 'search');
 
   const migratedUniversal = mergeSettings({
     settingsVersion: 3,
