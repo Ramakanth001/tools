@@ -538,12 +538,18 @@ async function getIndexStatus(connection) {
       const passageCount = passagesExist
         ? await client.query('SELECT COUNT(*)::bigint AS count FROM semantic_qa.passages')
         : { rows: [{ count: 0 }] };
+      const indexedDocsCount = passagesExist
+        ? await client.query('SELECT COUNT(DISTINCT source_id)::bigint AS count FROM semantic_qa.passages')
+        : { rows: [{ count: 0 }] };
+      let checkpoint = null;
       const runs = await client.query(`
         SELECT id, mode, status, processed::bigint AS processed, changed::bigint AS changed,
                total::bigint AS total, error, started_at AS "startedAt", finished_at AS "finishedAt"
         FROM semantic_qa.sync_runs ORDER BY started_at DESC LIMIT 10
       `);
       return {
+        indexedDocsCount: Number(indexedDocsCount.rows[0].count),
+        checkpoint,
         initialized: Boolean(corpus && exists),
         corpus,
         recordCount: Number(count.rows[0].count),
@@ -1449,10 +1455,24 @@ async function searchAllPassages(client, corpus, vector, queryText, minimumSimil
       SELECT count(*)::integer AS passage_count FROM semantic_qa.passages
     ),
     all_scored AS MATERIALIZED (
-      SELECT p.source_id, p.passage_index, p.passage_text, p.start_offset, p.end_offset,
-             1 - (p.embedding <=> $1::vector) AS similarity,
-             ts_rank_cd(p.search_vector, q.terms) AS lexical_score
-      FROM semantic_qa.passages p CROSS JOIN query q
+      (
+        SELECT p.source_id, p.passage_index, p.passage_text, p.start_offset, p.end_offset,
+               1 - (p.embedding <=> $1::vector) AS similarity,
+               0.0::float8 AS lexical_score
+        FROM semantic_qa.passages p
+        ORDER BY p.embedding <=> $1::vector
+        LIMIT 300
+      )
+      UNION ALL
+      (
+        SELECT p.source_id, p.passage_index, p.passage_text, p.start_offset, p.end_offset,
+               1 - (p.embedding <=> $1::vector) AS similarity,
+               ts_rank_cd(p.search_vector, q.terms) AS lexical_score
+        FROM semantic_qa.passages p CROSS JOIN query q
+        WHERE q.terms::text <> '' AND p.search_vector @@ q.terms
+        ORDER BY ts_rank_cd(p.search_vector, q.terms) DESC
+        LIMIT 100
+      )
     ),
     eligible AS MATERIALIZED (
       SELECT *, row_number() OVER (
@@ -1914,9 +1934,9 @@ async function getDocumentRecords(connection, reference) {
         FROM requested
         ${hasAliases ? 'LEFT JOIN semantic_qa.source_aliases a ON a.alias_id = requested.reference' : ''}
       ), selected AS (
-        SELECT coalesce(source_group, source_id) AS source_group
+        SELECT coalesce(records.source_group, records.source_id) AS source_group
         FROM semantic_qa.records CROSS JOIN resolved
-        WHERE records.source_id = resolved.source_id OR source_group = resolved.source_id
+        WHERE records.source_id = resolved.source_id OR records.source_group = resolved.source_id
         ORDER BY CASE WHEN records.source_id = resolved.source_id THEN 0 ELSE 1 END
         LIMIT 1
       )
