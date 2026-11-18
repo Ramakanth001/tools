@@ -200,14 +200,16 @@ async function run() {
   fs.writeFileSync(reportPath, `${JSON.stringify({ summary, results }, null, 2)}\n`);
 
   if (['test_sealed', 'holdout', 'regression'].includes(splitArg)) {
-    const verdictPath = path.join(__dirname, '..', 'benchmark', 'STANDARD_SEARCH_SEALED_VERDICT.md');
+    const verdictFilename = splitArg === 'regression' ? 'STANDARD_SEARCH_REGRESSION_REPORT.md' : 'STANDARD_SEARCH_SEALED_VERDICT.md';
+    const verdictPath = path.join(__dirname, '..', 'benchmark', verdictFilename);
     const failures = results.filter((r) => !r.pass);
     const splitDesc = splitArg === 'holdout'
       ? '`holdout` (Fresh Unseen Holdout: 30 reviewed cases: 10 positive paraphrases, 20 negative controls)'
       : splitArg === 'regression'
       ? '`regression` (Regression Suite: 30 reviewed cases: 10 positive paraphrases, 20 negative controls)'
       : '`test_sealed` (30 reviewed cases: 10 positive paraphrases, 20 negative controls)';
-    const md = `# Standard Search Sealed Release Verdict
+    const title = splitArg === 'regression' ? '# Standard Search Regression Suite Report' : '# Standard Search Sealed Release Verdict';
+    const md = `${title}
 
 **Execution Date:** ${summary.finishedAt}  
 **Split:** ${splitDesc}  
