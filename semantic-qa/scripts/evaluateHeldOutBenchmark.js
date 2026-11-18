@@ -38,12 +38,17 @@ async function search(question) {
 async function run() {
   const startTime = Date.now();
   const startedAt = new Date().toISOString();
-  const splitArg = process.argv.find((a) => a.startsWith('--split='))?.slice(8) || process.env.HELD_OUT_SPLIT || 'test_sealed';
+  const versionArg = process.argv.find((a) => a.startsWith('--version='))?.slice(10) || process.env.HELD_OUT_VERSION || '2';
+  const splitArg = process.argv.find((a) => a.startsWith('--split='))?.slice(8) || process.env.HELD_OUT_SPLIT || (versionArg === '2' ? 'holdout' : 'test_sealed');
   const frozenDir = path.join(__dirname, '..', 'benchmark', 'frozen');
-  const filename = splitArg === 'all'
-    ? 'held_out_150_queries.json'
-    : `held_out_150_${splitArg}.json`;
-  const filePath = path.join(frozenDir, filename);
+  let filename = versionArg === '2'
+    ? (splitArg === 'all' ? 'held_out_150_v2_queries.json' : `held_out_150_v2_${splitArg}.json`)
+    : (splitArg === 'all' ? 'held_out_150_queries.json' : `held_out_150_${splitArg}.json`);
+  let filePath = path.join(frozenDir, filename);
+
+  if (!fs.existsSync(filePath) && versionArg === '2' && splitArg === 'test_sealed') {
+    filePath = path.join(frozenDir, 'held_out_150_v2_regression.json');
+  }
 
   if (!fs.existsSync(filePath)) {
     throw new Error(`Benchmark split file not found: ${filePath}`);
@@ -141,7 +146,7 @@ async function run() {
   const passedTotal = results.filter((r) => r.pass).length;
 
   const summary = {
-    benchmarkVersion: 1,
+    benchmarkVersion: Number(versionArg) || 1,
     split: splitArg,
     gitSha,
     gitDirty,
@@ -194,13 +199,19 @@ async function run() {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   fs.writeFileSync(reportPath, `${JSON.stringify({ summary, results }, null, 2)}\n`);
 
-  if (splitArg === 'test_sealed') {
+  if (['test_sealed', 'holdout', 'regression'].includes(splitArg)) {
     const verdictPath = path.join(__dirname, '..', 'benchmark', 'STANDARD_SEARCH_SEALED_VERDICT.md');
     const failures = results.filter((r) => !r.pass);
+    const splitDesc = splitArg === 'holdout'
+      ? '`holdout` (Fresh Unseen Holdout: 30 reviewed cases: 10 positive paraphrases, 20 negative controls)'
+      : splitArg === 'regression'
+      ? '`regression` (Regression Suite: 30 reviewed cases: 10 positive paraphrases, 20 negative controls)'
+      : '`test_sealed` (30 reviewed cases: 10 positive paraphrases, 20 negative controls)';
     const md = `# Standard Search Sealed Release Verdict
 
 **Execution Date:** ${summary.finishedAt}  
-**Split:** \`test_sealed\` (30 reviewed cases: 10 positive paraphrases, 20 negative controls)  
+**Split:** ${splitDesc}  
+**Benchmark Version:** ${summary.benchmarkVersion}  
 **Git Commit SHA:** \`${summary.gitSha}\`  
 **Git Working Tree:** ${summary.gitDirty ? 'dirty (uncommitted working tree changes)' : 'clean'}  
 **Target Database:** \`${summary.indexIdentity.database}\` (port ${summary.indexIdentity.port}, ${summary.indexIdentity.recordCount || 6010} records)  

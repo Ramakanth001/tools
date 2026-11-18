@@ -1,0 +1,1126 @@
+{
+  "benchmarkVersion": 2,
+  "split": "train",
+  "cases": 90,
+  "queries": [
+    {
+      "id": "pos-01",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1322",
+      "question": "Can you tell me about the identity and nature of Shri Datta Swami?",
+      "rationale": "Direct identity inquiry matching discourse:1322",
+      "relevantSourceGroups": [
+        "discourse:1322",
+        "qa:320",
+        "discourse:2854",
+        "discourse:737",
+        "discourse:1113"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-02",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:320",
+      "question": "What is the procedure or location to have a personal meeting with Datta Swami?",
+      "rationale": "Procedure for meeting Swami matching qa:320",
+      "relevantSourceGroups": [
+        "qa:320",
+        "discourse:2854",
+        "discourse:1113",
+        "discourse:4488",
+        "discourse:4327"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-03",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:49",
+      "question": "What constitutes the genuine intrinsic nature of Lord Dattatreya?",
+      "rationale": "Real nature of Datta matching qa:49",
+      "relevantSourceGroups": [
+        "qa:49",
+        "qa:380",
+        "discourse:669",
+        "discourse:462",
+        "discourse:1585",
+        "discourse:1916"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-04",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:2068",
+      "question": "How do the concepts of Lord Datta and Lord Dattatreya differ in spiritual knowledge?",
+      "rationale": "Distinction between Datta and Dattatreya matching discourse:2068",
+      "relevantSourceGroups": [
+        "discourse:2068",
+        "discourse:3501",
+        "discourse:2184",
+        "discourse:2196",
+        "discourse:317"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-05",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:396",
+      "question": "What spiritual technique does Swami suggest to overcome pornographic addiction?",
+      "rationale": "Stopping pornography habit matching qa:396",
+      "relevantSourceGroups": [
+        "qa:396",
+        "discourse:5573",
+        "discourse:1071",
+        "discourse:4866",
+        "discourse:3664",
+        "discourse:1110"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-06",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:159",
+      "question": "What is the reason God appears not to respond to our sincere prayers?",
+      "rationale": "Unanswered prayers explanation matching qa:159",
+      "relevantSourceGroups": [
+        "qa:159",
+        "discourse:4513",
+        "discourse:3463",
+        "discourse:4642",
+        "discourse:4193"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-07",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:60",
+      "question": "Does the material universe possess objective reality or is it merely an illusion?",
+      "rationale": "World reality vs illusion matching qa:60",
+      "relevantSourceGroups": [
+        "qa:60",
+        "discourse:1814",
+        "discourse:2554",
+        "discourse:1824",
+        "discourse:107",
+        "discourse:805"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-08",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:208",
+      "question": "How can a devotee conquer fear and nervousness regarding childbirth and parenting?",
+      "rationale": "Anxiety about having a child matching qa:208",
+      "relevantSourceGroups": [
+        "qa:208",
+        "discourse:4786",
+        "discourse:1240",
+        "discourse:735",
+        "discourse:4323",
+        "discourse:565"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-09",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:738",
+      "question": "How does the human incarnation act as a two-in-one system of God and human medium?",
+      "rationale": "Two-in-one nature of human incarnation matching discourse:738",
+      "relevantSourceGroups": [
+        "discourse:738",
+        "discourse:3359",
+        "discourse:1787",
+        "discourse:2485",
+        "discourse:195",
+        "discourse:2834"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-10",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:55",
+      "question": "How can one recognise the contemporary human incarnation in this present world?",
+      "rationale": "Recognising contemporary human incarnation matching qa:55",
+      "relevantSourceGroups": [
+        "qa:55",
+        "discourse:2834",
+        "qa:43",
+        "discourse:1174",
+        "discourse:5072",
+        "discourse:195"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-11",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:5573",
+      "question": "Why does human psychological weakness cause attraction toward unlawful sexual pleasure?",
+      "rationale": "Lust and attraction analysis matching discourse:5573",
+      "relevantSourceGroups": [
+        "discourse:5573",
+        "discourse:3048",
+        "discourse:3350",
+        "discourse:2304",
+        "discourse:3567",
+        "discourse:1892"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-12",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:533",
+      "question": "Why should a devotee perform deep spiritual analysis instead of blind devotional rituals?",
+      "rationale": "Spiritual knowledge over blind ritualism matching discourse:533",
+      "relevantSourceGroups": [
+        "discourse:533",
+        "discourse:3580",
+        "discourse:4492",
+        "discourse:1549",
+        "discourse:1949",
+        "discourse:4298"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-13",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:87",
+      "question": "What is the relationship between the unimaginable God Parabrahman and the first energetic form Datta?",
+      "rationale": "Unimaginable God and first incarnation matching qa:87",
+      "relevantSourceGroups": [
+        "qa:87",
+        "discourse:2842",
+        "discourse:2351",
+        "discourse:1517",
+        "discourse:4236",
+        "discourse:2705"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-14",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:380",
+      "question": "Can energetic incarnations be directly perceived by humans on earth or only human incarnations?",
+      "rationale": "Energetic vs human incarnation perception matching qa:380",
+      "relevantSourceGroups": [
+        "qa:380",
+        "discourse:2186",
+        "discourse:976",
+        "discourse:1174",
+        "discourse:2554",
+        "discourse:1734"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-15",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:3501",
+      "question": "What is the true significance of the three heads of Lord Dattatreya?",
+      "rationale": "Significance of Brahma Vishnu Shiva in Datta matching discourse:3501",
+      "relevantSourceGroups": [
+        "discourse:3501",
+        "discourse:3135",
+        "qa:380",
+        "discourse:3142",
+        "discourse:317",
+        "discourse:675"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-16",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:766",
+      "question": "How does continuous attachment to worldly desires lead to moral degradation and suffering?",
+      "rationale": "Attachment leading to degradation matching discourse:766",
+      "relevantSourceGroups": [
+        "discourse:766",
+        "discourse:4531",
+        "discourse:2960",
+        "discourse:1589",
+        "discourse:213",
+        "discourse:1110"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-17",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:3034",
+      "question": "Why does God delay granting the fruits of our desires when we pray to Him?",
+      "rationale": "Divine timing and unanswered requests matching discourse:3034",
+      "relevantSourceGroups": [
+        "discourse:3034",
+        "discourse:3449",
+        "discourse:2520",
+        "discourse:1961",
+        "discourse:3004",
+        "discourse:1364"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-18",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:5497",
+      "question": "How does Shankara explain that the world is relatively real to the soul while unreal to God?",
+      "rationale": "Mithya and relative reality matching discourse:5497",
+      "relevantSourceGroups": [
+        "discourse:5497",
+        "discourse:113",
+        "discourse:3000",
+        "discourse:433",
+        "discourse:839",
+        "discourse:381"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-19",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:3191",
+      "question": "What guidance does Swami give to pregnant women regarding mental peace and prayer?",
+      "rationale": "Spiritual advice during pregnancy matching discourse:3191",
+      "relevantSourceGroups": [
+        "discourse:3191",
+        "discourse:704",
+        "discourse:2760",
+        "discourse:4739",
+        "discourse:2335",
+        "discourse:4796"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-20",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:2528",
+      "question": "How does the past karma of parents affect the birth and health of their progeny?",
+      "rationale": "Karma affecting child birth matching discourse:2528",
+      "relevantSourceGroups": [
+        "discourse:2528",
+        "discourse:1873",
+        "discourse:3212",
+        "discourse:1034",
+        "discourse:786",
+        "discourse:1056"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-21",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:737",
+      "question": "Why is the human incarnation compared to electric current entering a wire?",
+      "rationale": "Wire and current metaphor for incarnation matching discourse:737",
+      "relevantSourceGroups": [
+        "discourse:737",
+        "discourse:67",
+        "discourse:366",
+        "discourse:1663",
+        "discourse:2173",
+        "discourse:235"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-22",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:345",
+      "question": "What is the role of miracles in spiritual path and why are they not the main goal?",
+      "rationale": "Miracles role and limitations matching qa:345",
+      "relevantSourceGroups": [
+        "qa:345",
+        "discourse:5215",
+        "discourse:1604",
+        "discourse:4319",
+        "qa:339",
+        "discourse:296"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-23",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:993",
+      "question": "How does true spiritual knowledge generate genuine devotion and inspire practical sacrifice?",
+      "rationale": "Jnana generating Bhakti and Karma Samnyasa matching discourse:993",
+      "relevantSourceGroups": [
+        "discourse:993",
+        "discourse:5213",
+        "discourse:1530",
+        "discourse:2630",
+        "discourse:1398",
+        "discourse:1723"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-24",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1113",
+      "question": "Can someone become a true disciple of Swami through knowledge even without meeting Him physically like Ekalavya?",
+      "rationale": "Ekalavya example and disciple relation matching discourse:1113",
+      "relevantSourceGroups": [
+        "discourse:1113",
+        "discourse:2817",
+        "discourse:1286",
+        "discourse:3579",
+        "discourse:1531"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-25",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1517",
+      "question": "What is the definition of true love and devotion toward God without bargaining for benefits?",
+      "rationale": "Unconditional devotion vs business devotion matching discourse:1517",
+      "relevantSourceGroups": [
+        "discourse:1517",
+        "discourse:2208",
+        "discourse:2371",
+        "discourse:1762",
+        "discourse:4352",
+        "discourse:1136"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-26",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:314",
+      "question": "Why does human ego and jealousy prevent devotees from accepting the contemporary human incarnation?",
+      "rationale": "Repulsion between common media matching qa:314",
+      "relevantSourceGroups": [
+        "qa:314",
+        "discourse:839",
+        "discourse:1402",
+        "discourse:3360",
+        "discourse:2164",
+        "qa:38"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-27",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:2804",
+      "question": "What is the difference between true spiritual service (karmaphala tyaga) and mere theoretical lip-service?",
+      "rationale": "Practical sacrifice vs theoretical worship matching discourse:2804",
+      "relevantSourceGroups": [
+        "discourse:2804",
+        "discourse:520",
+        "discourse:2833",
+        "discourse:4321",
+        "discourse:4490",
+        "discourse:1605"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-28",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:4318",
+      "question": "How does God punish unrepentant sinners in hell to reform them?",
+      "rationale": "Reformation through punishment in hell matching discourse:4318",
+      "relevantSourceGroups": [
+        "discourse:4318",
+        "discourse:513",
+        "discourse:747",
+        "discourse:1648",
+        "discourse:1251",
+        "discourse:1022"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-29",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1309",
+      "question": "Why is sacrifice of the fruit of hard work considered the supreme test of devotion?",
+      "rationale": "Karmaphala tyaga as acid test of love matching discourse:1309",
+      "relevantSourceGroups": [
+        "discourse:1309",
+        "discourse:2092",
+        "qa:414",
+        "discourse:1774",
+        "discourse:1606",
+        "discourse:1444"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "pos-30",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1116",
+      "question": "How can householders balance their domestic duties with spiritual pursuit without neglecting family?",
+      "rationale": "Householder duty and spiritual pursuit matching discourse:1116",
+      "relevantSourceGroups": [
+        "discourse:1116",
+        "discourse:3337",
+        "qa:207",
+        "discourse:1557",
+        "discourse:2492",
+        "discourse:590"
+      ],
+      "split": "train"
+    },
+    {
+      "id": "trap-01",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can an oil lamp heat an entire house in winter?",
+      "rationale": "Clause trap: oil lamp + heat house",
+      "split": "train"
+    },
+    {
+      "id": "trap-02",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can an oil lamp cook rice or boil drinking water?",
+      "rationale": "Clause trap: oil lamp + cook rice",
+      "split": "train"
+    },
+    {
+      "id": "trap-03",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can lighting an oil lamp cure diabetes or reduce blood sugar?",
+      "rationale": "Clause trap: oil lamp + cure diabetes",
+      "split": "train"
+    },
+    {
+      "id": "trap-04",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can copper wire transmit spiritual vibrations to heal illness?",
+      "rationale": "Clause trap: copper wire + transmit vibrations",
+      "split": "train"
+    },
+    {
+      "id": "trap-05",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can meditating on Lord Datta charge a lithium electric battery?",
+      "rationale": "Clause trap: meditate + charge battery",
+      "split": "train"
+    },
+    {
+      "id": "trap-06",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can chanting mantras increase car engine mileage on the highway?",
+      "rationale": "Clause trap: mantra + increase mileage",
+      "split": "train"
+    },
+    {
+      "id": "trap-07",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can holy ash extinguish a burning gasoline fire?",
+      "rationale": "Clause trap: holy ash + extinguish gasoline",
+      "split": "train"
+    },
+    {
+      "id": "trap-08",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can lighting incense protect a building from lightning strikes?",
+      "rationale": "Clause trap: incense + protect lightning",
+      "split": "train"
+    },
+    {
+      "id": "trap-09",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can a clay oil lamp replace electric bulbs in an operating theatre?",
+      "rationale": "Clause trap: oil lamp + operating theatre",
+      "split": "train"
+    },
+    {
+      "id": "trap-10",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can performing puja clean toxic industrial effluent in a chemical river?",
+      "rationale": "Clause trap: puja + clean effluent",
+      "split": "train"
+    },
+    {
+      "id": "trap-11",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can reciting the Gayatri mantra repair a punctured car tyre?",
+      "rationale": "Clause trap: Gayatri mantra + repair tyre",
+      "split": "train"
+    },
+    {
+      "id": "trap-12",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can eating flowers from the altar substitute for insulin injections?",
+      "rationale": "Clause trap: altar flowers + substitute insulin",
+      "split": "train"
+    },
+    {
+      "id": "trap-13",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can an oil lamp boil milk for making tea?",
+      "rationale": "Clause trap: oil lamp + boil milk",
+      "split": "train"
+    },
+    {
+      "id": "trap-14",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can spiritual energy melt titanium metal in an industrial furnace?",
+      "rationale": "Clause trap: spiritual energy + melt titanium",
+      "split": "train"
+    },
+    {
+      "id": "trap-15",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Can burning camphor purify radioactive nuclear fallout?",
+      "rationale": "Clause trap: camphor + purify fallout",
+      "split": "train"
+    },
+    {
+      "id": "phys-01",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How do I bake a moist chocolate fudge cake from scratch in an oven?",
+      "rationale": "Cooking recipe absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-02",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the exact temperature and boiling point of sesame oil in Celsius?",
+      "rationale": "Physical measurement absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-03",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How many lumens of brightness does a standard cotton-wick clay oil lamp produce?",
+      "rationale": "Photometric measurement absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-04",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What dosage of ibuprofen and paracetamol is safe for a child weighing 20 kilograms?",
+      "rationale": "Medical pediatric dosage absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-05",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How do I replace the alternator on a 2018 Honda Civic sedan?",
+      "rationale": "Automotive repair absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-06",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the recipe and cooking time for authentic Hyderabadi mutton dum biryani?",
+      "rationale": "Culinary recipe absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-07",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How to solder surface-mount microchips onto an electronic printed circuit board?",
+      "rationale": "Electronics engineering absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-08",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the electrical resistance and wattage of a 100-watt tungsten filament bulb?",
+      "rationale": "Electrical physics absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-09",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How do I troubleshoot a leaking copper water pipe under a kitchen sink?",
+      "rationale": "Plumbing repair absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-10",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What are the steps to calibrate a gas chromatography mass spectrometer in a chemical lab?",
+      "rationale": "Laboratory procedure absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-11",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How to knit a woolen sweater for winter using circular knitting needles?",
+      "rationale": "Craft procedure absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-12",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the cure and treatment protocol for bacterial pneumonia in elderly patients?",
+      "rationale": "Medical clinical treatment absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-13",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How to install a dual-boot Ubuntu Linux alongside Windows 11 on an NVMe SSD?",
+      "rationale": "Software installation absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-14",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the compressive strength of C30 concrete after 28 days of curing in MPa?",
+      "rationale": "Civil engineering specification absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "phys-15",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How do I brew homemade espresso coffee using a manual lever machine?",
+      "rationale": "Beverage preparation absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-01",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the official capital city of the French Republic?",
+      "rationale": "World geography absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-02",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Which national football team won the 2022 FIFA World Cup final in Qatar?",
+      "rationale": "Sports history absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-03",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "In what year was the United Nations Charter signed in San Francisco?",
+      "rationale": "Modern world history absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-04",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the equatorial diameter and orbital period of the planet Saturn?",
+      "rationale": "Astronomy planetary data absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-05",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Who served as the first democratically elected president of South Africa in 1994?",
+      "rationale": "Political history absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-06",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the chemical formula and molar mass of sodium chloride table salt?",
+      "rationale": "Inorganic chemistry absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-07",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the estimated human population of the Tokyo metropolitan area?",
+      "rationale": "Demographic statistics absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-08",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Who wrote the play Romeo and Juliet in Elizabethan England?",
+      "rationale": "English literature absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-09",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the longest river system on the continent of South America?",
+      "rationale": "Physical geography absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-10",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "Which country won the Eurovision Song Contest in the year 2023?",
+      "rationale": "Entertainment trivia absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-11",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the currency and central bank of the United Kingdom?",
+      "rationale": "Economics currency data absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "gen-12",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "When did the Berlin Wall fall, leading to German reunification?",
+      "rationale": "European history absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-01",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What does the Book of Mormon teach about the ancient migration of the Jaredites across the ocean?",
+      "rationale": "Latter-day Saint scripture absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-02",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How does the First Vatican Council define the conditions for Papal Infallibility ex cathedra?",
+      "rationale": "Catholic canon law specifics absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-03",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What are the auditing levels of the Operating Thetan bridge in Scientology doctrine?",
+      "rationale": "Scientology theology absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-04",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What are the rules of ritual purification at a Shinto shrine temizuya water pavilion in Japan?",
+      "rationale": "Shinto liturgical ritual absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-05",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "How do Calvinist theologians explain the Five Points of TULIP predestination theology?",
+      "rationale": "Reformed Protestant dogma absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-06",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What does the Tibetan Book of the Dead teach about the Bardo of the intermediate state between rebirths?",
+      "rationale": "Tibetan Bardo teachings specific texts absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-07",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What is the Zoroastrian teaching regarding the Chinvat Bridge and the Daena maiden after death?",
+      "rationale": "Zoroastrian eschatology absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-08",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What are the specific dietary laws of Kashrut regarding kosher slaughtering and milk-meat separation in the Talmud?",
+      "rationale": "Rabbinic Talmudic halakha absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "unans-09",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "question": "What does the Daoist text Daodejing say about the uncarved block (Pu) in chapter 28?",
+      "rationale": "Daoist textual verse commentary absent from corpus",
+      "split": "train"
+    },
+    {
+      "id": "noisy-01",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1322",
+      "relevantSourceGroups": [
+        "discourse:1322",
+        "discourse:737",
+        "qa:320",
+        "discourse:738",
+        "discourse:3985",
+        "discourse:4291"
+      ],
+      "question": "who is shree datta swamy",
+      "rationale": "Noisy transliterated spelling of core positive query",
+      "split": "train"
+    },
+    {
+      "id": "noisy-02",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:320",
+      "relevantSourceGroups": [
+        "qa:320",
+        "discourse:2854",
+        "discourse:4385",
+        "discourse:2916",
+        "discourse:2882",
+        "discourse:5472"
+      ],
+      "question": "where to meet dattswami in vijayawada or hyderabad",
+      "rationale": "Colloquial phrasing of meeting Swami matching qa:320",
+      "split": "train"
+    },
+    {
+      "id": "noisy-03",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:396",
+      "relevantSourceGroups": [
+        "qa:396",
+        "discourse:4531",
+        "discourse:2222",
+        "discourse:3935",
+        "discourse:5074",
+        "discourse:5093",
+        "discourse:2455"
+      ],
+      "question": "how to stop waching pron habit spiritually",
+      "rationale": "Misspelled addiction query matching qa:396",
+      "split": "train"
+    },
+    {
+      "id": "noisy-04",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:159",
+      "relevantSourceGroups": [
+        "qa:159",
+        "discourse:4513",
+        "qa:387",
+        "discourse:3034",
+        "discourse:4588",
+        "discourse:3463"
+      ],
+      "question": "why god doesnt anser my daily prayrs",
+      "rationale": "Colloquial unanswered prayers matching qa:159",
+      "split": "train"
+    },
+    {
+      "id": "noisy-05",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:2068",
+      "relevantSourceGroups": [
+        "discourse:2068",
+        "discourse:3501",
+        "discourse:415",
+        "discourse:5454",
+        "discourse:2842"
+      ],
+      "question": "diference between lord datta and dathatreya",
+      "rationale": "Misspelled distinction query matching discourse:2068",
+      "split": "train"
+    },
+    {
+      "id": "noisy-06",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:738",
+      "relevantSourceGroups": [
+        "discourse:738",
+        "discourse:1787",
+        "discourse:1074",
+        "discourse:417",
+        "discourse:2558",
+        "discourse:463",
+        "discourse:235"
+      ],
+      "question": "two in one system of human incarnation explantion",
+      "rationale": "Informal fragment query matching discourse:738",
+      "split": "train"
+    },
+    {
+      "id": "noisy-07",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:60",
+      "relevantSourceGroups": [
+        "qa:60",
+        "discourse:1814",
+        "discourse:2500",
+        "discourse:1824",
+        "discourse:5497",
+        "discourse:462"
+      ],
+      "question": "is this jagat world real or maya illusion according to swami",
+      "rationale": "Mixed transliterated Sanskrit query matching qa:60",
+      "split": "train"
+    },
+    {
+      "id": "noisy-08",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1113",
+      "relevantSourceGroups": [
+        "discourse:1113",
+        "discourse:999",
+        "qa:153",
+        "discourse:3579",
+        "discourse:1758",
+        "discourse:2016"
+      ],
+      "question": "can ekalavya type disciple learn without seeing guru swami",
+      "rationale": "Noisy question matching discourse:1113",
+      "split": "train"
+    },
+    {
+      "id": "noisy-09",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:345",
+      "relevantSourceGroups": [
+        "qa:345",
+        "discourse:296",
+        "discourse:2520",
+        "discourse:2581",
+        "qa:352",
+        "discourse:452",
+        "discourse:2776"
+      ],
+      "question": "why swami doesnt do mirakles everywhere now",
+      "rationale": "Noisy miracles query matching qa:345",
+      "split": "train"
+    }
+  ]
+}

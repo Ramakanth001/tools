@@ -2,6 +2,28 @@
   "summary": {
     "benchmarkVersion": 1,
     "split": "tune",
+    "gitSha": "79551881d0d0dcac9fac30540c525652048c0b77",
+    "gitDirty": true,
+    "startedAt": "2026-11-18T05:55:22.398Z",
+    "finishedAt": "2026-11-18T05:56:52.732Z",
+    "durationMs": 90334,
+    "benchmarkSha256": "eac68625b657e6bf381f09cc2e88ae9a1ea17abfd7bf9509ad7a29094206d156",
+    "indexIdentity": {
+      "host": "127.0.0.1",
+      "port": 5433,
+      "database": "universal_qa_v3_candidate",
+      "retrievalSchemaVersion": "answer-unit-v7",
+      "embeddingFormatVersion": "generic-contextual-v4",
+      "embeddingModel": "bge-m3",
+      "embeddingModelDigest": "7907646426070047a77226ac3e684fbbe8410524f7b4a74d02837e43f2146bab",
+      "recordCount": 6010
+    },
+    "settings": {
+      "apiBase": "http://127.0.0.1:8790/api",
+      "topK": 5,
+      "threshold": 0.49,
+      "ollamaBaseUrl": "http://127.0.0.1:11434"
+    },
     "totalCases": 30,
     "passed": 30,
     "positiveCases": 10,
@@ -9,8 +31,8 @@
     "positiveAdmissionRate": 1,
     "negativeRejectionRate": 1,
     "positiveRecallAt5": 1,
-    "positiveTop1Accuracy": 1,
-    "meanReciprocalRank": 1,
+    "positiveTop1Accuracy": 0.6,
+    "meanReciprocalRank": 0.775,
     "falseAcceptRate": 0,
     "categoryBreakdown": {
       "positive_paraphrase": {
@@ -18,7 +40,7 @@
         "passed": 10,
         "falseAccepts": 0,
         "positiveHits": 10,
-        "top1Hits": 10
+        "top1Hits": 6
       },
       "lexical_trap": {
         "total": 5,
@@ -59,9 +81,10 @@
     "gatesPassed": {
       "positiveAdmissionGte95": true,
       "recallAt5Gte95": true,
-      "top1Gte90": true,
+      "top1Gte90": false,
       "falseAcceptLte02": true
-    }
+    },
+    "releaseVerdict": "REJECTED"
   },
   "results": [
     {
@@ -78,8 +101,8 @@
         "discourse:2632",
         "discourse:1039",
         "discourse:73",
-        "discourse:255",
-        "discourse:2669"
+        "discourse:2669",
+        "discourse:533"
       ]
     },
     {
@@ -89,15 +112,15 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:1504",
       "strongMatch": true,
-      "acceptedSourceId": "discourse:1443",
+      "acceptedSourceId": "discourse:1056",
       "rank": 1,
       "pass": true,
       "topSourceIds": [
-        "discourse:1443",
         "discourse:1056",
         "discourse:2409",
-        "discourse:3105",
-        "discourse:2815"
+        "discourse:1443",
+        "discourse:3102",
+        "discourse:4761"
       ]
     },
     {
@@ -107,14 +130,14 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:476",
       "strongMatch": true,
-      "acceptedSourceId": "discourse:4568",
-      "rank": 1,
+      "acceptedSourceId": "discourse:630",
+      "rank": 2,
       "pass": true,
       "topSourceIds": [
-        "discourse:4568",
-        "discourse:1774",
-        "discourse:1605",
+        "discourse:630",
         "qa:414",
+        "discourse:356",
+        "discourse:1605",
         "discourse:1541"
       ]
     },
@@ -125,15 +148,15 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:4214",
       "strongMatch": true,
-      "acceptedSourceId": "discourse:1006",
-      "rank": 1,
+      "acceptedSourceId": "discourse:1387",
+      "rank": 2,
       "pass": true,
       "topSourceIds": [
+        "discourse:1387",
         "discourse:1006",
-        "discourse:2170",
-        "discourse:605",
+        "discourse:151",
         "discourse:1897",
-        "discourse:151"
+        "discourse:605"
       ]
     },
     {
@@ -143,15 +166,15 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:1863",
       "strongMatch": true,
-      "acceptedSourceId": "discourse:3007",
-      "rank": 1,
+      "acceptedSourceId": "discourse:4413",
+      "rank": 2,
       "pass": true,
       "topSourceIds": [
+        "discourse:4413",
         "discourse:3007",
+        "discourse:853",
         "discourse:860",
-        "discourse:2840",
-        "discourse:5105",
-        "discourse:853"
+        "discourse:1346"
       ]
     },
     {
@@ -161,14 +184,14 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:4321",
       "strongMatch": true,
-      "acceptedSourceId": "discourse:1575",
+      "acceptedSourceId": "discourse:150",
       "rank": 1,
       "pass": true,
       "topSourceIds": [
-        "discourse:1575",
-        "discourse:4887",
         "discourse:150",
+        "discourse:1575",
         "discourse:972",
+        "discourse:310",
         "discourse:3765"
       ]
     },
@@ -179,15 +202,15 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:2854",
       "strongMatch": true,
-      "acceptedSourceId": "qa:320",
+      "acceptedSourceId": "discourse:2854",
       "rank": 1,
       "pass": true,
       "topSourceIds": [
-        "qa:320",
+        "discourse:2854",
+        "discourse:5451",
         "discourse:3985",
-        "discourse:3386",
-        "discourse:1113",
-        "discourse:5451"
+        "discourse:4294",
+        "qa:320"
       ]
     },
     {
@@ -197,15 +220,15 @@
       "shouldAbstain": false,
       "expectedSourceId": "discourse:3985",
       "strongMatch": true,
-      "acceptedSourceId": "discourse:1113",
-      "rank": 1,
+      "acceptedSourceId": "discourse:4537",
+      "rank": 4,
       "pass": true,
       "topSourceIds": [
+        "discourse:4537",
+        "discourse:4876",
+        "discourse:3136",
         "discourse:1113",
-        "discourse:5106",
-        "discourse:1200",
-        "discourse:5213",
-        "discourse:504"
+        "qa:98"
       ]
     },
     {
@@ -221,8 +244,8 @@
       "topSourceIds": [
         "discourse:2184",
         "discourse:3359",
-        "discourse:1540",
         "discourse:2025",
+        "discourse:1540",
         "discourse:2658"
       ]
     },
@@ -238,10 +261,10 @@
       "pass": true,
       "topSourceIds": [
         "discourse:1377",
-        "discourse:3970",
+        "discourse:628",
+        "discourse:514",
         "discourse:1087",
-        "discourse:2314",
-        "discourse:473"
+        "discourse:4918"
       ]
     },
     {
@@ -255,11 +278,11 @@
       "rank": null,
       "pass": true,
       "topSourceIds": [
+        "qa:190",
         "discourse:2189",
-        "discourse:1192",
-        "discourse:5266",
         "discourse:4732",
-        "discourse:1730"
+        "discourse:5266",
+        "discourse:1192"
       ]
     },
     {
@@ -276,8 +299,8 @@
         "discourse:452",
         "qa:156",
         "discourse:560",
-        "discourse:4532",
-        "discourse:2486"
+        "qa:97",
+        "discourse:2189"
       ]
     },
     {
@@ -293,9 +316,9 @@
       "topSourceIds": [
         "discourse:2681",
         "discourse:1257",
-        "discourse:1613",
-        "discourse:5238",
-        "qa:220"
+        "qa:220",
+        "discourse:4042",
+        "discourse:5238"
       ]
     },
     {
@@ -313,7 +336,7 @@
         "discourse:2551",
         "discourse:1841",
         "discourse:1691",
-        "discourse:2806"
+        "discourse:1831"
       ]
     },
     {
@@ -331,7 +354,7 @@
         "discourse:802",
         "discourse:106",
         "discourse:1690",
-        "discourse:2806"
+        "discourse:1841"
       ]
     },
     {
@@ -364,8 +387,8 @@
       "pass": true,
       "topSourceIds": [
         "qa:242",
-        "discourse:4419",
         "discourse:4789",
+        "discourse:4419",
         "discourse:1954",
         "discourse:2491"
       ]
@@ -399,8 +422,8 @@
       "rank": null,
       "pass": true,
       "topSourceIds": [
-        "qa:430",
         "discourse:2129",
+        "qa:430",
         "discourse:2052",
         "discourse:1273",
         "discourse:81"
@@ -420,8 +443,8 @@
         "discourse:1096",
         "discourse:3860",
         "discourse:4911",
-        "discourse:5441",
-        "discourse:4727"
+        "discourse:5511",
+        "qa:54"
       ]
     },
     {
@@ -439,7 +462,7 @@
         "discourse:588",
         "discourse:1258",
         "discourse:965",
-        "discourse:1434"
+        "discourse:2087"
       ]
     },
     {
@@ -455,8 +478,8 @@
       "topSourceIds": [
         "discourse:2730",
         "qa:200",
-        "discourse:1199",
         "discourse:1282",
+        "discourse:453",
         "qa:173"
       ]
     },
@@ -525,11 +548,11 @@
       "rank": null,
       "pass": true,
       "topSourceIds": [
+        "discourse:1821",
         "discourse:1911",
         "discourse:2096",
         "discourse:1709",
-        "discourse:5316",
-        "discourse:1861"
+        "discourse:5316"
       ]
     },
     {
@@ -561,11 +584,11 @@
       "rank": null,
       "pass": true,
       "topSourceIds": [
-        "discourse:861",
         "discourse:2946",
         "discourse:2916",
         "discourse:5700",
-        "discourse:5386"
+        "discourse:5060",
+        "discourse:256"
       ]
     },
     {
@@ -582,8 +605,8 @@
         "discourse:2754",
         "discourse:1071",
         "discourse:1857",
-        "qa:373",
-        "discourse:2513"
+        "discourse:3837",
+        "discourse:2746"
       ]
     },
     {
@@ -598,10 +621,10 @@
       "pass": true,
       "topSourceIds": [
         "discourse:453",
-        "discourse:662",
         "discourse:346",
-        "discourse:755",
-        "discourse:900"
+        "discourse:891",
+        "discourse:662",
+        "discourse:342"
       ]
     }
   ]

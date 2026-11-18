@@ -142,14 +142,43 @@ function run() {
     }
   }
 
-  let gitSha = 'unknown';
-  let gitStatus = 'unknown';
-  try {
-    gitSha = execSync('git rev-parse HEAD', { cwd: rootDir }).toString().trim();
-    const statusOut = execSync('git status --porcelain', { cwd: rootDir }).toString().trim();
-    gitStatus = statusOut.length > 0 ? 'dirty (uncommitted working tree changes)' : 'clean';
-  } catch (e) {
-    // ignore
+  let gitSha = rawReport.gitSha || 'unknown';
+  let gitStatus = rawReport.gitDirty != null
+    ? (rawReport.gitDirty ? 'dirty (uncommitted working tree changes)' : 'clean')
+    : 'unknown';
+  if (gitSha === 'unknown') {
+    try {
+      gitSha = execSync('git rev-parse HEAD', { cwd: rootDir }).toString().trim();
+      const statusOut = execSync('git status --porcelain', { cwd: rootDir }).toString().trim();
+      gitStatus = statusOut.length > 0 ? 'dirty (uncommitted working tree changes)' : 'clean';
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  let standardSearchStatus = 'ON HOLD (Gated Preview)';
+  let standardSearchRec = 'Sealed release gates not satisfied. Maintain on hold until positive admission and top-1 gates pass.';
+  const holdoutResultsPath = path.join(__dirname, '..', 'benchmark', 'results', 'held_out_150_holdout_results.json');
+  const sealedResultsPath = fs.existsSync(holdoutResultsPath)
+    ? holdoutResultsPath
+    : path.join(__dirname, '..', 'benchmark', 'results', 'held_out_150_test_sealed_results.json');
+  if (fs.existsSync(sealedResultsPath)) {
+    try {
+      const sealedData = JSON.parse(fs.readFileSync(sealedResultsPath, 'utf8'));
+      if (sealedData.summary?.releaseVerdict === 'APPROVED') {
+        standardSearchStatus = 'APPROVED / PRODUCTION-READY';
+        standardSearchRec = 'Releasable. All four release gates met on sealed holdout set.';
+      } else {
+        const top1 = sealedData.summary?.positiveTop1Accuracy != null ? (sealedData.summary.positiveTop1Accuracy * 100).toFixed(0) : '?';
+        const recall = sealedData.summary?.positiveRecallAt5 != null ? (sealedData.summary.positiveRecallAt5 * 100).toFixed(0) : '?';
+        const admission = sealedData.summary?.positiveAdmissionRate != null ? (sealedData.summary.positiveAdmissionRate * 100).toFixed(0) : '?';
+        const falseAcc = sealedData.summary?.falseAcceptRate != null ? (sealedData.summary.falseAcceptRate * 100).toFixed(1) : '?';
+        standardSearchStatus = 'ON HOLD (Gated Preview)';
+        standardSearchRec = `Production promotion withheld. Sealed gates: Top-1 ${top1}%, Recall@5 ${recall}%, Admission ${admission}%, False Accepts ${falseAcc}%.`;
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const { gates, allPassed } = evaluateGates(rawReport, auditReport);
@@ -173,7 +202,7 @@ function run() {
 
 | Component | Status | Recommendation |
 | :--- | :--- | :--- |
-| **Standard Semantic Search** | **APPROVED / PRODUCTION-READY** | Releasable. 23/23 curated benchmark, 100/100 corpus queries, 0% negative false-accepts, 0 non-Swami contamination, full passing test suite. |
+| **Standard Semantic Search** | **${standardSearchStatus}** | ${standardSearchRec} |
 | **Deep Search** | **BLOCKED FOR GENERAL AVAILABILITY (Gated Preview Only)** | Candidate recall (81.0%), evidence recall (50.0%), and status calibration (24.0%) on fast single-pass Qwen 2.5 7B do not meet the 90%+ release threshold. |
 
 ### Key Architectural Accomplishments

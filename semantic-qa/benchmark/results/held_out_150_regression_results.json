@@ -1,0 +1,631 @@
+{
+  "summary": {
+    "benchmarkVersion": 2,
+    "split": "regression",
+    "gitSha": "79551881d0d0dcac9fac30540c525652048c0b77",
+    "gitDirty": true,
+    "startedAt": "2026-11-18T06:07:24.044Z",
+    "finishedAt": "2026-11-18T06:07:51.762Z",
+    "durationMs": 27718,
+    "benchmarkSha256": "6417511ef203eabb9ebed01ae1ad582bc09f617454242469525822d1249e2dbc",
+    "indexIdentity": {
+      "host": "127.0.0.1",
+      "port": 5433,
+      "database": "universal_qa_v3_candidate",
+      "retrievalSchemaVersion": "answer-unit-v7",
+      "embeddingFormatVersion": "generic-contextual-v4",
+      "embeddingModel": "bge-m3",
+      "embeddingModelDigest": "7907646426070047a77226ac3e684fbbe8410524f7b4a74d02837e43f2146bab",
+      "recordCount": 6010
+    },
+    "settings": {
+      "apiBase": "http://127.0.0.1:8790/api",
+      "topK": 5,
+      "threshold": 0.49,
+      "ollamaBaseUrl": "http://127.0.0.1:11434"
+    },
+    "totalCases": 30,
+    "passed": 30,
+    "positiveCases": 10,
+    "negativeCases": 20,
+    "positiveAdmissionRate": 1,
+    "negativeRejectionRate": 1,
+    "positiveRecallAt5": 1,
+    "positiveTop1Accuracy": 0.8,
+    "meanReciprocalRank": 0.9,
+    "falseAcceptRate": 0,
+    "categoryBreakdown": {
+      "positive_paraphrase": {
+        "total": 10,
+        "passed": 10,
+        "falseAccepts": 0,
+        "positiveHits": 10,
+        "top1Hits": 8
+      },
+      "lexical_trap": {
+        "total": 5,
+        "passed": 5,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "physical_and_recipes": {
+        "total": 5,
+        "passed": 5,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "general_knowledge": {
+        "total": 4,
+        "passed": 4,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "unanswered_spiritual": {
+        "total": 3,
+        "passed": 3,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "noisy_and_transliterated": {
+        "total": 3,
+        "passed": 3,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      }
+    },
+    "gatesPassed": {
+      "positiveAdmissionGte95": true,
+      "recallAt5Gte95": true,
+      "top1Gte90": false,
+      "falseAcceptLte02": true
+    },
+    "releaseVerdict": "REJECTED"
+  },
+  "results": [
+    {
+      "id": "pos-41",
+      "question": "What is the inner spiritual meaning of the churning of the cosmic ocean (Samudra Manthana)?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:845",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:546",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:546",
+        "qa:121",
+        "discourse:578",
+        "discourse:2632",
+        "discourse:4489"
+      ]
+    },
+    {
+      "id": "pos-42",
+      "question": "Why did Lord Dattatreya choose twenty-four gurus from nature including the honeybee and python?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1239",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:80",
+      "rank": 2,
+      "pass": true,
+      "topSourceIds": [
+        "qa:380",
+        "discourse:80",
+        "discourse:1239",
+        "discourse:273",
+        "discourse:1864"
+      ]
+    },
+    {
+      "id": "pos-43",
+      "question": "How does self-control (dama) and mental control (shama) help in conquering sensual cravings?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:423",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:5085",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:5085",
+        "discourse:1169",
+        "discourse:5153",
+        "discourse:5073",
+        "discourse:4865"
+      ]
+    },
+    {
+      "id": "pos-44",
+      "question": "What is the spiritual damage caused by engaging in illicit affairs and breaking marriage vows?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1019",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:2607",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2607",
+        "qa:201",
+        "discourse:5551",
+        "discourse:1218",
+        "discourse:1292"
+      ]
+    },
+    {
+      "id": "pos-45",
+      "question": "How does the grace of God operate to protect a devotee from past negative karma?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:264",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:3797",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:3797",
+        "discourse:1654",
+        "discourse:1034",
+        "discourse:687",
+        "discourse:81"
+      ]
+    },
+    {
+      "id": "pos-46",
+      "question": "Why do pure souls sometimes suffer intense physical illness and pain on earth?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:78",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:1214",
+      "rank": 2,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1214",
+        "qa:324",
+        "discourse:491",
+        "discourse:982",
+        "discourse:1878"
+      ]
+    },
+    {
+      "id": "pos-47",
+      "question": "Can devotion without surrender and obedience to divine commands please God?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:2335",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:2540",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2540",
+        "discourse:2049",
+        "discourse:2011",
+        "discourse:2597",
+        "discourse:4881"
+      ]
+    },
+    {
+      "id": "pos-48",
+      "question": "What is the difference between awareness (chit) and inert energy (prana) in living beings?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:3108",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:3380",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:3380",
+        "discourse:128",
+        "discourse:4415",
+        "discourse:131",
+        "discourse:5639"
+      ]
+    },
+    {
+      "id": "pos-49",
+      "question": "How does modern science affirm that matter and energy are mutually convertible like maya?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1815",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:485",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:485",
+        "discourse:1832",
+        "discourse:418",
+        "discourse:814",
+        "discourse:461"
+      ]
+    },
+    {
+      "id": "pos-50",
+      "question": "Why does human soul mistake itself for God in the state of deep sleep or waking state?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1814",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:2140",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2140",
+        "discourse:1864",
+        "discourse:2136",
+        "discourse:1833",
+        "discourse:768"
+      ]
+    },
+    {
+      "id": "trap-21",
+      "question": "Can holy basil leaves cure bacterial tuberculosis without antibiotics?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2401",
+        "qa:266",
+        "discourse:5525",
+        "discourse:1202",
+        "discourse:2303"
+      ]
+    },
+    {
+      "id": "trap-22",
+      "question": "Can meditating in the sun replace sunscreen against UV radiation?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "qa:97",
+        "qa:174",
+        "discourse:1531",
+        "qa:156",
+        "discourse:2486"
+      ]
+    },
+    {
+      "id": "trap-23",
+      "question": "Can an oil lamp illuminate an entire football stadium at night?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:533",
+        "discourse:1118",
+        "discourse:1587",
+        "discourse:1690",
+        "discourse:1582"
+      ]
+    },
+    {
+      "id": "trap-24",
+      "question": "Can chanting Sanskrit verses decode encrypted computer passwords?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:781",
+        "discourse:2163",
+        "qa:112",
+        "discourse:1543",
+        "discourse:2681"
+      ]
+    },
+    {
+      "id": "trap-25",
+      "question": "Can burning cow dung cakes power an electric passenger train?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:5093",
+        "qa:399",
+        "discourse:1877",
+        "discourse:1969",
+        "discourse:3982"
+      ]
+    },
+    {
+      "id": "phys-21",
+      "question": "How to mix epoxy resin and hardener to coat a wooden dining table without bubbles?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1954",
+        "discourse:2052",
+        "discourse:1711",
+        "discourse:2360",
+        "qa:242"
+      ]
+    },
+    {
+      "id": "phys-22",
+      "question": "What is the aerodynamic drag coefficient of a Boeing 787 Dreamliner at cruising speed?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:4450",
+        "discourse:4774",
+        "discourse:5316",
+        "qa:41",
+        "discourse:2339"
+      ]
+    },
+    {
+      "id": "phys-23",
+      "question": "How do I remove stubborn red wine stains from white cotton tablecloth fabric?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:3455",
+        "qa:332",
+        "discourse:2052",
+        "discourse:2360",
+        "qa:242"
+      ]
+    },
+    {
+      "id": "phys-24",
+      "question": "What are the camera exposure settings for photographing the Milky Way at night?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2200",
+        "discourse:4726",
+        "discourse:965",
+        "discourse:3666",
+        "qa:197"
+      ]
+    },
+    {
+      "id": "phys-25",
+      "question": "How to properly season a cast iron skillet using flaxseed oil in an oven?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1690",
+        "discourse:1689",
+        "discourse:1954",
+        "discourse:4413",
+        "qa:332"
+      ]
+    },
+    {
+      "id": "gen-17",
+      "question": "What is the main operating system kernel developed by Linus Torvalds in 1991?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:588",
+        "qa:168",
+        "discourse:4787",
+        "discourse:3508",
+        "discourse:4415"
+      ]
+    },
+    {
+      "id": "gen-18",
+      "question": "Which treaty ended World War I between the Allied powers and Germany in 1919?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2221",
+        "discourse:905",
+        "discourse:893",
+        "discourse:5758",
+        "discourse:721"
+      ]
+    },
+    {
+      "id": "gen-19",
+      "question": "What is the primary language spoken in the South American nation of Brazil?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2624",
+        "discourse:1315",
+        "discourse:5453",
+        "qa:239",
+        "qa:339"
+      ]
+    },
+    {
+      "id": "gen-20",
+      "question": "What is the deepest oceanic trench on planet Earth called?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:763",
+        "discourse:965",
+        "qa:193",
+        "discourse:5580",
+        "qa:226"
+      ]
+    },
+    {
+      "id": "unans-13",
+      "question": "What are the requirements for initiation into the Eleusinian mysteries of Demeter in ancient Greece?",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1759",
+        "qa:98",
+        "discourse:3820",
+        "discourse:5106",
+        "discourse:3136"
+      ]
+    },
+    {
+      "id": "unans-14",
+      "question": "What does the Sikh scripture Guru Granth Sahib say in the Japji Sahib about the realm of truth (Sach Khand)?",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "qa:185",
+        "qa:149",
+        "discourse:2590",
+        "discourse:4771",
+        "discourse:2352"
+      ]
+    },
+    {
+      "id": "unans-15",
+      "question": "What is the Swedenborgian teaching regarding spiritual correspondences between heaven and human anatomy?",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:978",
+        "discourse:124",
+        "discourse:3298",
+        "discourse:4321",
+        "discourse:450"
+      ]
+    },
+    {
+      "id": "noisy-13",
+      "question": "can a lamp heat a cake temperature degrees celsius 100 200",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1691",
+        "discourse:1841",
+        "discourse:1508",
+        "discourse:4448",
+        "discourse:1542"
+      ]
+    },
+    {
+      "id": "noisy-14",
+      "question": "qwertyuiop asdfghjkl zxcvbnm",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:5047",
+        "discourse:5471",
+        "discourse:2489",
+        "discourse:5604",
+        "discourse:5737"
+      ]
+    },
+    {
+      "id": "noisy-15",
+      "question": "paracetamol dosage for baking cake in oil lamp",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:90",
+        "discourse:1118",
+        "discourse:1841",
+        "discourse:1587",
+        "discourse:1691"
+      ]
+    }
+  ]
+}

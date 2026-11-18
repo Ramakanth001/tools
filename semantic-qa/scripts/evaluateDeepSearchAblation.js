@@ -251,60 +251,79 @@ async function run() {
     reviewedCases = reviewedCases.slice(0, Math.max(1, Number(limitArg)));
   }
   const results = [];
+  const failures = [];
+  let executionError = null;
 
-  for (const [index, entry] of reviewedCases.entries()) {
-    const startedAt = Date.now();
-    const search = await api(apiBase, '/search', {
-      method: 'POST',
-      body: JSON.stringify({
-        indexConnection,
-        ollamaBaseUrl: process.env.SEMANTIC_QA_EVAL_OLLAMA || 'http://127.0.0.1:11434',
-        question: entry.question,
-        searchMode: 'semantic',
-        topK: 20,
-        threshold: Number(process.env.SEMANTIC_QA_EVAL_THRESHOLD || 0.49),
-        summary: {
-          enabled: false,
-          mode: 'deep',
-          deepModel: targetModel,
-          deliberation,
-          deepMaxRecords,
-          parallelRequests: 1,
-          requestTimeoutMs: 900000,
-          hardwarePreference: process.env.SEMANTIC_QA_HARDWARE || 'auto',
-        },
-      }),
-    });
-    if (!search.deepSummaryJob?.id) throw new Error(`${entry.id}: search did not start Deep Search`);
-    const job = await waitForDeepSearch(apiBase, search.deepSummaryJob.id, deadlineMs, pollMs);
-    const scored = scoreCase(entry, job, Date.now() - startedAt);
-    const evidenceVerification = await verifyEvidence(job.result?.evidence || []);
-    scored.citationsChecked = evidenceVerification.citationsChecked;
-    scored.citationsPassed = evidenceVerification.citationsPassed;
-    scored.citationsFailed = evidenceVerification.citationsFailed;
-    scored.exactEvidence = evidenceVerification.exactEvidence;
-    scored.hasEvidence = evidenceVerification.hasEvidence;
-    results.push(scored);
-    process.stderr.write(`Evaluated ${index + 1}/${reviewedCases.length}: ${entry.id} (${deliberation}, ${job.result?.answerStatus})\n`);
+  try {
+    for (const [index, entry] of reviewedCases.entries()) {
+      const startedAt = Date.now();
+      try {
+        const search = await api(apiBase, '/search', {
+          method: 'POST',
+          body: JSON.stringify({
+            indexConnection,
+            ollamaBaseUrl: process.env.SEMANTIC_QA_EVAL_OLLAMA || 'http://127.0.0.1:11434',
+            question: entry.question,
+            searchMode: 'semantic',
+            topK: 20,
+            threshold: Number(process.env.SEMANTIC_QA_EVAL_THRESHOLD || 0.49),
+            summary: {
+              enabled: false,
+              mode: 'deep',
+              deepModel: targetModel,
+              deliberation,
+              deepMaxRecords,
+              parallelRequests: 1,
+              requestTimeoutMs: 900000,
+              hardwarePreference: process.env.SEMANTIC_QA_HARDWARE || 'auto',
+            },
+          }),
+        });
+        if (!search.deepSummaryJob?.id) throw new Error(`${entry.id}: search did not start Deep Search`);
+        const job = await waitForDeepSearch(apiBase, search.deepSummaryJob.id, deadlineMs, pollMs);
+        const scored = scoreCase(entry, job, Date.now() - startedAt);
+        const evidenceVerification = await verifyEvidence(job.result?.evidence || []);
+        scored.citationsChecked = evidenceVerification.citationsChecked;
+        scored.citationsPassed = evidenceVerification.citationsPassed;
+        scored.citationsFailed = evidenceVerification.citationsFailed;
+        scored.exactEvidence = evidenceVerification.exactEvidence;
+        scored.hasEvidence = evidenceVerification.hasEvidence;
+        results.push(scored);
+        process.stderr.write(`Evaluated ${index + 1}/${reviewedCases.length}: ${entry.id} (${deliberation}, ${job.result?.answerStatus})\n`);
+      } catch (caseErr) {
+        process.stderr.write(`Failed case ${entry.id}: ${caseErr.message}\n`);
+        failures.push({
+          id: entry.id,
+          error: caseErr.message,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+    }
+  } catch (err) {
+    executionError = err;
+  } finally {
+    const totalReviewed = document.cases.filter((entry) => groundTruthReviewFor(entry)).length;
+    const report = {
+      executedCases: results.length,
+      failedCasesCount: failures.length,
+      reviewedCases: totalReviewed,
+      completeBenchmarkRun: results.length === totalReviewed && failures.length === 0,
+      benchmarkVersion: document.version,
+      variant,
+      deliberation,
+      createdAt: new Date().toISOString(),
+      corpusContract: document.corpusContract,
+      summary: summarize(results),
+      results,
+      failures,
+      ...(executionError ? { executionError: executionError.message } : {}),
+    };
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (process.env.SEMANTIC_QA_DEEP_REPORT) {
+      fs.writeFileSync(path.resolve(process.env.SEMANTIC_QA_DEEP_REPORT), `${JSON.stringify(report, null, 2)}\n`);
+    }
   }
-
-  const report = {
-    executedCases: results.length,
-    reviewedCases: document.cases.filter((entry) => groundTruthReviewFor(entry)).length,
-    completeBenchmarkRun: results.length === document.cases.filter((entry) => groundTruthReviewFor(entry)).length,
-    benchmarkVersion: document.version,
-    variant,
-    deliberation,
-    createdAt: new Date().toISOString(),
-    corpusContract: document.corpusContract,
-    summary: summarize(results),
-    results,
-  };
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  if (process.env.SEMANTIC_QA_DEEP_REPORT) {
-    fs.writeFileSync(path.resolve(process.env.SEMANTIC_QA_DEEP_REPORT), `${JSON.stringify(report, null, 2)}\n`);
-  }
-  if (!results.length || results.some((entry) => !entry.answerStatusCorrect || !entry.abstentionCorrect || entry.exactEvidence === false || entry.forbiddenEvidenceRate > 0 || (entry.evidenceRecall !== null && entry.evidenceRecall < 1))) {
+  if (executionError || failures.length > 0 || !results.length || results.some((entry) => !entry.answerStatusCorrect || !entry.abstentionCorrect || entry.exactEvidence === false || entry.forbiddenEvidenceRate > 0 || (entry.evidenceRecall !== null && entry.evidenceRecall < 1))) {
     process.exitCode = 1;
   }
 }

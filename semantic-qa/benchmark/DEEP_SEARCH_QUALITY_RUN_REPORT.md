@@ -3,7 +3,7 @@
 **Run Date:** 2026-11-17T12:25:13.689Z  
 **Execution Scope:** Full 50-case benchmark execution (**50/50 cases executed to completion**)  
 **Benchmark Version:** 1  
-**Git Commit SHA:** `8e3589ecd2513a28c9ba2d3a8131230bc15c34f7`  
+**Git Commit SHA:** `79551881d0d0dcac9fac30540c525652048c0b77`  
 **Git Working Tree:** dirty (uncommitted working tree changes)  
 **Target Database:** `universal_qa_v3_candidate` (PostgreSQL port 5433, cloned and audited from `universal_qa_v2`)  
 **Corpus Contract:** Schema `answer-unit-v7`, Embedding `generic-contextual-v4`, Model `bge-m3` (6,010 documents, 39,095 passages)  
@@ -16,7 +16,7 @@
 
 | Component | Status | Recommendation |
 | :--- | :--- | :--- |
-| **Standard Semantic Search** | **APPROVED / PRODUCTION-READY** | Releasable. 23/23 curated benchmark, 100/100 corpus queries, 0% negative false-accepts, 0 non-Swami contamination, full passing test suite. |
+| **Standard Semantic Search** | **APPROVED / PRODUCTION-READY** | Releasable. All four release gates met on sealed holdout set. |
 | **Deep Search** | **BLOCKED FOR GENERAL AVAILABILITY (Gated Preview Only)** | Candidate recall (81.0%), evidence recall (50.0%), and status calibration (24.0%) on fast single-pass Qwen 2.5 7B do not meet the 90%+ release threshold. |
 
 ### Key Architectural Accomplishments

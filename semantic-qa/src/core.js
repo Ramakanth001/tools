@@ -477,8 +477,8 @@ function rerankPassageMatches(rows, query, limit = 5, threshold = null) {
         // Smoothstep curve between 0.20 and 0.60
         const t = Math.max(0, Math.min(1, (semanticSimilarity - 0.20) / 0.40));
         const smoothWeight = t * t * (3 - 2 * t);
-        const discoveryTarget = discoverySimilarity * 0.95;
-        const discoveryDelta = Math.max(0, discoveryTarget - semanticSimilarity) * smoothWeight;
+        const discoveryTarget = discoverySimilarity * 0.90;
+        const discoveryDelta = Math.max(0, discoveryTarget - semanticSimilarity) * smoothWeight * 0.20;
         effectiveBaseSimilarity = semanticSimilarity + discoveryDelta;
 
         const titleCoverageBoost = titleCoverage >= 0.40 ? titleCoverage * 0.06 * smoothWeight : 0;
@@ -568,7 +568,7 @@ function rerankPassageMatches(rows, query, limit = 5, threshold = null) {
     const supportingPassages = passages.filter((passage, index) => (
       index > 0 && passage.semanticSimilarity >= Math.max(0.35, best.semanticSimilarity - 0.12)
     )).length;
-    const isGrounded = (best.semanticSimilarity >= 0.52 || (best.lexicalScore || 0) > 0 || best.isExact) && substantiveCoverage >= 0.50 && !decisionActionMissing;
+    const isGrounded = (best.semanticSimilarity >= 0.52 || (best.lexicalScore || 0) > 0 || best.isExact) && substantiveCoverage >= 0.40 && !decisionActionMissing;
     const supportBonus = isGrounded ? Math.min(0.03, supportingPassages * 0.015) : 0;
 
     const intent = intentSignals(query, { question: cleanTitle || representative.question, answer: best.text });
