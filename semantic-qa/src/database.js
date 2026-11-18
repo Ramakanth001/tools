@@ -1,4 +1,6 @@
 const { requireToolDep } = require('../requireToolDep');
+const { createDistancePoolLease } = require('./distancePools');
+const { ensureEnglishBodyIndex } = require('./distanceEnglishBody');
 const {
   quoteIdentifier,
   assertIdentifier,
@@ -69,6 +71,11 @@ async function withPool(connection, callback) {
   } finally {
     await pool.end().catch(() => undefined);
   }
+}
+
+const leaseDistancePool = createDistancePoolLease(config => new Pool(config));
+function withDistancePool(connection, callback) {
+  return leaseDistancePool(connectionToPoolConfig(connection), callback);
 }
 
 async function testPostgresConnection(connection) {
@@ -249,6 +256,18 @@ async function ensureCoreSchema(client) {
     )
   `);
   await client.query(`
+    CREATE TABLE IF NOT EXISTS semantic_qa.search_lexemes (
+      word text PRIMARY KEY,
+      document_count bigint NOT NULL CHECK (document_count >= 0),
+      eligible_document_count bigint NOT NULL DEFAULT 0 CHECK (eligible_document_count >= 0),
+      refreshed_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await client.query(`
+    ALTER TABLE semantic_qa.search_lexemes
+    ADD COLUMN IF NOT EXISTS eligible_document_count bigint NOT NULL DEFAULT 0
+  `);
+  await client.query(`
     ALTER TABLE semantic_qa.corpus
     ADD COLUMN IF NOT EXISTS embedding_format_version text NOT NULL DEFAULT 'legacy-v1'
   `);
@@ -360,6 +379,8 @@ async function createDiscoveryPassagesTable(client, tableName, dimension, { unlo
     CREATE ${unlogged ? 'UNLOGGED ' : ''}TABLE semantic_qa.${quoteIdentifier(name)} (
       source_id text NOT NULL,
       discovery_index integer NOT NULL,
+      answer_unit_id text,
+      discovery_kind text NOT NULL DEFAULT 'context',
       discovery_text text NOT NULL,
       embedding vector(${dim}) NOT NULL,
       search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, discovery_text)) STORED,
@@ -407,9 +428,24 @@ async function createPassageIndexes(client) {
 
 async function createV5Indexes(client) {
   if (await relationExists(client, 'answer_units')) {
+    await client.query(`
+      ALTER TABLE semantic_qa.answer_units
+      ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('simple'::regconfig, associated_question), 'A') ||
+        setweight(to_tsvector('simple'::regconfig, unit_text), 'D')
+      ) STORED
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_answer_units_source_id ON semantic_qa.answer_units (source_id, unit_index)');
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_answer_units_search_gin ON semantic_qa.answer_units USING gin (search_vector)');
+    await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_answer_units_question_trgm ON semantic_qa.answer_units USING gin (associated_question gin_trgm_ops)');
+    await ensureEnglishBodyIndex(client);
   }
   if (await relationExists(client, 'discovery_passages')) {
+    await client.query(`
+      ALTER TABLE semantic_qa.discovery_passages
+      ADD COLUMN IF NOT EXISTS answer_unit_id text,
+      ADD COLUMN IF NOT EXISTS discovery_kind text NOT NULL DEFAULT 'context'
+    `);
     await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_discovery_embedding_hnsw ON semantic_qa.discovery_passages USING hnsw (embedding vector_cosine_ops)');
     await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_discovery_search_gin ON semantic_qa.discovery_passages USING gin (search_vector)');
     await client.query('CREATE INDEX IF NOT EXISTS semantic_qa_discovery_text_trgm ON semantic_qa.discovery_passages USING gin (discovery_text gin_trgm_ops)');
@@ -427,7 +463,7 @@ async function grantV5ReadAccess(client) {
       FOREACH role_name IN ARRAY ARRAY['spiritual_gpt_index_reader', 'semantic_qa_reader'] LOOP
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
           EXECUTE format('GRANT USAGE ON SCHEMA semantic_qa TO %I', role_name);
-          EXECUTE format('GRANT SELECT ON semantic_qa.corpus, semantic_qa.records, semantic_qa.passages, semantic_qa.answer_units, semantic_qa.discovery_passages, semantic_qa.source_aliases TO %I', role_name);
+          EXECUTE format('GRANT SELECT ON semantic_qa.corpus, semantic_qa.records, semantic_qa.passages, semantic_qa.answer_units, semantic_qa.discovery_passages, semantic_qa.source_aliases, semantic_qa.search_lexemes TO %I', role_name);
         END IF;
       END LOOP;
     END $grant$
@@ -454,6 +490,26 @@ async function createSearchIndex(client) {
   await client.query(`
     CREATE INDEX IF NOT EXISTS semantic_qa_records_question_trgm
       ON semantic_qa.records USING gin (question gin_trgm_ops)
+  `);
+}
+
+async function refreshSearchLexemes(client) {
+  if (!(await recordsTableExists(client))) return;
+  await client.query('TRUNCATE semantic_qa.search_lexemes');
+  await client.query(`
+    WITH eligible AS MATERIALIZED (
+      SELECT word, count(*)::bigint AS document_count
+      FROM semantic_qa.records r
+      CROSS JOIN LATERAL unnest(tsvector_to_array(r.search_vector)) AS terms(word)
+      WHERE coalesce(lower(r.metadata->>'ambiguous'),'false') <> 'true'
+        AND CASE WHEN coalesce(r.metadata->>'answer_unit_count','') ~ '^[0-9]+$'
+          THEN (r.metadata->>'answer_unit_count')::numeric > 0 ELSE true END
+      GROUP BY word
+    )
+    INSERT INTO semantic_qa.search_lexemes (word, document_count, eligible_document_count, refreshed_at)
+    SELECT corpus.word, corpus.ndoc::bigint, coalesce(eligible.document_count,0), now()
+    FROM ts_stat('SELECT search_vector FROM semantic_qa.records') corpus
+    LEFT JOIN eligible ON eligible.word=corpus.word
   `);
 }
 
@@ -491,6 +547,17 @@ async function initializeIndex(connection, { model, modelDigest = null, dimensio
       await createSearchIndex(client);
       await createPassageIndexes(client);
       await createV5Indexes(client);
+      const vocabulary = await client.query('SELECT 1 FROM semantic_qa.search_lexemes LIMIT 1');
+      if (exists && !vocabulary.rows.length) {
+        await client.query('BEGIN');
+        try {
+          await refreshSearchLexemes(client);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        }
+      }
       await grantV5ReadAccess(client);
       if (!existingCorpus) {
         const formatVersion = embeddingFormatForModel(model);
@@ -900,6 +967,9 @@ async function commitIncremental(client, {
     `);
     const invalidPassages = await countInvalidVerbatimPassages(client);
     if (invalidPassages) throw new Error(`Verbatim offset validation failed for ${invalidPassages} passages`);
+    await createV5Indexes(client);
+    await refreshSearchLexemes(client);
+    await grantV5ReadAccess(client);
     await client.query(`
       UPDATE semantic_qa.corpus SET source_mapping = $1::jsonb, embedding_model = $2,
         embedding_model_digest = $3, embedding_dimension = $4, embedding_format_version = $5,
@@ -963,6 +1033,7 @@ async function commitRebuild(client, {
     await createSearchIndex(client);
     await createPassageIndexes(client);
     await createV5Indexes(client);
+    await refreshSearchLexemes(client);
     await grantV5ReadAccess(client);
     await client.query(`
       INSERT INTO semantic_qa.corpus
@@ -1985,6 +2056,7 @@ module.exports = {
   buildTextPhraseQueries,
   createPool,
   withPool,
+  withDistancePool,
   testPostgresConnection,
   discoverSourceCatalog,
   validateMapping,

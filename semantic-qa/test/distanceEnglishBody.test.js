@@ -1,6 +1,6 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {selectBodyTerms}=require('../src/distanceEnglishBody');
+const {selectBodyTerms,retrieveEnglishBodyCandidates}=require('../src/distanceEnglishBody');
 const {addEnglishBodyCandidates,englishBodyBoost}=require('../src/distanceEnglishBody');
 const {isNumberedReferenceLookup,questionReference,matchesQuestionReference}=require('../src/distanceEnglishBody');
 
@@ -51,4 +51,23 @@ test('English bonus requires multiple terms and diminishes with weaker coverage 
   assert.equal(englishBodyBoost({...row,english_body_matched_terms:['service']}),0);
   assert.ok(englishBodyBoost(row)>englishBodyBoost({...row,english_body_coverage:.5}));
   assert.ok(englishBodyBoost(row)>englishBodyBoost({...row,english_body_retrieval_rank:10}));
+});
+
+test('an older PostgreSQL corpus can use English body retrieval before its next index refresh', async () => {
+  const unit={answer_unit_id:'u1',content_hash:'unit-hash',record_hash:'record-hash',document_length:90,
+    terms:{lesson:2,review:1},eligible:true};
+  const pool={async query(sql) {
+    if (sql.includes('AS answer_version')) return {rows:[{answer_version:'1',record_version:'1'}]};
+    if (sql.includes('u.distance_english_frequencies')) throw Object.assign(new Error('Missing stored data'),{code:'42703'});
+    if (sql.includes('AS document_length')) {
+      assert.match(sql,/FROM unnest\(to_tsvector/u);
+      return {rows:[unit,...Array.from({length:5},(_,i)=>({...unit,answer_unit_id:'other'+i,terms:{other:1}}))]};
+    }
+    if (sql.includes('tsvector_to_array')) return {rows:[{terms:['lesson','review']}]};
+    assert.match(sql,/to_tsvector\('english'::regconfig,u.associated_question\) @@/u);
+    return {rows:[{matched_answer_unit_id:'u1',matched_answer_unit_hash:'unit-hash',
+      content_hash:'record-hash',question_terms:['lesson','review']}]};
+  }};
+  const result=await retrieveEnglishBodyCandidates(pool,'How should I review a lesson?');
+  assert.deepEqual(result.rows.map(row=>row.matched_answer_unit_id),['u1']);
 });

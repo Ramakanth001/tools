@@ -137,14 +137,24 @@ async function retrieveEnglishBodyCandidatesSql(pool,query,{limit=60}={}){
   return {rows:result.rows,terms};
 }
 
-async function buildCorpusIndex(pool) {
-  const { rows } = await pool.query(`
+function frequencySql(vector) {
+  return `(SELECT coalesce(jsonb_object_agg(term.lexeme, cardinality(term.positions)), '{}'::jsonb)
+    FROM unnest(${vector}) term)`;
+}
+
+function loadCorpusTerms(pool, stored) {
+  const contextVector = "to_tsvector('english'::regconfig,u.associated_question)";
+  const bodyTerms = stored ? 'u.distance_english_frequencies'
+    : frequencySql("to_tsvector('english'::regconfig,u.unit_text) || " + contextVector);
+  const titleTerms = stored ? 'r.distance_english_title_frequencies'
+    : frequencySql("to_tsvector('english'::regconfig,r.question)");
+  return pool.query(`
     SELECT u.answer_unit_id, u.content_hash, r.content_hash AS record_hash, length(u.unit_text) AS document_length,
-           u.distance_english_frequencies AS terms,
+           ${bodyTerms} AS terms,
            CASE WHEN NOT EXISTS (
              SELECT 1 FROM semantic_qa.answer_units v
              WHERE v.source_id=u.source_id AND v.answer_unit_id<>u.answer_unit_id
-           ) THEN r.distance_english_title_frequencies END AS title_terms,
+           ) THEN ${titleTerms} END AS title_terms,
            coalesce(lower(r.metadata->>'ambiguous'),'false')<>'true'
              AND CASE WHEN coalesce(r.metadata->>'answer_unit_count','') ~ '^[0-9]+$'
                THEN (r.metadata->>'answer_unit_count')::numeric>0 ELSE true END AS eligible
@@ -152,6 +162,15 @@ async function buildCorpusIndex(pool) {
     WHERE u.language='ENG' AND u.context_complete=true
     ORDER BY u.source_id,u.answer_unit_id
   `);
+}
+
+async function buildCorpusIndex(pool) {
+  let stored = true;
+  const { rows } = await loadCorpusTerms(pool, true).catch(error => {
+    if (error?.code !== '42703') throw error;
+    stored = false;
+    return loadCorpusTerms(pool, false);
+  });
   const averageLength = rows.reduce((sum, row) => sum + row.document_length, 0) / Math.max(1, rows.length) || 1000;
   const postings = new Map();
   const lengths = new Float64Array(rows.length);
@@ -174,7 +193,7 @@ async function buildCorpusIndex(pool) {
     frequencies.set(term, posting.documents);
     postings.set(term, Uint32Array.from(posting.entries));
   }
-  return { documents: rows.length, identities: documents, frequencies, postings, lengths };
+  return { documents: rows.length, identities: documents, frequencies, postings, lengths, stored };
 }
 
 async function retrieveEnglishBodyCandidates(pool, query, { limit = 60, reference = false } = {}) {
@@ -207,13 +226,15 @@ async function retrieveEnglishBodyCandidates(pool, query, { limit = 60, referenc
     .slice(0, Math.max(1, Math.min(200, limit)));
   if (!ranked.length) return { rows: [], terms };
   const ids = ranked.map(match => index.identities[match.document].id);
+  const contextVector = index.stored ? 'u.distance_english_context_vector'
+    : "to_tsvector('english'::regconfig,u.associated_question)";
   const { rows } = await pool.query(`
     SELECT u.source_id,r.question,''::text AS answer,r.metadata,r.content_hash,
            u.associated_question AS matched_discovery_text,u.answer_unit_id AS matched_answer_unit_id,
            u.unit_text AS matched_answer_unit_text,u.start_offset AS matched_answer_unit_start,
            u.content_hash AS matched_answer_unit_hash,
            ARRAY(SELECT term FROM unnest($2::text[]) term
-                 WHERE u.distance_english_context_vector @@ to_tsquery('simple',term)) AS question_terms
+                 WHERE ${contextVector} @@ to_tsquery('simple',term)) AS question_terms
     FROM semantic_qa.answer_units u JOIN semantic_qa.records r USING(source_id)
     WHERE u.answer_unit_id=ANY($1::text[]) AND u.language='ENG' AND u.context_complete=true
       AND coalesce(lower(r.metadata->>'ambiguous'),'false')<>'true'
