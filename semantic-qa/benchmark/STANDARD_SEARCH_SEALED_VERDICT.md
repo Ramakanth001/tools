@@ -1,14 +1,14 @@
 # Standard Search Sealed Release Verdict
 
-**Execution Date:** 2026-11-18T06:08:39.719Z  
+**Execution Date:** 2026-11-18T06:24:36.144Z  
 **Split:** `holdout` (Fresh Unseen Holdout: 30 reviewed cases: 10 positive paraphrases, 20 negative controls)  
 **Benchmark Version:** 2  
-**Git Commit SHA:** `79551881d0d0dcac9fac30540c525652048c0b77`  
-**Git Working Tree:** dirty (uncommitted working tree changes)  
+**Git Commit SHA:** `fb46fbee2ab395f277a142d3cf2b55a6aba06662`  
+**Git Working Tree:** clean  
 **Target Database:** `universal_qa_v3_candidate` (port 5433, 6010 records)  
 **Corpus Contract:** Schema `answer-unit-v7`, Embedding `generic-contextual-v4`, Model `bge-m3`  
 **Benchmark File Hash (SHA-256):** `496fbc3a976a7c1bd52e19215f02567bc7a8abcf0f5446c4613d2e75c5ec58e9`  
-**Evaluation Duration:** 28.9s  
+**Evaluation Duration:** 28.5s  
 
 ---
 

@@ -3,8 +3,8 @@
 **Run Date:** 2026-11-17T12:25:13.689Z  
 **Execution Scope:** Full 50-case benchmark execution (**50/50 cases executed to completion**)  
 **Benchmark Version:** 1  
-**Git Commit SHA:** `79551881d0d0dcac9fac30540c525652048c0b77`  
-**Git Working Tree:** dirty (uncommitted working tree changes)  
+**Git Commit SHA:** `eea24145bffec5c47fc045cd5658b325e4351422`  
+**Git Working Tree:** clean  
 **Target Database:** `universal_qa_v3_candidate` (PostgreSQL port 5433, cloned and audited from `universal_qa_v2`)  
 **Corpus Contract:** Schema `answer-unit-v7`, Embedding `generic-contextual-v4`, Model `bge-m3` (6,010 documents, 39,095 passages)  
 **Deliberation Model:** `qwen2.5:7b` (variant: `deliberation-fast`, mode: `fast`, max-records: 20)  

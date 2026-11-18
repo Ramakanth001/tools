@@ -2,11 +2,11 @@
   "summary": {
     "benchmarkVersion": 2,
     "split": "holdout",
-    "gitSha": "79551881d0d0dcac9fac30540c525652048c0b77",
-    "gitDirty": true,
-    "startedAt": "2026-11-18T06:08:10.866Z",
-    "finishedAt": "2026-11-18T06:08:39.719Z",
-    "durationMs": 28853,
+    "gitSha": "fb46fbee2ab395f277a142d3cf2b55a6aba06662",
+    "gitDirty": false,
+    "startedAt": "2026-11-18T06:24:07.630Z",
+    "finishedAt": "2026-11-18T06:24:36.144Z",
+    "durationMs": 28514,
     "benchmarkSha256": "496fbc3a976a7c1bd52e19215f02567bc7a8abcf0f5446c4613d2e75c5ec58e9",
     "indexIdentity": {
       "host": "127.0.0.1",
