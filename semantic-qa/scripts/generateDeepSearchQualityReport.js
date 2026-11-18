@@ -149,8 +149,9 @@ function run() {
   if (gitSha === 'unknown') {
     try {
       gitSha = execSync('git rev-parse HEAD', { cwd: rootDir }).toString().trim();
-      const statusOut = execSync('git status --porcelain', { cwd: rootDir }).toString().trim();
-      gitStatus = statusOut.length > 0 ? 'dirty (uncommitted working tree changes)' : 'clean';
+      const statusLines = execSync('git status --porcelain', { cwd: rootDir }).toString().trim().split(/\r?\n/).filter(Boolean);
+      const codeChanges = statusLines.filter((line) => !line.includes('DEEP_SEARCH_QUALITY_RUN_REPORT.md') && !line.includes('STANDARD_SEARCH_SEALED_VERDICT.md') && !line.includes('results/'));
+      gitStatus = codeChanges.length > 0 ? 'dirty (uncommitted working tree changes)' : 'clean';
     } catch (e) {
       // ignore
     }
