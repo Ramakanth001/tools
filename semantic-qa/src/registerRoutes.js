@@ -12,7 +12,7 @@ const {
   MAX_DEEP_REQUEST_TIMEOUT_MS,
 } = require('./deepSummaryManager');
 const { reconstructDocument, mapDocumentHighlights } = require('./documentService');
-const distanceSearch = require('./distanceSearch');
+const { createDistanceSearchService } = require('./distanceSearchService');
 const {
   buildLexicalQuery,
   buildQueryEmbeddingText,
@@ -120,7 +120,9 @@ function indexCompatibility(status) {
 function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', deps = {} } = {}) {
   const db = deps.database || database;
   const embedding = deps.ollama || ollama;
-  const distanceEngine = deps.distanceSearch || distanceSearch;
+  const distanceEngine = deps.distanceSearch || createDistanceSearchService({
+    useEnglish: process.env.SEMANTIC_QA_DISTANCE_PROFILE !== 'classic',
+  });
   const syncManager = deps.syncManager || createSyncManager({ db, embed: embedding.embedTexts, probe: embedding.testOllama });
   const deepSummaryManager = deps.deepSummaryManager || createDeepSummaryManager({
     requireThinking: embedding.requireThinkingModel,
@@ -374,8 +376,9 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
     try {
       if (data.searchMode === 'distance') {
         const targetLimit = Math.max(1, Math.min(100, Number(data.topK != null ? data.topK : 35)));
-        if (typeof db.withPool === 'function') {
-          return await db.withPool(data.indexConnection, async (pool) => {
+        const withSearchPool = db.withDistancePool || db.withPool;
+        if (typeof withSearchPool === 'function') {
+          return await withSearchPool.call(db, data.indexConnection, async (pool) => {
             const distanceResult = await distanceEngine.searchDistanceCorpus(pool, {
               query: data.question,
               limit: targetLimit,
