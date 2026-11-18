@@ -22,38 +22,76 @@
  */
 
 const { getCanonicalSpiritualTerm, getSpiritualVariants } = require('./spiritualEquivalents.js');
+const { addSingleUnitTitles, retrieveSingleUnitTitles } = require('./distanceTitleShortlist.js');
+const {
+  retrieveEnglishBodyCandidates, addEnglishBodyCandidates, englishBodyBoost,
+  clearEnglishBodyCache, numberedTitleReference, isNumberedReferenceLookup, questionReference, matchesQuestionReference,
+} = require('./distanceEnglishBody.js');
+const {
+  retrieveEnglishPassageCandidates, addEnglishPassageCandidates, clearEnglishPassageCache, isAnchoredPassageQuestion,
+  prepareEnglishPassageSearch,
+} = require('./distanceEnglishPassages.js');
 
-let cachedCorpusTotal = null;
-let cachedCorpusTotalExpiresAt = 0;
-const CORPUS_TOTAL_TTL_MS = 5 * 60 * 1000; // 5-minute TTL
-
-async function getCorpusTotal(pool) {
-  const now = Date.now();
-  if (cachedCorpusTotal != null && now < cachedCorpusTotalExpiresAt) {
-    return cachedCorpusTotal;
+function isSearchEligibleMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return true;
+  if (metadata.ambiguous === true || String(metadata.ambiguous || '').toLowerCase() === 'true') {
+    return false;
   }
-  if (pool) {
-    try {
-      const res = await pool.query('SELECT count(*) as count FROM semantic_qa.records');
-      cachedCorpusTotal = Math.max(1, Number(res.rows[0]?.count) || 6010);
-      cachedCorpusTotalExpiresAt = now + CORPUS_TOTAL_TTL_MS;
-    } catch {
-      cachedCorpusTotal = 6010;
-      cachedCorpusTotalExpiresAt = now + 60000;
-    }
-  } else {
-    cachedCorpusTotal = 6010;
-    cachedCorpusTotalExpiresAt = now + 60000;
+  if (Object.hasOwn(metadata, 'answer_unit_count')) {
+    const answerUnitCount = Number(metadata.answer_unit_count);
+    if (Number.isFinite(answerUnitCount) && answerUnitCount <= 0) return false;
   }
-  return cachedCorpusTotal;
+  return true;
 }
 
-const idfMemoryCache = new Map();
+function searchEligibilitySql(alias = 'r') {
+  return `
+    coalesce(lower(${alias}.metadata->>'ambiguous'), 'false') <> 'true'
+    AND (
+      coalesce(${alias}.metadata->>'answer_unit_count', '') !~ '^[0-9]+$'
+      OR (${alias}.metadata->>'answer_unit_count')::integer > 0
+    )
+  `;
+}
+
+const CORPUS_TOTAL_TTL_MS = 5 * 60 * 1000;
+let perPoolCorpusStatistics = new WeakMap();
+
+function corpusStatistics(pool) {
+  let statistics = perPoolCorpusStatistics.get(pool);
+  if (!statistics) {
+    statistics = { total: null, expiresAt: 0, pending: null, idf: new LRUCache(30000), lexemes: new LRUCache(30000) };
+    perPoolCorpusStatistics.set(pool, statistics);
+  }
+  return statistics;
+}
+
+async function getCorpusTotal(pool) {
+  if (!pool) return 6010;
+  const statistics = corpusStatistics(pool);
+  const now = Date.now();
+  if (now < statistics.expiresAt) return statistics.total;
+  if (!statistics.pending) {
+    statistics.pending = pool.query(`
+      SELECT count(*) as count FROM semantic_qa.records r WHERE ${searchEligibilitySql('r')}
+    `).then(result => {
+      const total = Math.max(1, Number(result.rows[0]?.count) || 6010);
+      if (statistics.total !== null && total !== statistics.total) {
+        statistics.idf.clear();
+        statistics.lexemes.clear();
+      }
+      statistics.total = total;
+      statistics.expiresAt = Date.now() + CORPUS_TOTAL_TTL_MS;
+      return total;
+    }, () => 6010).finally(() => { statistics.pending = null; });
+  }
+  return statistics.pending;
+}
 
 function clearIdfCache() {
-  idfMemoryCache.clear();
-  cachedCorpusTotal = null;
-  cachedCorpusTotalExpiresAt = 0;
+  clearEnglishBodyCache();
+  clearEnglishPassageCache();
+  perPoolCorpusStatistics = new WeakMap();
 }
 
 class LRUCache {
@@ -86,9 +124,21 @@ class LRUCache {
 }
 
 const termCanonicalCache = new LRUCache(15000);
+const scoringDocumentCache = new LRUCache(2500);
+const SPIRITUAL_QUERY_ANCHORS = new Set([
+  'allah', 'anubhava', 'aparoksha', 'atma', 'avatar', 'baba', 'bhakti', 'bible',
+  'brahma', 'buddha', 'consciousness', 'datta', 'devotion', 'devotee', 'devotees',
+  'dharma', 'divine', 'ego', 'god', 'gita', 'guru', 'heaven', 'holy', 'incarnation',
+  'incarnations', 'jesus', 'karma', 'krishna', 'lord', 'maayaa', 'maya', 'mecca',
+  'meditation', 'moksha', 'muhammad', 'nivritti', 'nivrutti', 'paroksha', 'prajnanam',
+  'prayer', 'quran', 'rama', 'sacrifice', 'sadguru', 'sai', 'salvation', 'satan',
+  'shankara', 'shirdi', 'shiva', 'shri', 'soul', 'souls', 'spiritual', 'spirituality',
+  'swami', 'upanishad', 'vasudeva', 'veda', 'vedas', 'vishnu', 'vishwarupam', 'worship',
+]);
 
 const INTENT_WORDS = new Set([
   'meaning', 'means', 'meant', 'definition', 'define',
+  'mean',
   'purpose', 'reason', 'why', 'who', 'what', 'how',
   'specialty', 'significance', 'importance',
   'difference', 'different',
@@ -120,7 +170,7 @@ const PRIORITY_SPIRITUAL_ENTITIES = new Set([
   'gayatri', 'savitri', 'savita', 'sandhya', 'vandanam', 'sandhyavandanam',
   'nivritti', 'pravritti', 'karma', 'bhakti', 'jnana', 'mukti', 'maya', 'mithya',
   'advaita', 'vishishtadvaita', 'dvaita', 'shuddhadvaita', 'vivartavada', 'parinamavada',
-  'parabrahman', 'brahman', 'atma', 'soul', 'god', 'swami', 'incarnation', 'avatar',
+  'parabrahman', 'brahman', 'brahma', 'atma', 'soul', 'god', 'swami', 'incarnation', 'avatar',
   'jesus', 'muhammad', 'buddha', 'shankara', 'ramanuja', 'madhva', 'krishna', 'rama',
   'shiva', 'vishnu', 'datta', 'hanuman', 'gopika', 'radha', 'yajna', 'upanayanam',
   'yajnopavitam', 'mantra', 'temple', 'idol', 'statue', 'upasana', 'shraddha', 'eshana',
@@ -148,8 +198,393 @@ const GENERIC_WORDS = new Set([
   'tell', 'than', 'that', 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too',
   'under', 'until', 'up', 'us',
   'very', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'would',
-  'you', 'your', 'yours', 'yourself', 'yourselves'
+  'you', 'your', 'yours', 'yourself', 'yourselves',
+  // Natural search framing must never become the mandatory topic anchor.
+  'regarding', 'specific', 'issue', 'issues', 'question', 'questions',
+  'according', 'perspective', 'standpoint', 'conclusion', 'draw',
+  'teaching', 'teachings', 'address', 'addresses', 'indicate',
+  'practical', 'terms'
 ]);
+
+let fuzzyQueryVocabulary = null;
+
+/**
+ * Elasticsearch's default AUTO fuzziness allows no edits for 1-2 character
+ * terms, one edit for 3-5 character terms, and two edits for longer terms.
+ */
+function autoFuzzinessMaxEdits(token) {
+  const length = String(token || '').length;
+  if (length <= 2) return 0;
+  if (length <= 5) return 1;
+  return 2;
+}
+
+/**
+ * Bounded optimal-string-alignment distance. Adjacent transpositions count as
+ * one edit, matching Elasticsearch's default fuzzy_transpositions behavior.
+ */
+function boundedDamerauLevenshtein(left, right, maxEdits = 2) {
+  const a = String(left || '');
+  const b = String(right || '');
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > maxEdits) return maxEdits + 1;
+  if (!a.length || !b.length) return Math.max(a.length, b.length);
+
+  let previousPrevious = null;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    let rowMinimum = current[0];
+    for (let j = 1; j <= b.length; j++) {
+      const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let distance = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + substitutionCost,
+      );
+      if (
+        previousPrevious && i > 1 && j > 1 &&
+        a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]
+      ) {
+        distance = Math.min(distance, previousPrevious[j - 2] + 1);
+      }
+      current[j] = distance;
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > maxEdits) return maxEdits + 1;
+    previousPrevious = previous;
+    previous = current;
+  }
+
+  return previous[b.length];
+}
+
+function getFuzzyQueryVocabulary() {
+  if (fuzzyQueryVocabulary) return fuzzyQueryVocabulary;
+
+  const candidates = new Map();
+  const register = (variant, canonical = variant, priority = 0) => {
+    const cleanVariant = foldDiacritics(String(variant || '').toLowerCase()).trim();
+    const cleanCanonical = foldDiacritics(String(canonical || '').toLowerCase()).trim();
+    if (
+      !cleanVariant || !cleanCanonical || cleanVariant.includes(' ') ||
+      cleanCanonical.includes(' ') || cleanVariant.length < 3 ||
+      GENERIC_WORDS.has(cleanVariant)
+    ) return;
+    const existing = candidates.get(cleanVariant);
+    if (!existing || priority > existing.priority) {
+      candidates.set(cleanVariant, { canonical: cleanCanonical, priority });
+    }
+  };
+
+  for (const term of PRIORITY_SPIRITUAL_ENTITIES) {
+    const canonical = getCanonicalSpiritualTerm(term) || term;
+    register(term, canonical, 4);
+    for (const variant of getSpiritualVariants(term)) register(variant, canonical, 3);
+  }
+  for (const term of INTENT_WORDS) register(term, term, 2);
+
+  fuzzyQueryVocabulary = candidates;
+  return fuzzyQueryVocabulary;
+}
+
+function isSingleAdjacentTransposition(left, right) {
+  if (left.length !== right.length) return false;
+  const mismatches = [];
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) mismatches.push(index);
+    if (mismatches.length > 2) return false;
+  }
+  if (mismatches.length !== 2 || mismatches[1] !== mismatches[0] + 1) return false;
+  const [first, second] = mismatches;
+  return left[first] === right[second] && left[second] === right[first];
+}
+
+function isSingleRepeatedCharacterEdit(left, right) {
+  if (Math.abs(left.length - right.length) !== 1) return false;
+  const longer = left.length > right.length ? left : right;
+  const shorter = left.length > right.length ? right : left;
+  for (let index = 0; index < longer.length; index++) {
+    const isRepeated = (index > 0 && longer[index] === longer[index - 1])
+      || (index + 1 < longer.length && longer[index] === longer[index + 1]);
+    if (isRepeated && `${longer.slice(0, index)}${longer.slice(index + 1)}` === shorter) return true;
+  }
+  return false;
+}
+
+function isSimplePlural(value, candidate) {
+  return value === `${candidate}s` || value === `${candidate}es`;
+}
+
+/**
+ * Correct one query token only when AUTO fuzziness yields an unambiguous
+ * canonical result. Corpus text is never rewritten; this applies to user
+ * queries only and therefore cannot silently alter indexed teachings.
+ */
+function correctFuzzyQueryToken(token) {
+  const value = foldDiacritics(String(token || '').toLowerCase()).trim();
+  const maxEdits = autoFuzzinessMaxEdits(value);
+  if (!value || maxEdits === 0 || GENERIC_WORDS.has(value) || MODIFIER_WORDS.has(value)) return value;
+
+  const exactCanonical = getCanonicalSpiritualTerm(value);
+  if (exactCanonical) return exactCanonical;
+  if (value.length <= 3) return value;
+
+  const vocabulary = getFuzzyQueryVocabulary();
+  if (vocabulary.has(value)) return vocabulary.get(value).canonical;
+
+  let bestDistance = maxEdits + 1;
+  let bestPriority = -1;
+  const bestCanonicals = new Set();
+
+  for (const [candidate, details] of vocabulary.entries()) {
+    if (Math.abs(candidate.length - value.length) > maxEdits) continue;
+    if (candidate[0] !== value[0]) continue;
+    const distance = boundedDamerauLevenshtein(value, candidate, maxEdits);
+    if (distance > maxEdits) continue;
+    // Never rewrite a valid-looking word merely because it is one edit from a
+    // domain term (for example Sita→Shiva, mean→meat, medication→meditation).
+    // Automatic rewrites are limited to mechanically high-confidence errors.
+    const safeEdit = isSingleAdjacentTransposition(value, candidate)
+      || isSingleRepeatedCharacterEdit(value, candidate)
+      || isSimplePlural(value, candidate);
+    if (!safeEdit) continue;
+    const similarity = 1 - (distance / Math.max(candidate.length, value.length));
+    if (distance > 1 && similarity < 0.82) continue;
+
+    if (distance < bestDistance || (distance === bestDistance && details.priority > bestPriority)) {
+      bestDistance = distance;
+      bestPriority = details.priority;
+      bestCanonicals.clear();
+      bestCanonicals.add(details.canonical);
+    } else if (distance === bestDistance && details.priority === bestPriority) {
+      bestCanonicals.add(details.canonical);
+    }
+  }
+
+  return bestCanonicals.size === 1 ? [...bestCanonicals][0] : value;
+}
+
+function normalizeSearchQuery(text) {
+  const normalized = normalizeSpiritual(text);
+  if (!normalized) return { normalizedQuery: '', corrections: [] };
+
+  const corrections = [];
+  const correctedTokens = normalized.split(' ').filter(Boolean).map((token) => {
+    const corrected = correctFuzzyQueryToken(token);
+    if (corrected !== token) corrections.push({ from: token, to: corrected });
+    return corrected;
+  });
+
+  return {
+    normalizedQuery: correctedTokens.join(' '),
+    corrections,
+  };
+}
+
+function correctContextualQueryTerms(normalizedQuery) {
+  const tokens = String(normalizedQuery || '').split(/\s+/u).filter(Boolean);
+  const context = new Set(tokens);
+  const corrections = [];
+  const corrected = tokens.map((token) => {
+    if (
+      token === 'angles'
+      && ['angel', 'dream', 'sleep', 'heaven', 'god', 'divine', 'spirit'].some((word) => context.has(word))
+    ) {
+      corrections.push({ from: 'angles', to: 'angels' });
+      return 'angels';
+    }
+    return token;
+  });
+  return { normalizedQuery: corrected.join(' '), corrections };
+}
+
+function adjacentTranspositionCandidates(token) {
+  const value = String(token || '').toLowerCase();
+  if (!/^[a-z]{6,}$/u.test(value)) return [];
+  const candidates = new Set();
+  for (let index = 0; index + 1 < value.length; index++) {
+    if (value[index] === value[index + 1]) continue;
+    candidates.add(`${value.slice(0, index)}${value[index + 1]}${value[index]}${value.slice(index + 2)}`);
+  }
+  return [...candidates];
+}
+
+async function resolveCorpusLexemeCounts(pool, words) {
+  // Search queries are normalized before reaching this function. Restricting
+  // this lookup to plain lexemes also keeps the combined tsquery syntactically
+  // safe; punctuation-bearing tokens simply remain outside auto-correction.
+  const requested = [...new Set(words || [])].filter((word) => /^[a-z]+$/u.test(word));
+  const corpusLexemeCountCache = corpusStatistics(pool).lexemes;
+  const uncached = requested.filter((word) => corpusLexemeCountCache.get(word) === undefined);
+  if (uncached.length) {
+    try {
+      const result = await pool.query(`
+        SELECT word, document_count::bigint AS count
+        FROM semantic_qa.search_lexemes
+        WHERE word = ANY($1::text[])
+      `, [uncached]);
+      const inventory = new Map(
+        result.rows.map((row) => [row.word, Number(row.count) || 0])
+      );
+      for (const word of uncached) {
+        corpusLexemeCountCache.set(word, inventory.get(word) || 0);
+      }
+    } catch {
+      // A failed lookup supplies no evidence and can be retried on the next request.
+    }
+  }
+  return corpusLexemeCountCache;
+}
+
+function singleEditCorpusCandidates(token) {
+  const value = String(token || '').toLowerCase();
+  if (!/^[a-z]{5,}$/u.test(value)) return [];
+  const candidates = new Set(adjacentTranspositionCandidates(value));
+  for (let index = 1; index < value.length; index++) {
+    candidates.add(`${value.slice(0, index)}${value.slice(index + 1)}`);
+  }
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+  for (let index = 1; index <= value.length; index++) {
+    for (const letter of alphabet) candidates.add(`${value.slice(0, index)}${letter}${value.slice(index)}`);
+  }
+  candidates.delete(value);
+  return [...candidates];
+}
+
+function hasSpiritualSearchContext(tokens) {
+  for (const token of tokens || []) {
+    if (SPIRITUAL_QUERY_ANCHORS.has(token)) return true;
+    if (
+      token.length >= 5
+      && singleEditCorpusCandidates(token).some((candidate) => SPIRITUAL_QUERY_ANCHORS.has(candidate))
+    ) return true;
+  }
+  return false;
+}
+
+async function correctCorpusSpelling(pool, normalizedQuery) {
+  const tokens = String(normalizedQuery || '').split(/\s+/u).filter(Boolean);
+  if (!tokens.length || !pool || !hasSpiritualSearchContext(tokens)) {
+    return { normalizedQuery, corrections: [] };
+  }
+  const corpusLexemeCountCache = await resolveCorpusLexemeCounts(pool, tokens);
+
+  const tokenCandidates = new Map();
+  const lookup = new Set();
+  for (const token of [...new Set(tokens)]) {
+    if (
+      token.length < 5 || GENERIC_WORDS.has(token) || MODIFIER_WORDS.has(token)
+      || corpusLexemeCountCache.get(token) !== 0
+      || getCanonicalSpiritualTerm(token)
+    ) continue;
+    const candidates = singleEditCorpusCandidates(token);
+    if (!candidates.length) continue;
+    tokenCandidates.set(token, candidates);
+    for (const candidate of candidates) lookup.add(candidate);
+    if (tokenCandidates.size >= 4) break;
+  }
+  if (!tokenCandidates.size) return { normalizedQuery, corrections: [] };
+  await resolveCorpusLexemeCounts(pool, [...lookup]);
+
+  const corrections = [];
+  const correctedTokens = tokens.map((token) => {
+    const candidates = tokenCandidates.get(token);
+    if (!candidates) return token;
+    const ranked = candidates
+      .map((candidate) => ({ candidate, count: corpusLexemeCountCache.get(candidate) || 0 }))
+      .filter((entry) => entry.count > 0)
+      .sort((left, right) => right.count - left.count || left.candidate.localeCompare(right.candidate));
+    if (!ranked.length) return token;
+    const best = ranked[0];
+    const runnerUp = ranked[1]?.count || 0;
+    const mechanicalEdit = isSingleAdjacentTransposition(token, best.candidate)
+      || isSingleRepeatedCharacterEdit(token, best.candidate);
+    const sufficientlySupported = mechanicalEdit
+      ? best.count >= 1 && best.count > runnerUp
+      : best.count >= 2 && best.count >= runnerUp * 3;
+    if (!sufficientlySupported) return token;
+    corrections.push({ from: token, to: best.candidate });
+    return best.candidate;
+  });
+  return { normalizedQuery: correctedTokens.join(' '), corrections };
+}
+
+async function correctCorpusTranspositions(pool, normalizedQuery) {
+  return correctCorpusSpelling(pool, normalizedQuery);
+}
+
+const MORPHOLOGY_AUXILIARIES = new Set([
+  'did', 'does', 'do', 'can', 'could', 'will', 'would', 'shall', 'should',
+  'may', 'might', 'must',
+]);
+const MORPHOLOGY_COPULAS = new Set(['am', 'is', 'are', 'was', 'were', 'be', 'been', 'being']);
+const MORPHOLOGY_DETERMINERS = new Set(['a', 'an', 'the', 'this', 'that', 'my', 'our', 'your']);
+
+function isControlledSingularContext(tokens, index, { allowDistantAuxiliary = false } = {}) {
+  const token = tokens[index];
+  const previous = tokens[index - 1] || '';
+  const next = tokens[index + 1] || '';
+  const recent = tokens.slice(Math.max(0, index - 4), index);
+
+  if (token === 'pleases' && ['clarify', 'explain'].includes(next)) return true;
+  if (token === 'shoulds' && previous === 'how') return true;
+  if (MORPHOLOGY_DETERMINERS.has(previous)) return true;
+  if (MORPHOLOGY_AUXILIARIES.has(previous) || (
+    allowDistantAuxiliary && recent.some((word) => MORPHOLOGY_AUXILIARIES.has(word))
+  )) {
+    return true;
+  }
+  if (token.endsWith('ys')) return true;
+  if (token.endsWith('ings') && (
+    ['after', 'before', 'while', 'by'].includes(previous)
+    || MORPHOLOGY_DETERMINERS.has(next)
+  )) return true;
+  if (token.endsWith('eds') && MORPHOLOGY_COPULAS.has(previous)) return true;
+  if (['spirituals', 'practicals'].includes(token) && /^(life|question|questions|terms?|spiritual)$/u.test(next)) {
+    return true;
+  }
+  if (token === 'normals' && (next.endsWith('ing') || ['condition', 'conditions'].includes(next))) return true;
+  if (token.endsWith('s') && ['anubhava'].includes(next)) return true;
+  return false;
+}
+
+async function correctControlledMorphology(pool, normalizedQuery) {
+  const tokens = String(normalizedQuery || '').split(/\s+/u).filter(Boolean);
+  if (!tokens.length || !pool) return { normalizedQuery, corrections: [] };
+  const spiritualContext = hasSpiritualSearchContext(tokens);
+
+  const candidates = new Map();
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (
+      !/^[a-z]{5,}s$/u.test(token)
+      || !isControlledSingularContext(tokens, index, { allowDistantAuxiliary: spiritualContext })
+    ) continue;
+    const base = token.slice(0, -1);
+    if (base.length >= 4) candidates.set(index, base);
+  }
+  if (!candidates.size) return { normalizedQuery: tokens.join(' '), corrections: [] };
+
+  const corpusLexemeCountCache = await resolveCorpusLexemeCounts(pool, [
+    ...candidates.values(),
+    ...[...candidates.keys()].map((index) => tokens[index]),
+  ]);
+  const corrections = [];
+  const corrected = tokens.map((token, index) => {
+    const base = candidates.get(index);
+    if (!base) return token;
+    const tokenCount = corpusLexemeCountCache.get(token);
+    const baseCount = corpusLexemeCountCache.get(base) || 0;
+    // Never rewrite an attested corpus form. This deliberately favors
+    // precision over recall for valid plurals and third-person verbs.
+    if (tokenCount !== 0 || baseCount < 2) return token;
+    corrections.push({ from: token, to: base });
+    return base;
+  });
+  return { normalizedQuery: corrected.join(' '), corrections };
+}
 
 /**
  * Classify query words into core subjects, modifiers, and intent terms
@@ -228,7 +663,10 @@ function canonicalizeSpiritualTerm(term) {
   else if (/^s[aā]v[iī]t[h]?[aā](r|r?u)?$/i.test(s)) res = 'savita';
   else if (/^s[aā]v[iī]t[h]?r[iīy]+$/i.test(s)) res = 'savitri';
   else if (/^m[aā]nt[h]?r[aā]?(s|as|am)?$/i.test(s)) res = 'mantra';
-  else if (/^br[aā]hm[aā]?(n|na|nas|s)?$/i.test(s)) res = 'brahmin';
+  // Brahman (ultimate reality) and Brahmin/Brahmana (priestly identity) are
+  // distinct theological concepts and must never share a canonical root.
+  else if (/^br[aā]hm[iī]n(s)?$/i.test(s) || /^br[aā]hm[aā]n[aā](s)?$/i.test(s)) res = 'brahmin';
+  else if (/^br[aā]hm(am|an)$/i.test(s)) res = 'brahman';
   else if (/^b[h]?akt[h]?[iī]$/i.test(s)) res = 'bhakti';
   else if (/^m[uū]kt[h]?[iī]$/i.test(s)) res = 'mukti';
   else if (/^[aā]d[iī]p[aā]r[aā]s?[h]?akt[h]?[iī]$/i.test(s)) res = 'adiparashakti';
@@ -268,7 +706,9 @@ function canonicalizeSpiritualTerm(term) {
 function normalizeSpiritual(text) {
   if (!text) return '';
   const words = foldDiacritics(text.toLowerCase())
-    .replace(/[^a-z0-9\s]/g, ' ')
+    // Preserve every writing system represented in the corpus. The earlier
+    // ASCII-only filter silently erased Malayalam and Telugu queries.
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter(Boolean);
 
@@ -298,26 +738,31 @@ function normalizeSpiritual(text) {
  */
 async function resolveCorpusIDF(pool, words) {
   const uniqueWords = [...new Set(words.map(w => w.toLowerCase()).filter(w => !GENERIC_WORDS.has(w)))].slice(0, 25);
-  const uncached = uniqueWords.filter(w => !idfMemoryCache.has(w));
   const totalDocs = await getCorpusTotal(pool);
+  const idfMemoryCache = pool && corpusStatistics(pool).total !== null ? corpusStatistics(pool).idf : new Map();
+  const uncached = uniqueWords.filter(w => idfMemoryCache.get(w) === undefined);
+  let lookupFailed = false;
 
   if (uncached.length > 0 && pool) {
-    await Promise.all(uncached.map(async (word) => {
-      try {
-        const res = await pool.query(`
-          SELECT count(*) as count FROM semantic_qa.records WHERE search_vector @@ to_tsquery('simple', $1)
-        `, [word]);
-        const rawCount = Number(res.rows[0].count) || 0;
+    try {
+      const res = await pool.query(`
+        SELECT word, eligible_document_count::bigint AS count
+        FROM semantic_qa.search_lexemes
+        WHERE word = ANY($1::text[])
+      `, [uncached]);
+      const counts = new Map(res.rows.map((row) => [row.word, Number(row.count) || 0]));
+      for (const word of uncached) {
+        const rawCount = counts.get(word) || 0;
         if (rawCount === 0) {
           idfMemoryCache.set(word, 0.2);
         } else {
           const idf = Math.max(0.5, Math.log(1 + (totalDocs - rawCount + 0.5) / (rawCount + 0.5)));
           idfMemoryCache.set(word, idf);
         }
-      } catch {
-        idfMemoryCache.set(word, 0.5);
       }
-    }));
+    } catch {
+      lookupFailed = true;
+    }
   }
 
   const idfMap = {};
@@ -325,7 +770,7 @@ async function resolveCorpusIDF(pool, words) {
     if (GENERIC_WORDS.has(w.toLowerCase())) {
       idfMap[w.toLowerCase()] = 0.05; // Generic words suppressed
     } else {
-      idfMap[w.toLowerCase()] = idfMemoryCache.get(w.toLowerCase()) || 1.2;
+      idfMap[w.toLowerCase()] = idfMemoryCache.get(w.toLowerCase()) || (lookupFailed && uncached.includes(w.toLowerCase()) ? 0.5 : 1.2);
     }
   }
   return idfMap;
@@ -488,6 +933,19 @@ function countPhraseOccurrences(text, phrase, precompiledRegex) {
  * Continuous Rolling Token Window Proximity Calculator
  * Eliminates paragraph boundary blinders.
  */
+function minimumTokenDistance(listA, listB, maximum = 999) {
+  let a = 0;
+  let b = 0;
+  let distance = maximum;
+  while (a < listA.length && b < listB.length) {
+    distance = Math.min(distance, Math.abs(listA[a] - listB[b]));
+    if (distance === 0) break;
+    if (listA[a] < listB[b]) a++;
+    else b++;
+  }
+  return distance;
+}
+
 function computeRollingProximity(tokens, contentWords, idfMap) {
   if (!tokens || !tokens.length || !contentWords || !contentWords.length) {
     return { proximityScore: 0, minObservedDistance: 999, bestAnchorIdx: 0 };
@@ -513,13 +971,7 @@ function computeRollingProximity(tokens, contentWords, idfMap) {
     for (let j = i + 1; j < activeKeys.length; j++) {
       const listA = posMap.get(activeKeys[i]) || [];
       const listB = posMap.get(activeKeys[j]) || [];
-      let minDist = 999;
-      for (const pa of listA) {
-        for (const pb of listB) {
-          const d = Math.abs(pa - pb);
-          if (d < minDist) minDist = d;
-        }
-      }
+      const minDist = minimumTokenDistance(listA, listB);
       if (minDist < minObservedDistance) minObservedDistance = minDist;
       if (minDist <= 35) {
         const idfA = idfMap[activeKeys[i]] || 1.0;
@@ -551,20 +1003,34 @@ function computeRollingProximity(tokens, contentWords, idfMap) {
  * Subject-Aware Tiered Scoring Engine
  * Combines Title Authority with Swami's Direct Answer Teaching Density.
  */
-function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, idfMap, subjects = [], intents = []) {
+function prepareScoringDocument(doc) {
+  const cacheKey = JSON.stringify([
+    doc.source_id,
+    doc.matched_answer_unit_id || 'record',
+    doc.matched_answer_unit_hash || doc.matched_answer_unit_text || '',
+    doc.content_hash || doc.answer || '',
+    doc.question || '',
+    doc.matched_discovery_text || '',
+    doc.metadata?.question_context || '',
+  ]);
+  const cached = scoringDocumentCache.get(cacheKey);
+  if (cached) return cached;
+
   const origTitle = doc.question || '';
   const normTitle = normalizeSpiritual(origTitle);
   const titleWords = normTitle.split(' ').filter(Boolean);
-  const titleContentWords = titleWords.filter(w => !GENERIC_WORDS.has(w));
-
+  const titleContentWords = titleWords.filter((word) => !GENERIC_WORDS.has(word));
   const origBody = doc.answer || '';
-  const origContext = (doc.metadata && doc.metadata.question_context) ? doc.metadata.question_context : '';
-  const fullText = `${origContext ? origContext + '\n\n' : ''}${origBody}`;
-  const normBody = normalizeSpiritual(fullText);
-  const bodyTokens = normBody.split(' ').filter(Boolean);
+  const origContext = doc.metadata?.question_context || '';
+  const origDiscovery = doc.matched_discovery_text || '';
+  const origAnswerUnit = doc.matched_answer_unit_text || '';
+  const scoringContext = origDiscovery || origContext;
+  const scoringAnswer = origAnswerUnit || origBody;
+  const normDiscovery = normalizeSpiritual(origDiscovery);
+  const discoveryWords = normDiscovery.split(' ').filter(Boolean);
+  const normScoringContext = origDiscovery ? normDiscovery : normalizeSpiritual(scoringContext);
 
-  // Extract Swami's direct response (stripping devotee preambles in [...])
-  let swamiSpeech = origBody;
+  let swamiSpeech = scoringAnswer;
   const repliedIdx = swamiSpeech.indexOf('Swami replied:-');
   if (repliedIdx !== -1) {
     swamiSpeech = swamiSpeech.slice(repliedIdx + 'Swami replied:-'.length);
@@ -572,7 +1038,175 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
     swamiSpeech = swamiSpeech.replace(/^\[[^\]]+\]\s*/, '');
   }
   const normSwamiSpeech = normalizeSpiritual(swamiSpeech);
+  const normIntentAnswer = swamiSpeech === scoringAnswer ? normSwamiSpeech : normalizeSpiritual(scoringAnswer);
   const speechTokens = normSwamiSpeech.split(' ').filter(Boolean);
+  const normBody = `${normScoringContext} ${normSwamiSpeech}`.trim();
+  const bodyTokens = normBody.split(' ').filter(Boolean);
+  const bodyLines = scoringAnswer.split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 6 && line.length <= 80)
+    .map((line) => {
+      const normalized = normalizeSpiritual(line);
+      return { line, normalized, words: normalized.split(' ').filter(Boolean) };
+    });
+
+  const prepared = {
+    origTitle,
+    normTitle,
+    titleWords,
+    titleContentWords,
+    origBody,
+    origAnswerUnit,
+    normBody,
+    bodyTokens,
+    normDiscovery,
+    discoveryWords,
+    normSwamiSpeech,
+    normIntentAnswer,
+    speechTokens,
+    bodyLines,
+  };
+  scoringDocumentCache.set(cacheKey, prepared);
+  return prepared;
+}
+
+function classifySearchIntent(value) {
+  return classifyNormalizedSearchIntent(normalizeSpiritual(String(value || '')));
+}
+
+function classifyNormalizedSearchIntent(text) {
+  if (!text) return 'general';
+  if (/\b(?:difference|different|differ|distinction|compare|comparison|versus|vs|between)\b/u.test(text)) return 'comparison';
+  if (/\b(?:who|identity of)\b/u.test(text)) return 'identity';
+  if (/\b(?:meaning|means|meant|definition|define|essence|interpretation|nature|what is|what are)\b/u.test(text)) return 'definition';
+  if (/\b(?:why|reason|cause|because|due to)\b/u.test(text)) return 'causal';
+  if (/\b(?:how to|how can|how should|method|practice|achieve|attain|overcome|become)\b/u.test(text)) return 'procedure';
+  if (/^(?:is|are|can|could|do|does|did|should|would|will|may)\b/u.test(text)) return 'decision';
+  if (/\bwhen\b/u.test(text)) return 'temporal';
+  if (/\bwhere\b/u.test(text)) return 'location';
+  return 'general';
+}
+
+const ANSWER_INTENT_MARKERS = Object.freeze({
+  comparison: ['difference', 'different', 'whereas', 'while', 'unlike', 'on the other hand'],
+  definition: ['means', 'meaning', 'defined', 'definition', 'refers to', 'is called'],
+  causal: ['because', 'reason', 'due to', 'therefore', 'hence', 'since'],
+  procedure: ['should', 'must', 'can', 'practice', 'follow', 'by doing', 'in order to'],
+  decision: ['yes', 'no', 'should', 'should not', 'can', 'cannot'],
+  identity: ['is called', 'is known as', 'refers to'],
+  temporal: ['when', 'after', 'before', 'until'],
+  location: ['where', 'place', 'location', 'in the'],
+});
+
+function scoreIntentAlignment(queryIntent, discoveryText, answerText, subjectCoverage = 0) {
+  return scoreNormalizedIntentAlignment(queryIntent, normalizeSpiritual(discoveryText), normalizeSpiritual(answerText), subjectCoverage);
+}
+
+function scoreNormalizedIntentAlignment(queryIntent, discoveryText, answerText, subjectCoverage) {
+  if (!queryIntent || queryIntent === 'general') return { score: 0, discoveryAligned: false, answerAligned: false };
+  const discoveryIntent = classifyNormalizedSearchIntent(discoveryText);
+  const answerAligned = (ANSWER_INTENT_MARKERS[queryIntent] || []).some((marker) => answerText.includes(marker));
+  const discoveryAligned = discoveryIntent === queryIntent;
+  const evidenceFactor = Math.max(0.35, Math.min(1, Number(subjectCoverage) || 0));
+  const score = Math.round(
+    (discoveryAligned ? 90000 * evidenceFactor : 0)
+    + (answerAligned ? 35000 * evidenceFactor : 0)
+  );
+  return { score, discoveryAligned, answerAligned };
+}
+
+function buildConceptGroups(subjects, maximum = 4) {
+  const groups = [];
+  const presentationWords = new Set(['idea', 'ideas', 'understand', 'understood', 'together', 'issue', 'issues', 'question']);
+  for (const subject of [...new Set(subjects || [])]) {
+    if (groups.length >= maximum) break;
+    if (GENERIC_WORDS.has(subject) || INTENT_WORDS.has(subject) || MODIFIER_WORDS.has(subject) || presentationWords.has(subject)) continue;
+    const variants = new Set([canonicalizeSpiritualTerm(subject), normalizeSpiritual(subject)]);
+    for (const variant of getSpiritualVariants(subject) || []) {
+      const normalized = normalizeSpiritual(variant);
+      for (const token of normalized.split(/\s+/u)) if (token) variants.add(token);
+    }
+    variants.delete('');
+    if (variants.size) groups.push(variants);
+  }
+  return groups;
+}
+
+function computeMinimalCoveringSpan(tokens, conceptGroups) {
+  const words = Array.isArray(tokens) ? tokens : [];
+  const groups = (conceptGroups || []).filter((group) => group?.size);
+  if (words.length === 0 || groups.length < 2) return null;
+
+  const conceptByWord = new Map();
+  for (const [index, variants] of groups.entries()) {
+    for (const variant of variants) {
+      let hits = conceptByWord.get(variant);
+      if (!hits) conceptByWord.set(variant, hits = []);
+      hits.push(index);
+    }
+  }
+  const counts = Array(groups.length).fill(0);
+  const hits = [];
+  let covered = 0;
+  let left = 0;
+  let best = null;
+  for (let right = 0; right < words.length; right++) {
+    const rightGroups = conceptByWord.get(words[right]);
+    if (!rightGroups) continue;
+    hits.push({ position: right, groups: rightGroups });
+    for (const groupIndex of rightGroups) {
+      if (counts[groupIndex]++ === 0) covered++;
+    }
+    while (covered === groups.length) {
+      const leftHit = hits[left++];
+      const spanLength = right - leftHit.position + 1;
+      if (!best || spanLength < best.spanLength) {
+        best = {
+          start: leftHit.position,
+          end: right + 1,
+          spanLength,
+          requiredConcepts: groups.length,
+          density: groups.length / spanLength,
+        };
+      }
+      for (const groupIndex of leftHit.groups) {
+        if (--counts[groupIndex] === 0) covered--;
+      }
+    }
+  }
+  return best;
+}
+
+function scoreMinimalCoveringSpan(tokens, subjects, minimumConcepts = 2) {
+  const groups = buildConceptGroups(subjects);
+  if (groups.length < minimumConcepts) return { score: 0, span: null };
+  const span = computeMinimalCoveringSpan(tokens, groups);
+  if (!span) return { score: 0, span: null };
+  const compactness = Math.max(0, 1 - ((span.spanLength - span.requiredConcepts) / 60));
+  const score = Math.round(30000 + (span.requiredConcepts * 10000) + (compactness * 60000));
+  return { score, span };
+}
+
+function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, idfMap, subjects = [], intents = []) {
+  if (!isSearchEligibleMetadata(doc?.metadata)) return null;
+
+  const prepared = prepareScoringDocument(doc);
+  const {
+    origTitle,
+    normTitle,
+    titleWords,
+    titleContentWords,
+    origBody,
+    origAnswerUnit,
+    normBody,
+    bodyTokens,
+    normDiscovery,
+    discoveryWords,
+    normSwamiSpeech,
+    normIntentAnswer,
+    speechTokens,
+    bodyLines,
+  } = prepared;
 
   // Primary subject verification: Document MUST contain at least one subject entity or known variant
   const effectiveSubjects = subjects.length > 0 ? subjects : contentWords;
@@ -597,13 +1231,15 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
 
   const bodySubjectCount = bodyTokens.filter(t => effectiveSubjects.includes(t) || allKnownVariants.has(t)).length;
 
-  if (!titleHasSubject && !bodyHasSubject) {
+  const verifiedEnglishEvidence = doc.english_passage_evidence?.verified
+    || Number(doc.english_body_coverage) >= 0.5 && (doc.english_body_matched_terms?.length || 0) >= 2;
+  if (!titleHasSubject && !bodyHasSubject && !verifiedEnglishEvidence && !doc.exact_surface_title) {
     return null; // DISCARD off-topic discourses completely!
   }
 
   // When title does NOT contain the topic subject, require at least 2 mentions in the body
   // to eliminate random off-topic discourses that mention the subject once in passing (e.g. Guru Dakshina).
-  if (!titleHasSubject && bodySubjectCount < 2) {
+  if (!titleHasSubject && bodySubjectCount < 2 && !verifiedEnglishEvidence && !doc.exact_surface_title) {
     return null;
   }
 
@@ -663,6 +1299,27 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
   }
 
   const normQuery = normalizeSpiritual(query);
+  const uniqueDiscoveryContentHits = [...new Set(contentWords.filter((word) => discoveryWords.includes(word)))];
+  const discoveryCoverage = uniqueDiscoveryContentHits.length / Math.max(1, contentWords.length);
+  const queryIntent = classifyNormalizedSearchIntent(normQuery);
+  const isMultiConceptQuery = /\b(?:both of these issues|relationship between the ideas)\b/iu.test(query);
+  const rankingIntentEligible = ['comparison', 'definition', 'causal', 'procedure', 'identity'].includes(queryIntent);
+  const intentAlignment = isMultiConceptQuery || !rankingIntentEligible
+    ? { score: 0, discoveryAligned: false, answerAligned: false }
+    : scoreNormalizedIntentAlignment(queryIntent, normDiscovery, normIntentAnswer, discoveryCoverage);
+  const discoveryHasExactQuery = Boolean(normQuery && normDiscovery.includes(normQuery));
+  let discoveryScore = 0;
+  let discoveryMatchKind = '';
+  if (discoveryHasExactQuery || doc.discovery_exact_match) {
+    discoveryScore = 1500000 + (discoveryCoverage * 90000);
+    discoveryMatchKind = 'Exact embedded question match';
+  } else if (uniqueDiscoveryContentHits.length >= 4 && discoveryCoverage >= 0.72) {
+    discoveryScore = 260000 + (discoveryCoverage * 70000);
+    discoveryMatchKind = `Embedded question coverage ${Math.round(discoveryCoverage * 100)}%`;
+  } else if (uniqueDiscoveryContentHits.length >= 2) {
+    discoveryScore = discoveryCoverage * 120000;
+    discoveryMatchKind = `Embedded question coverage ${Math.round(discoveryCoverage * 100)}%`;
+  }
   const titleHasExactQuery = (normTitle === normQuery || normTitle.includes(normQuery));
   const titleMatchedPhrases = weightedPhrases.filter(wp => countPhraseOccurrences(normTitle, wp.text) > 0);
   const titleSubjectHits = effectiveSubjects.filter(s => {
@@ -749,13 +1406,10 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
   // ---------------------------------------------------------------------------
   // A. Internal Section Headings inside comprehensive discourses
   // Detects sections like "The Meaning of Gayatri Mantra" or "True Interpretation of Gayatri Mantra"
-  const bodyLines = origBody.split('\n').map(l => l.trim()).filter(Boolean);
   let sectionHeadingScore = 0;
   let foundSectionHeading = '';
-  for (const line of bodyLines) {
+  for (const { line, normalized: normL, words: lWords } of bodyLines) {
     if (line.length >= 6 && line.length <= 80) {
-      const normL = normalizeSpiritual(line);
-      const lWords = normL.split(' ').filter(Boolean);
       const lSubjects = effectiveSubjects.filter(s => lWords.includes(s));
       const lIntents = intents.filter(it => lWords.includes(it));
       if (lSubjects.length >= 1 && lIntents.length >= 1) {
@@ -800,18 +1454,27 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
 
   // E. Continuous Token Window Proximity in Swami's Teaching
   const { proximityScore, minObservedDistance } = computeRollingProximity(speechTokens, contentWords, idfMap);
+  const minimalCovering = isMultiConceptQuery || !rankingIntentEligible
+    ? { score: 0, span: null }
+    : scoreMinimalCoveringSpan(speechTokens, effectiveSubjects);
 
   // F. Substantive Subject Density (Rewards comprehensive discourses with 20-35+ mentions)
   const primaryCount = bodyTokens.filter(t => t === primarySubject).length;
   const secondaryCount = effectiveSubjects[1] ? bodyTokens.filter(t => t === effectiveSubjects[1]).length : 0;
   const densityScore = (Math.min(10, primaryCount) * 3000) + (Math.min(8, secondaryCount) * 1500);
 
-  const bodyTotal = sectionHeadingScore + directDefBoost + openingScore + bodyPhraseScore + (proximityScore * 1.5) + densityScore;
+  const bodyTotal = sectionHeadingScore + directDefBoost + openingScore + bodyPhraseScore
+    + (proximityScore * 1.5) + densityScore + minimalCovering.score + intentAlignment.score;
 
   // TOTAL SCORE: Blends Title Authority, Section Headings, and Content Depth!
-  const totalScore = titleTotal + bodyTotal;
+  const englishBodyScore = englishBodyBoost(doc);
+  const englishPassageScore = doc.english_passage_evidence ? doc.english_passage_evidence.strength * doc.english_passage_weight : 0;
+  const totalScore = titleTotal + discoveryScore + bodyTotal + englishBodyScore + englishPassageScore
+    + (doc.exact_surface_title ? 2400000 : 0);
 
   const decisionReasons = [];
+  if (doc.exact_surface_title) decisionReasons.push('Exact source title');
+  if (discoveryMatchKind) decisionReasons.push(discoveryMatchKind);
   if (defMatchKind) decisionReasons.push(defMatchKind);
   if (titleMatchKind && titleTier < 4) decisionReasons.push(titleMatchKind);
   else if (foundSectionHeading) decisionReasons.push(`Section: "${foundSectionHeading}"`);
@@ -824,6 +1487,9 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
   if (primaryCount >= 10) {
     decisionReasons.push(`${primaryCount} subject mentions`);
   }
+  if (minimalCovering.span) decisionReasons.push(`Minimal concept span: ${minimalCovering.span.spanLength} tokens`);
+  if (intentAlignment.discoveryAligned || intentAlignment.answerAligned) decisionReasons.push(`Intent: ${queryIntent}`);
+  if (doc.english_passage_evidence?.verified) decisionReasons.push('Matching concepts in the cited passage');
 
   return {
     sourceId: doc.source_id,
@@ -831,13 +1497,24 @@ function scoreDiscourse(doc, query, queryWords, contentWords, weightedPhrases, i
     date: doc.metadata?.record_date || '',
     formattedDate: formatDate(doc.metadata?.record_date),
     totalScore,
+    englishBodyScore,
+    ...(doc.english_passage_evidence ? { englishPassageScore } : {}),
     score: Math.round(totalScore * 10) / 10,
     titleScore: titleTotal,
     bodyScore: bodyTotal,
+    discoveryScore,
     proximityScore,
+    minimalSpanScore: minimalCovering.score,
+    minimalSpanLength: minimalCovering.span?.spanLength || null,
+    intentScore: intentAlignment.score,
+    queryIntent,
     minDistance: minObservedDistance,
     decisionSummary: decisionReasons.join(' · ') || 'Exact phrase & proximity match',
     answer: origBody,
+    answerUnitId: doc.matched_answer_unit_id || null,
+    answerUnitHash: doc.matched_answer_unit_hash || null,
+    answerUnitText: origAnswerUnit || null,
+    answerUnitStart: Number.isInteger(doc.matched_answer_unit_start) ? doc.matched_answer_unit_start : null,
     normSwamiSpeech,
   };
 }
@@ -896,6 +1573,40 @@ function splitIntoCleanSentences(text) {
   return results;
 }
 
+function selectMinimalCoveringSentenceRange(fullText, sentences, contentWords, maximumSentences = 3) {
+  const required = [...new Set((contentWords || [])
+    .map((word) => canonicalizeSpiritualTerm(word))
+    .filter((word) => word && !GENERIC_WORDS.has(word)))].slice(0, 8);
+  if (!fullText || !sentences?.length || required.length < 2) return null;
+
+  const requiredSet = new Set(required);
+  const sentenceHits = sentences.map((sentence) => new Set(
+    normalizeSpiritual(sentence.text).split(/\s+/u)
+      .map((word) => canonicalizeSpiritualTerm(word))
+      .filter((word) => requiredSet.has(word))
+  ));
+  let best = null;
+  for (let start = 0; start < sentences.length; start++) {
+    const covered = new Set();
+    for (let end = start; end < Math.min(sentences.length, start + maximumSentences); end++) {
+      for (const word of sentenceHits[end]) covered.add(word);
+      const rangeStart = sentences[start].start;
+      const rangeEnd = sentences[end].end;
+      const length = rangeEnd - rangeStart;
+      if (length > 700) break;
+      const candidate = { start: rangeStart, end: rangeEnd, coverage: covered.size, length };
+      if (
+        candidate.coverage >= 2
+        && (!best || candidate.coverage > best.coverage
+          || (candidate.coverage === best.coverage && candidate.length < best.length))
+      ) best = candidate;
+    }
+  }
+  if (!best) return null;
+  const text = fullText.slice(best.start, best.end);
+  return { ...best, text, required: required.length };
+}
+
 /**
  * Extract multi-sentence snippet with guaranteed complete sentence boundaries.
  * Returns { snippetText, targetPassage, passageOffset }
@@ -917,6 +1628,15 @@ function extractMultiSentenceSnippet(fullText, contentWords, weightedPhrases, fa
       snippetText: fb,
       targetPassage: fb,
       passageOffset: { start: 0, end: fb.length, text: fb },
+    };
+  }
+
+  const minimalRange = selectMinimalCoveringSentenceRange(fullText, sentences, contentWords);
+  if (minimalRange) {
+    return {
+      snippetText: minimalRange.text,
+      targetPassage: minimalRange.text,
+      passageOffset: { start: minimalRange.start, end: minimalRange.end, text: minimalRange.text },
     };
   }
 
@@ -1005,26 +1725,270 @@ function extractMultiSentenceSnippet(fullText, contentWords, weightedPhrases, fa
   };
 }
 
+function distanceCandidateKey(row) {
+  const sourceId = String(row?.source_id || '');
+  const answerUnitId = String(row?.matched_answer_unit_id || 'record');
+  return `${sourceId}\u0000${answerUnitId}`;
+}
+
+function stripSearchFraming(value, { extended = false } = {}) {
+  let result = String(value || '').trim();
+  const patterns = [
+    /^regarding this specific issue[,;:]?\s*/iu,
+    /^please clarify this spiritual question:\s*/iu,
+    /^could this spiritual point be clarified:\s*/iu,
+    /^what conclusion should a spiritual seeker draw about this question:\s*/iu,
+    /^what (?:practical )?explanation (?:does spiritual teaching give for|addresses) this question:\s*/iu,
+    /^what does the teaching indicate about this question:\s*/iu,
+    /^from (?:a practical standpoint|the standpoint of spiritual reasoning)[,;:]?\s*/iu,
+    /^in (?:practical spiritual life|spiritual terms)[,;:]?\s*/iu,
+    ...(extended ? [/^how should the relationship between the ideas in this spiritual question be understood:\s*/iu] : []),
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pattern of patterns) {
+      const stripped = result.replace(pattern, '').trim();
+      if (stripped !== result) {
+        result = stripped;
+        changed = true;
+      }
+    }
+  }
+  // Preserve the substantive noun phrase while removing a general interpretive
+  // frame. This affects retrieval text, not the displayed query or its intent.
+  if (extended) result = result.replace(/^how should (.+?) be understood\?$/iu, '$1?').trim();
+  return result || String(value || '').trim();
+}
+
+function mergeDistanceCandidate(target, incoming) {
+  if (!target) return { ...incoming };
+  const merged = { ...target };
+  for (const [key, value] of Object.entries(incoming || {})) {
+    if (value == null) continue;
+    if (value === '' && merged[key]) continue;
+    merged[key] = value;
+  }
+  merged.discovery_exact_match = Boolean(target.discovery_exact_match || incoming.discovery_exact_match);
+  merged.passage_exact_match = Boolean(target.passage_exact_match || incoming.passage_exact_match);
+  return merged;
+}
+
+/**
+ * Fuse independent lexical retrieval channels at answer-unit granularity.
+ * Record hits remain fallbacks only when no citable answer unit from that
+ * source was retrieved. This prevents one source from collapsing several
+ * independently relevant replies into a single candidate.
+ */
+function fuseDistanceCandidateChannels({ recordRows = [], discoveryRows = [], answerUnitRows = [], passageRows = [] }) {
+  const candidates = new Map();
+  const recordRankBySource = new Map();
+  const unitSources = new Set();
+
+  const upsert = (row, rankField, index) => {
+    const candidate = { ...row, [rankField]: index + 1 };
+    if (candidate.matched_answer_unit_id) unitSources.add(candidate.source_id);
+    const key = distanceCandidateKey(candidate);
+    candidates.set(key, mergeDistanceCandidate(candidates.get(key), candidate));
+  };
+
+  recordRows.forEach((row, index) => {
+    recordRankBySource.set(row.source_id, index + 1);
+    upsert(row, 'record_retrieval_rank', index);
+  });
+  discoveryRows.forEach((row, index) => upsert(row, 'discovery_retrieval_rank', index));
+  answerUnitRows.forEach((row, index) => upsert(row, 'answer_unit_retrieval_rank', index));
+  passageRows.forEach((row, index) => upsert(row, 'passage_retrieval_rank', index));
+
+  for (const [key, candidate] of candidates) {
+    if (candidate.matched_answer_unit_id) {
+      candidate.record_retrieval_rank ||= recordRankBySource.get(candidate.source_id);
+      continue;
+    }
+    const answerUnitCount = Number(candidate.metadata?.answer_unit_count);
+    if (
+      unitSources.has(candidate.source_id)
+      || (Number.isFinite(answerUnitCount) && answerUnitCount > 0)
+    ) candidates.delete(key);
+  }
+  return [...candidates.values()];
+}
+
 /**
  * Execute Distance-Based Search against the PostgreSQL records table.
  * Returns up to targetLimit (default 35, max 100) ranked discourses.
  */
-async function searchDistanceCorpus(pool, { query, limit = 35, searchMode = 'normal' }) {
+async function hydrateSingleUnitTitleCandidates(pool, recordRows) {
+  const sourceIds = [...new Set(recordRows.map((row) => row.source_id).filter(Boolean))];
+  if (!sourceIds.length) return [];
+  // Count ALL units, including incomplete/non-English units. A filtered count
+  // could incorrectly map a record title to one reply of a multi-reply source.
+  const result = await pool.query(`
+    SELECT r.source_id, r.question, ''::text AS answer, r.metadata, r.content_hash,
+           u.associated_question AS matched_discovery_text,
+           u.answer_unit_id AS matched_answer_unit_id,
+           u.unit_text AS matched_answer_unit_text,
+           u.start_offset AS matched_answer_unit_start,
+           u.content_hash AS matched_answer_unit_hash,
+           true AS single_unit_title_candidate
+    FROM semantic_qa.records r
+    JOIN semantic_qa.answer_units u USING (source_id)
+    WHERE r.source_id = ANY($1::text[])
+      AND ${searchEligibilitySql('r')}
+      AND u.language = 'ENG' AND u.context_complete = true
+      AND NOT EXISTS (
+        SELECT 1 FROM semantic_qa.answer_units other_unit
+        WHERE other_unit.source_id = u.source_id
+          AND other_unit.answer_unit_id <> u.answer_unit_id
+      )
+    ORDER BY array_position($1::text[], r.source_id)
+  `, [sourceIds]);
+  return result.rows;
+}
+
+async function resolveNumberedReference(pool, query) {
+  const text = String(query || '');
+  const requestedByQuestion = (text.match(/\b(?:verse|chapter|section|part)\b/giu) || []).length === 1
+    ? questionReference(text) : null;
+  const request = numberedTitleReference(text) || requestedByQuestion;
+  if (!pool || !request || !Number.isSafeInteger(request.number) || !/^[\p{L}\p{M}.'’: -]{1,100}$/u.test(request.name)) return null;
+  const { rows } = await pool.query(`
+    SELECT r.source_id, r.question FROM semantic_qa.records r
+    WHERE r.question ILIKE $1 AND ${searchEligibilitySql('r')}
+    ORDER BY r.source_id LIMIT 501
+  `, [`${request.name}%`]);
+  if (rows.length > 500) return null;
+  const work = normalizeSpiritual(request.name);
+  const titles = rows.flatMap(row => {
+    const reference = numberedTitleReference(row.question);
+    if (reference?.kind !== request.kind || normalizeSpiritual(reference.name) !== work) return [];
+    return [{ source_id: row.source_id, number: reference.number }];
+  });
+  // A lone title does not establish that the corpus stores a numbered series.
+  if (new Set(titles.map(row => row.number)).size < 2) return null;
+  return titles.filter(row => row.number === request.number);
+}
+
+// The optional full-text passage scan can be much slower than the exact
+// passage query. Limit that scan without changing other pool operations.
+async function queryDistancePassages(pool, sql, params, timings) {
+  if (!params[3] || typeof pool.connect !== 'function') return pool.query(sql, params);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN READ ONLY');
+    await client.query("SET LOCAL statement_timeout = '4000ms'");
+    return await client.query(sql, params);
+  } catch (error) {
+    if (error.code !== '57014') throw error;
+    timings.fullTextPassageTimedOut = true;
+  } finally {
+    let cleanupError;
+    try { await client.query('ROLLBACK'); }
+    catch (error) { cleanupError = error; }
+    client.release(cleanupError);
+  }
+  return pool.query(sql, [...params.slice(0, 3), false]);
+}
+
+async function searchDistanceCorpus(pool, {
+  query, limit = 35, searchMode = 'normal', experimentalSingleUnitTitles: enableSingleUnitTitles = false,
+  experimentalEnglishBodies: enableEnglishBodies = false, englishBodyWeight = 600000,
+  experimentalEnglishPassages: enableEnglishPassages = false, englishPassageWeight = 900000,
+  lexicalRanker = null, corpusGroundedEnglish = false,
+}) {
+  const totalStartedAt = performance.now();
+  const timings = {};
   const targetLimit = Math.max(1, Math.min(100, Number(limit) || 35));
-  const normQuery = normalizeSpiritual(query);
+  const baseNormalization = normalizeSearchQuery(query);
+  const contextualCorrection = correctContextualQueryTerms(baseNormalization.normalizedQuery);
+  const spellingStartedAt = performance.now();
+  const corpusCorrection = await correctCorpusTranspositions(pool, contextualCorrection.normalizedQuery);
+  const morphologyCorrection = await correctControlledMorphology(pool, corpusCorrection.normalizedQuery);
+  timings.spellingMs = performance.now() - spellingStartedAt;
+  const normQuery = morphologyCorrection.normalizedQuery;
+  const corrections = [
+    ...baseNormalization.corrections,
+    ...contextualCorrection.corrections,
+    ...corpusCorrection.corrections,
+    ...morphologyCorrection.corrections,
+  ];
+  const corpusCorrectionKeys = new Set(
+    [...corpusCorrection.corrections, ...morphologyCorrection.corrections]
+      .map((correction) => `${correction.from}\u0000${correction.to}`)
+  );
+  let correctedSurfaceQuery = String(query || '');
+  const surfaceCorrections = corrections.filter((correction, index, all) => (
+    (adjacentTranspositionCandidates(correction.from).includes(correction.to)
+      || corpusCorrectionKeys.has(`${correction.from}\u0000${correction.to}`))
+    && all.findIndex((candidate) => candidate.from === correction.from && candidate.to === correction.to) === index
+  ));
+  for (const correction of surfaceCorrections) {
+    const escaped = correction.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    correctedSurfaceQuery = correctedSurfaceQuery.replace(
+      new RegExp(`(?<![A-Za-z])${escaped}(?![A-Za-z])`, 'gi'),
+      correction.to
+    );
+  }
+  const retrievalSurfaceQuery = stripSearchFraming(correctedSurfaceQuery);
+  const numberedSourceRows = await resolveNumberedReference(pool, query);
+  if (numberedSourceRows && !numberedSourceRows.length) {
+    timings.totalMs = performance.now() - totalStartedAt;
+    return {
+      query, normalizedQuery: normQuery, retrievalQuery: retrievalSurfaceQuery, corrections, searchMode,
+      executionTimeMs: timings.totalMs, timings, totalFound: 0, matches: [],
+      ...(searchMode === 'debug' ? { debug: {
+        recordCandidateSourceIds: [], candidateAnswerUnitIds: [], scoredAnswerUnitIds: [], rankingCandidates: [],
+      } } : {}),
+    };
+  }
+  const exactNumberedUnits = numberedSourceRows?.length ? await hydrateSingleUnitTitleCandidates(pool, numberedSourceRows) : [];
+  const exactNumberedOnly = exactNumberedUnits.length > 0 && exactNumberedUnits.length === numberedSourceRows.length;
+  const englishSurface = enableEnglishBodies || enableEnglishPassages
+    ? stripSearchFraming(correctedSurfaceQuery, { extended: true }) : retrievalSurfaceQuery;
+  let groundedPassageSearch = null;
+  if (corpusGroundedEnglish && !numberedSourceRows && !isNumberedReferenceLookup(retrievalSurfaceQuery)) {
+    const groundingStartedAt = performance.now();
+    try {
+      groundedPassageSearch = await prepareEnglishPassageSearch(pool, query, englishSurface, { grounded: true, normalized: normQuery });
+    } catch {
+      timings.englishGroundingUnavailable = true;
+    }
+    timings.englishGroundingMs = performance.now() - groundingStartedAt;
+  }
+  const enableEnglishExpansion = !corpusGroundedEnglish || groundedPassageSearch !== null;
+  const experimentalSingleUnitTitles = enableSingleUnitTitles && enableEnglishExpansion;
+  const experimentalEnglishBodies = enableEnglishBodies && enableEnglishExpansion;
+  const experimentalEnglishPassages = enableEnglishPassages && enableEnglishExpansion;
+  const requestedReference = experimentalEnglishBodies ? questionReference(retrievalSurfaceQuery) : null;
+  const literalTitleQuery = experimentalSingleUnitTitles
+    ? requestedReference
+      ? `${requestedReference.name} ${requestedReference.kind} ${requestedReference.number}`
+      : stripSearchFraming(correctedSurfaceQuery, { extended: true })
+    : retrievalSurfaceQuery;
   const qWords = normQuery.split(' ').filter(Boolean);
-  const rawWords = query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const hasBodyContext = experimentalEnglishBodies && (hasSpiritualSearchContext(qWords)
+    || /\b(?:atheis\w*|theis\w*|demon\w*|hypocrisy|awareness|consciousness|charity|offerings|ritual\w*)\b/iu.test(retrievalSurfaceQuery));
+  const englishBodyEligible = (hasBodyContext || experimentalEnglishBodies && groundedPassageSearch)
+    && !isNumberedReferenceLookup(retrievalSurfaceQuery);
+  // Long questions with a body retrieval channel benefit less from whole-string
+  // trigram matching. Keep it for short lookups and queries with spelling repairs.
+  const anchoredPassageQuestion = experimentalEnglishPassages && isAnchoredPassageQuestion(query);
+  const fuzzyQuestionSearch = !(hasBodyContext || anchoredPassageQuestion) || corrections.length > 0
+    || (retrievalSurfaceQuery.match(/[\p{L}\p{N}]+/gu) || []).length < 10;
+  const rawWords = qWords;
   const contentWords = qWords.filter(w => !GENERIC_WORDS.has(w) && w.length > 1);
 
   if (!qWords.length) {
-    return { query, totalFound: 0, matches: [] };
+    return { query, normalizedQuery: normQuery, corrections, totalFound: 0, matches: [] };
   }
 
   // 1. Classify query into Subjects (entities) and Intents
   const { subjects, intents } = classifyQueryTokens(qWords);
 
   // 2. Resolve dynamic statistical BM25 IDF across corpus
+  const idfStartedAt = performance.now();
   const idfMap = await resolveCorpusIDF(pool, qWords);
+  timings.idfMs = performance.now() - idfStartedAt;
 
   // Sort subjects: substantive entities first over author/speaker tokens, priority spiritual entities, then by dynamic IDF
   const hasSubstantiveSubject = subjects.some(s => !SPEAKER_TOKENS.has(s));
@@ -1124,46 +2088,373 @@ async function searchDistanceCorpus(pool, { query, limit = 35, searchMode = 'nor
   }
 
   const queryStart = Date.now();
-  let dbResult;
+  const discoveryTerms = [...new Set([...contentWords, ...subjects, ...intents])]
+    .filter((word) => word && word.length >= 3)
+    .slice(0, 12);
+  const discoveryTsQuery = discoveryTerms.length ? discoveryTerms.join(' | ') : primaryTermExpr;
+  const recordCandidatesPromise = exactNumberedOnly ? Promise.resolve({ rows: [] }) : (async () => {
+    const startedAt = performance.now();
+    try {
+      try {
+        return await pool.query(`
+          SELECT r.source_id, r.question, r.answer, r.metadata, r.content_hash
+          FROM semantic_qa.records r
+          WHERE ${searchEligibilitySql('r')}
+            AND (r.search_vector @@ to_tsquery('simple', $1) OR r.question ILIKE $2 OR r.question ILIKE $4)
+          ORDER BY (
+            CASE
+              WHEN r.question ILIKE $4 THEN 0
+              WHEN r.question ILIKE $3 THEN 1
+              WHEN r.question ILIKE $2 THEN 2
+              ELSE 3
+            END
+          ),
+          ts_rank_cd(r.search_vector, to_tsquery('simple', $1)) DESC
+          LIMIT 100
+        `, [tsQueryStr, `%${primaryPrefix}%`, `%${primaryPrefix}%${secondarySubject}%`, `%${titleNgramFilter}%`]);
+      } catch {
+        return await pool.query(`
+          SELECT r.source_id, r.question, r.answer, r.metadata, r.content_hash
+          FROM semantic_qa.records r
+          WHERE ${searchEligibilitySql('r')}
+            AND (r.search_vector @@ to_tsquery('simple', $1) OR r.question ILIKE $2 OR r.answer ILIKE $2)
+          LIMIT 100
+        `, [primaryTermExpr, `%${primaryPrefix}%`]);
+      }
+    } finally {
+      timings.recordCandidatesMs = performance.now() - startedAt;
+    }
+  })();
 
-  try {
-    dbResult = await pool.query(`
-      SELECT r.source_id, r.question, r.answer, r.metadata
-      FROM semantic_qa.records r
-      WHERE (r.search_vector @@ to_tsquery('simple', $1) OR r.question ILIKE $2 OR r.question ILIKE $4)
-      ORDER BY (
-        CASE
-          WHEN r.question ILIKE $4 THEN 0
-          WHEN r.question ILIKE $3 THEN 1
-          WHEN r.question ILIKE $2 THEN 2
-          ELSE 3
-        END
-      ),
-      ts_rank_cd(r.search_vector, to_tsquery('simple', $1)) DESC
-      LIMIT 400
-    `, [tsQueryStr, `%${primaryPrefix}%`, `%${primaryPrefix}%${secondarySubject}%`, `%${titleNgramFilter}%`]);
-  } catch (err) {
-    dbResult = await pool.query(`
-      SELECT r.source_id, r.question, r.answer, r.metadata
-      FROM semantic_qa.records r
-      WHERE r.search_vector @@ to_tsquery('simple', $1) OR r.question ILIKE $2 OR r.answer ILIKE $2
-      LIMIT 400
-    `, [primaryTermExpr, `%${primaryPrefix}%`]);
-  }
+  const discoveryCandidatesPromise = exactNumberedOnly ? Promise.resolve([]) : (async () => {
+    const startedAt = performance.now();
+    try {
+      const result = await pool.query(`
+        WITH exact_matches AS MATERIALIZED (
+          SELECT d.source_id, d.answer_unit_id, d.discovery_text, d.discovery_index,
+                 true AS exact_match,
+                 ts_rank_cd(d.search_vector, to_tsquery('simple', $1)) AS discovery_rank
+          FROM semantic_qa.discovery_passages d
+          JOIN semantic_qa.records eligible ON eligible.source_id = d.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND d.discovery_text ILIKE $3
+          ORDER BY length(d.discovery_text), d.source_id, d.discovery_index
+          LIMIT 60
+        ),
+        lexical_matches AS MATERIALIZED (
+          SELECT d.source_id, d.answer_unit_id, d.discovery_text, d.discovery_index,
+                 (position(lower($2) in lower(d.discovery_text)) > 0) AS exact_match,
+                 ts_rank_cd(d.search_vector, to_tsquery('simple', $1)) AS discovery_rank
+          FROM semantic_qa.discovery_passages d
+          JOIN semantic_qa.records eligible ON eligible.source_id = d.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND d.search_vector @@ to_tsquery('simple', $1)
+          ORDER BY ts_rank_cd(d.search_vector, to_tsquery('simple', $1)) DESC,
+                   d.source_id, d.discovery_index
+          LIMIT 600
+        ),
+        combined AS MATERIALIZED (
+          SELECT * FROM exact_matches
+          UNION ALL
+          SELECT * FROM lexical_matches
+        ),
+        ranked AS (
+          SELECT combined.*,
+                 row_number() OVER (
+                   PARTITION BY combined.source_id, coalesce(combined.answer_unit_id, '')
+                   ORDER BY combined.exact_match DESC, combined.discovery_rank DESC, combined.discovery_index
+                 ) AS source_rank
+          FROM combined
+        )
+        SELECT r.source_id, r.question,
+               CASE WHEN u.answer_unit_id IS NULL THEN r.answer ELSE ''::text END AS answer,
+               r.metadata, r.content_hash,
+               ranked.discovery_text AS matched_discovery_text,
+               ranked.answer_unit_id AS matched_answer_unit_id,
+               ranked.exact_match AS discovery_exact_match,
+               ranked.discovery_rank,
+               u.unit_text AS matched_answer_unit_text,
+               u.start_offset AS matched_answer_unit_start,
+               u.content_hash AS matched_answer_unit_hash
+        FROM ranked
+        JOIN semantic_qa.records r USING (source_id)
+        LEFT JOIN semantic_qa.answer_units u ON u.answer_unit_id = ranked.answer_unit_id
+        WHERE ranked.source_rank = 1
+        ORDER BY ranked.exact_match DESC, ranked.discovery_rank DESC, r.source_id
+        LIMIT 180
+      `, [discoveryTsQuery, retrievalSurfaceQuery, `%${retrievalSurfaceQuery}%`]);
+      return result.rows;
+    } catch {
+      return [];
+    } finally {
+      timings.discoveryCandidatesMs = performance.now() - startedAt;
+    }
+  })();
 
-  const candidates = dbResult.rows;
+  const answerUnitCandidatesPromise = exactNumberedOnly ? Promise.resolve([]) : (async () => {
+    const startedAt = performance.now();
+    try {
+      const result = await pool.query(`
+        WITH fuzzy_settings AS MATERIALIZED (
+          SELECT set_config('pg_trgm.word_similarity_threshold', '0.45', true)
+        ),
+        exact_matches AS MATERIALIZED (
+          SELECT u.source_id, u.answer_unit_id,
+                 true AS exact_match,
+                 'exact question'::text AS channel,
+                 row_number() OVER (ORDER BY length(u.associated_question), u.source_id, u.unit_index) AS channel_rank,
+                 2.0::double precision AS channel_weight
+          FROM semantic_qa.answer_units u
+          JOIN semantic_qa.records eligible ON eligible.source_id = u.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND u.context_complete = true
+            AND u.associated_question ILIKE $3
+          ORDER BY length(u.associated_question), u.source_id, u.unit_index
+          LIMIT 60
+        ),
+        lexical_matches AS MATERIALIZED (
+          SELECT u.source_id, u.answer_unit_id,
+                 (position(lower($2) in lower(u.associated_question)) > 0) AS exact_match,
+                 'answer full text'::text AS channel,
+                 row_number() OVER (
+                   ORDER BY ts_rank_cd(u.search_vector, to_tsquery('simple', $1)) DESC,
+                            u.source_id, u.unit_index
+                 ) AS channel_rank,
+                 1.2::double precision AS channel_weight
+          FROM semantic_qa.answer_units u
+          JOIN semantic_qa.records eligible ON eligible.source_id = u.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND u.context_complete = true
+            AND u.search_vector @@ to_tsquery('simple', $1)
+          ORDER BY ts_rank_cd(u.search_vector, to_tsquery('simple', $1)) DESC,
+                   u.source_id, u.unit_index
+          LIMIT 500
+        ),
+        fuzzy_matches AS MATERIALIZED (
+          SELECT u.source_id, u.answer_unit_id,
+                 false AS exact_match,
+                 'fuzzy question'::text AS channel,
+                 row_number() OVER (
+                   ORDER BY similarity(u.associated_question, $2) DESC,
+                            u.source_id, u.unit_index
+                 ) AS channel_rank,
+                 1.5::double precision AS channel_weight
+          FROM semantic_qa.answer_units u
+          JOIN semantic_qa.records eligible ON eligible.source_id = u.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND u.context_complete = true
+            AND $4::boolean
+            AND u.associated_question % $2
+          ORDER BY similarity(u.associated_question, $2) DESC,
+                   u.source_id, u.unit_index
+          LIMIT 300
+        ),
+        fuzzy_span_matches AS MATERIALIZED (
+          SELECT u.source_id, u.answer_unit_id,
+                 false AS exact_match,
+                 'fuzzy question span'::text AS channel,
+                 row_number() OVER (
+                   ORDER BY word_similarity($2, u.associated_question) DESC,
+                            u.source_id, u.unit_index
+                 ) AS channel_rank,
+                 1.7::double precision AS channel_weight
+          FROM fuzzy_settings
+          CROSS JOIN semantic_qa.answer_units u
+          JOIN semantic_qa.records eligible ON eligible.source_id = u.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND u.context_complete = true
+            AND $4::boolean
+            AND $2 <% u.associated_question
+          ORDER BY word_similarity($2, u.associated_question) DESC,
+                   u.source_id, u.unit_index
+          LIMIT 300
+        ),
+        combined AS MATERIALIZED (
+          SELECT * FROM exact_matches
+          UNION ALL
+          SELECT * FROM lexical_matches
+          UNION ALL
+          SELECT * FROM fuzzy_matches
+          UNION ALL
+          SELECT * FROM fuzzy_span_matches
+        ),
+        fused AS (
+          SELECT source_id, answer_unit_id,
+                 bool_or(exact_match) AS exact_match,
+                 array_agg(DISTINCT channel ORDER BY channel) AS channels,
+                 sum(channel_weight / (60.0 + channel_rank)) AS rrf_score
+          FROM combined
+          GROUP BY source_id, answer_unit_id
+        ), shortlist AS MATERIALIZED (
+          SELECT * FROM fused
+          ORDER BY exact_match DESC, rrf_score DESC, source_id, answer_unit_id
+          LIMIT 240
+        )
+        SELECT r.source_id, r.question, ''::text AS answer, r.metadata, r.content_hash,
+               u.associated_question AS matched_discovery_text,
+               fused.answer_unit_id AS matched_answer_unit_id,
+               fused.exact_match AS discovery_exact_match,
+               fused.rrf_score AS answer_unit_rrf_score,
+               fused.channels AS matched_answer_unit_channels,
+               u.unit_text AS matched_answer_unit_text,
+               u.start_offset AS matched_answer_unit_start,
+               u.content_hash AS matched_answer_unit_hash
+        FROM shortlist fused
+        JOIN semantic_qa.answer_units u ON u.answer_unit_id = fused.answer_unit_id
+        JOIN semantic_qa.records r ON r.source_id = fused.source_id
+        ORDER BY fused.exact_match DESC, fused.rrf_score DESC, r.source_id, fused.answer_unit_id
+      `, [discoveryTsQuery, retrievalSurfaceQuery, `%${retrievalSurfaceQuery}%`, fuzzyQuestionSearch]);
+      return result.rows;
+    } catch {
+      return [];
+    } finally {
+      timings.answerUnitCandidatesMs = performance.now() - startedAt;
+    }
+  })();
+
+  const passageCandidatesPromise = exactNumberedOnly ? Promise.resolve([]) : (async () => {
+    const startedAt = performance.now();
+    const passagePhrase = topTitlePhrase?.text || primarySubject || '';
+    const needsFullTextPassage = /\bcompare\b|\bproof\s+that\b/u.test(normQuery);
+    const passageAnchors = [...subjects]
+      .filter((word) => word && word.length >= 3)
+      .sort((left, right) => (idfMap[right] || 1) - (idfMap[left] || 1))
+      .slice(0, 1);
+    if (!passageAnchors.length && primarySubject) passageAnchors.push(primarySubject);
+    const passageAnchorExpressions = passageAnchors.map((anchor) => {
+      const variants = getSpiritualVariants(anchor).map(formatTsQueryVariant).slice(0, 14);
+      return variants.length > 1 ? `(${variants.join(' | ')})` : anchor;
+    });
+    const passageTsQuery = passageAnchorExpressions.join(' & ');
+    try {
+      const result = await queryDistancePassages(pool, `
+        WITH exact_passage AS MATERIALIZED (
+          SELECT p.source_id, p.answer_unit_id, p.passage_index, p.passage_text,
+                 p.start_offset, true AS exact_match, 'exact passage'::text AS channel,
+                 row_number() OVER (ORDER BY length(p.passage_text), p.source_id, p.passage_index) AS channel_rank,
+                 1.5::double precision AS channel_weight
+          FROM semantic_qa.passages p
+          JOIN semantic_qa.records eligible ON eligible.source_id = p.source_id
+          WHERE ${searchEligibilitySql('eligible')}
+            AND p.context_complete = true AND p.story_complete = true
+            AND $2 <> '' AND p.passage_text ILIKE $3
+          ORDER BY length(p.passage_text), p.source_id, p.passage_index
+          LIMIT 100
+        ),
+        full_text_passage AS MATERIALIZED (
+          SELECT p.source_id, p.answer_unit_id, p.passage_index, p.passage_text,
+                 p.start_offset, false AS exact_match, 'full text passage'::text AS channel,
+                 row_number() OVER (
+                   ORDER BY ts_rank_cd(p.search_vector, to_tsquery('simple', $1)) DESC,
+                            p.source_id, p.passage_index
+                 ) AS channel_rank,
+                 1.2::double precision AS channel_weight
+          FROM semantic_qa.passages p
+          JOIN semantic_qa.records eligible ON eligible.source_id = p.source_id
+          WHERE $4::boolean
+            AND ${searchEligibilitySql('eligible')}
+            AND p.context_complete = true AND p.story_complete = true
+            AND p.search_vector @@ to_tsquery('simple', $1)
+          ORDER BY ts_rank_cd(p.search_vector, to_tsquery('simple', $1)) DESC,
+                   p.source_id, p.passage_index
+          LIMIT 600
+        ),
+        combined AS MATERIALIZED (
+          SELECT * FROM exact_passage
+          UNION ALL SELECT * FROM full_text_passage
+        ),
+        fused AS MATERIALIZED (
+          SELECT source_id, answer_unit_id, passage_index,
+                 max(passage_text) AS passage_text,
+                 min(start_offset) AS start_offset,
+                 bool_or(exact_match) AS exact_match,
+                 array_agg(DISTINCT channel ORDER BY channel) AS channels,
+                 sum(channel_weight / (60.0 + channel_rank)) AS rrf_score
+          FROM combined
+          GROUP BY source_id, answer_unit_id, passage_index
+        ),
+        ranked AS (
+          SELECT fused.*,
+                 row_number() OVER (
+                   PARTITION BY source_id, answer_unit_id
+                   ORDER BY exact_match DESC, rrf_score DESC, passage_index
+                 ) AS answer_unit_passage_rank
+          FROM fused
+        )
+        SELECT r.source_id, r.question, ''::text AS answer, r.metadata, r.content_hash,
+               u.associated_question AS matched_discovery_text,
+               ranked.answer_unit_id AS matched_answer_unit_id,
+               false AS discovery_exact_match,
+               ranked.exact_match AS passage_exact_match,
+               ranked.rrf_score AS passage_rrf_score,
+               ranked.channels AS matched_passage_channels,
+               ranked.passage_text AS matched_passage_text,
+               ranked.start_offset AS matched_passage_start,
+               u.unit_text AS matched_answer_unit_text,
+               u.start_offset AS matched_answer_unit_start,
+               u.content_hash AS matched_answer_unit_hash
+        FROM ranked
+        JOIN semantic_qa.records r USING (source_id)
+        JOIN semantic_qa.answer_units u ON u.answer_unit_id = ranked.answer_unit_id
+        WHERE ranked.answer_unit_passage_rank = 1
+        ORDER BY ranked.exact_match DESC, ranked.rrf_score DESC, r.source_id, ranked.answer_unit_id
+        LIMIT 240
+      `, [passageTsQuery, passagePhrase, `%${passagePhrase}%`, needsFullTextPassage], timings);
+      return result.rows;
+    } catch {
+      return [];
+    } finally {
+      timings.passageCandidatesMs = performance.now() - startedAt;
+    }
+  })();
+
+  const [dbResult, discoveryRows, answerUnitRows, passageRows, literalTitleRows, englishBodyResult, englishPassageRows] = await Promise.all([
+    recordCandidatesPromise,
+    discoveryCandidatesPromise,
+    answerUnitCandidatesPromise,
+    passageCandidatesPromise,
+    experimentalSingleUnitTitles && !exactNumberedOnly ? (async () => {
+      const started = performance.now();
+      try { return await retrieveSingleUnitTitles(pool, literalTitleQuery); }
+      finally { timings.literalTitleCandidatesMs = performance.now() - started; }
+    })() : Promise.resolve([]),
+    englishBodyEligible && !exactNumberedOnly ? (async () => {
+      const started=performance.now();
+      try { return await retrieveEnglishBodyCandidates(pool, englishSurface, {limit:120}); }
+      finally { timings.englishBodyCandidatesMs=performance.now()-started; }
+    })() : Promise.resolve({rows:[],terms:[]}),
+    experimentalEnglishPassages && !exactNumberedOnly && !isNumberedReferenceLookup(retrievalSurfaceQuery) ? (async () => {
+      const started = performance.now();
+      try { return await retrieveEnglishPassageCandidates(pool, query, englishSurface, 90, groundedPassageSearch); }
+      finally { timings.englishPassageCandidatesMs = performance.now() - started; }
+    })() : Promise.resolve([]),
+  ]);
+
+  const titleStartedAt = performance.now();
+  const titleUnitRows = experimentalSingleUnitTitles
+    ? await hydrateSingleUnitTitleCandidates(pool, dbResult.rows)
+    : [];
+  if (experimentalSingleUnitTitles) timings.singleUnitTitleCandidatesMs = performance.now() - titleStartedAt;
+
+  let candidates = fuseDistanceCandidateChannels({
+    recordRows: dbResult.rows,
+    discoveryRows,
+    answerUnitRows,
+    passageRows,
+  });
 
   // Fallback candidate expansion: Anchored on broad content words & variants
   // to ensure up to targetLimit discourses without EVER failing recall.
-  if (candidates.length < targetLimit) {
-    const existingIds = new Set(candidates.map(c => c.source_id));
+  if (candidates.length < targetLimit && !exactNumberedOnly) {
+    const existingIds = new Set(candidates.map((candidate) => candidate.source_id));
     const allSearchTokens = [...new Set([...contentWords, ...subjects])].filter(w => w && w.length >= 3).slice(0, 8);
     const broadTsQuery = allSearchTokens.length > 0 ? allSearchTokens.join(' | ') : primaryTermExpr;
     try {
       const fallbackResult = await pool.query(`
-        SELECT r.source_id, r.question, r.answer, r.metadata
+        SELECT r.source_id, r.question, r.answer, r.metadata, r.content_hash
         FROM semantic_qa.records r
-        WHERE r.search_vector @@ to_tsquery('simple', $1) OR r.question ILIKE $2
+        WHERE ${searchEligibilitySql('r')}
+          AND (r.search_vector @@ to_tsquery('simple', $1) OR r.question ILIKE $2)
         ORDER BY ts_rank_cd(r.search_vector, to_tsquery('simple', $1)) DESC, r.source_id ASC
         LIMIT 200
       `, [broadTsQuery, `%${primaryPrefix}%`]);
@@ -1177,60 +2468,239 @@ async function searchDistanceCorpus(pool, { query, limit = 35, searchMode = 'nor
     } catch { /* ignore fallback errors */ }
   }
 
-  // 5. Score all candidates using Subject Authority, Title Purity & Swami Direct Definition
-  const scored = candidates
-    .map(doc => scoreDiscourse(doc, query, rawWords, contentWords, weightedPhrases, idfMap, subjects, intents))
-    .filter(Boolean);
+  // Deep scoring normalizes answer text and is intentionally more expensive
+  // than indexed retrieval. Fuse the independent retrieval channels first so
+  // only a bounded, high-recall shortlist pays that cost.
+  const scoringLimit = Math.max(100, targetLimit * 3);
+  const debugPreShortlistAnswerUnitIds = searchMode === 'debug'
+    ? candidates.map((candidate) => candidate.matched_answer_unit_id).filter(Boolean)
+    : null;
+  candidates.sort((left, right) => {
+    const leftExact = left.discovery_exact_match ? 1 : 0;
+    const rightExact = right.discovery_exact_match ? 1 : 0;
+    if (rightExact !== leftExact) return rightExact - leftExact;
+    const leftRrf = (left.record_retrieval_rank ? 1 / (60 + left.record_retrieval_rank) : 0)
+      + (left.discovery_retrieval_rank ? 1.2 / (60 + left.discovery_retrieval_rank) : 0)
+      + (left.answer_unit_retrieval_rank ? 1.4 / (60 + left.answer_unit_retrieval_rank) : 0)
+      + (left.passage_retrieval_rank ? 1.3 / (60 + left.passage_retrieval_rank) : 0);
+    const rightRrf = (right.record_retrieval_rank ? 1 / (60 + right.record_retrieval_rank) : 0)
+      + (right.discovery_retrieval_rank ? 1.2 / (60 + right.discovery_retrieval_rank) : 0)
+      + (right.answer_unit_retrieval_rank ? 1.4 / (60 + right.answer_unit_retrieval_rank) : 0)
+      + (right.passage_retrieval_rank ? 1.3 / (60 + right.passage_retrieval_rank) : 0);
+    if (rightRrf !== leftRrf) return rightRrf - leftRrf;
+    return distanceCandidateKey(left).localeCompare(distanceCandidateKey(right));
+  });
+  candidates = candidates.slice(0, scoringLimit);
+  const incumbentUnits = groundedPassageSearch
+    ? new Set(candidates.map(row => row.matched_answer_unit_id).filter(Boolean)) : null;
+  if (experimentalSingleUnitTitles) {
+    candidates = addSingleUnitTitles(candidates, [...literalTitleRows, ...titleUnitRows], {
+      queryWords: normalizeSpiritual(literalTitleQuery).split(' ').filter(Boolean),
+      idfMap,
+      normalizeTitle: normalizeSpiritual,
+      isGeneric: (word) => GENERIC_WORDS.has(word) || SPEAKER_TOKENS.has(word),
+      maxExtra: 12,
+    });
+  }
+  if (englishBodyEligible) candidates=addEnglishBodyCandidates(candidates,englishBodyResult.rows,{weight:englishBodyWeight,maxExtra:120});
+  if (numberedSourceRows?.length) {
+    const numberedIds = new Set(numberedSourceRows.map(row => row.source_id));
+    const exactByKey = new Map(exactNumberedUnits.map(row => [distanceCandidateKey(row), { ...row, exact_surface_title: true }]));
+    candidates = candidates.filter(row => numberedIds.has(row.source_id)).map(row => {
+      const key = distanceCandidateKey(row);
+      const exact = exactByKey.get(key);
+      if (!exact) return row;
+      exactByKey.delete(key);
+      return exact;
+    }).concat([...exactByKey.values()]);
+  }
+  if (experimentalEnglishBodies) {
+    const surface = normalizeSpiritual(literalTitleQuery);
+    const matches = literalTitleRows.filter(row => surface.split(' ').length >= 3 && normalizeSpiritual(row.question) === surface
+      || matchesQuestionReference(requestedReference, row.question, normalizeSpiritual));
+    const references = new Map(matches.map(row => [distanceCandidateKey(row), row]));
+    candidates = candidates.map(row => {
+      const key = distanceCandidateKey(row);
+      if (!references.delete(key)) return row;
+      return { ...row, exact_surface_title: true };
+    });
+    for (const row of references.values()) candidates.push({ ...row, exact_surface_title: true });
+  }
+
+  const scoringStartedAt = performance.now();
+  const evaluateCandidate = row => scoreDiscourse(row, normQuery, rawWords, contentWords, weightedPhrases, idfMap, subjects, intents);
+  let scored = candidates.map(evaluateCandidate).filter(Boolean);
+  if (englishPassageRows.length) {
+    const priorBest = scored.reduce((maximum, match) => Math.max(maximum, match.totalScore), 0);
+    const confidenceScale = Math.max(0, Math.min(1, (1150000 - priorBest) / 800000));
+    if (confidenceScale > 0) {
+      const passageWeight = englishPassageWeight * confidenceScale * 1.5;
+      const priorScores = new Map(scored.map(match => [`${match.sourceId}\u0000${match.answerUnitId || 'record'}`, match]));
+      candidates = addEnglishPassageCandidates(candidates, englishPassageRows, passageWeight);
+      scored = candidates.map(row => {
+        const previous = priorScores.get(distanceCandidateKey(row));
+        if (!previous) return evaluateCandidate(row);
+        if (!row.english_passage_evidence) return previous;
+        const englishPassageScore = row.english_passage_evidence.strength * passageWeight;
+        const totalScore = previous.totalScore + englishPassageScore;
+        const decisionSummary = row.english_passage_evidence.verified
+          ? `${previous.decisionSummary} · Matching concepts in the cited passage`
+          : previous.decisionSummary;
+        return { ...previous, englishPassageScore, totalScore, score: Math.round(totalScore * 10) / 10, decisionSummary };
+      }).filter(Boolean);
+    }
+  }
+  timings.scoringMs = performance.now() - scoringStartedAt;
+
+  const debugCandidateAnswerUnitIds = searchMode === 'debug'
+    ? candidates.map((candidate) => candidate.matched_answer_unit_id).filter(Boolean)
+    : null;
+  const debugPassageFacts = searchMode === 'debug' && experimentalEnglishPassages
+    ? new Map(candidates.map(row => [row.matched_answer_unit_id, {
+      answerLength: row.matched_answer_unit_text?.length || 0,
+      exactReference: Boolean(row.exact_surface_title),
+    }])) : null;
+
+  const debugScoredAnswerUnitIds = searchMode === 'debug'
+    ? scored.map((candidate) => candidate.answerUnitId).filter(Boolean)
+    : null;
 
   // Deterministic primary score sort with secondary source_id tie-breaker
   scored.sort((a, b) => {
     if (b.totalScore !== a.totalScore) {
       return b.totalScore - a.totalScore;
     }
-    return String(a.sourceId).localeCompare(String(b.sourceId));
+    return `${a.sourceId}\u0000${a.answerUnitId || ''}`.localeCompare(`${b.sourceId}\u0000${b.answerUnitId || ''}`);
   });
 
+  let lexicalRanking = null;
+  if (lexicalRanker && !numberedSourceRows && enableEnglishExpansion) {
+    const rankingStarted = performance.now();
+    lexicalRanking = await lexicalRanker.rank(pool, query, scored, { limit: targetLimit, evaluateCandidate,
+      groundedEnglish: groundedPassageSearch !== null, repairedQuery: englishSurface, incumbentUnits });
+    timings.lexicalRankingMs = performance.now() - rankingStarted;
+  }
   // 6. Return up to targetLimit discourses (default 35, capped at 100)
-  const finalMatches = scored.slice(0, targetLimit);
+  const finalMatches = lexicalRanking?.matches || scored.slice(0, targetLimit);
 
   // 7. Generate snippets, highlighting, and passage deep-link offsets ONLY for winning matches
   // Offsets are measured directly on match.answer (rendered in reader) to prevent question_context drift.
+  const snippetsStartedAt = performance.now();
   for (const match of finalMatches) {
-    const { snippetText, targetPassage, passageOffset } = extractMultiSentenceSnippet(
-      match.answer,
+    const snippetSource = match.answerUnitText || match.answer;
+    let { snippetText, targetPassage, passageOffset } = extractMultiSentenceSnippet(
+      snippetSource,
       contentWords,
       weightedPhrases,
       match.normSwamiSpeech
     );
+    if (match.answerUnitText && Number.isInteger(match.answerUnitStart)) {
+      const adjusted = {
+        ...passageOffset,
+        start: match.answerUnitStart + passageOffset.start,
+        end: match.answerUnitStart + passageOffset.end,
+      };
+      if (!match.answer || match.answer.slice(adjusted.start, adjusted.end) === adjusted.text) {
+        passageOffset = adjusted;
+      } else {
+        ({ snippetText, targetPassage, passageOffset } = extractMultiSentenceSnippet(
+          match.answer,
+          contentWords,
+          weightedPhrases,
+          normalizeSpiritual(match.answer)
+        ));
+      }
+    }
     match.snippet = snippetText;
     match.targetPassage = targetPassage;
     match.passageOffset = passageOffset;
-    match.highlightedSnippet = highlightSnippet(snippetText, query);
+    match.highlightedSnippet = highlightSnippet(snippetText, normQuery);
     delete match.answer;
+    delete match.answerUnitText;
+    delete match.answerUnitStart;
     delete match.normSwamiSpeech;
   }
+  timings.snippetsMs = performance.now() - snippetsStartedAt;
+  timings.totalMs = performance.now() - totalStartedAt;
 
   return {
     query,
+    normalizedQuery: normQuery,
+    retrievalQuery: retrievalSurfaceQuery,
+    corrections,
     searchMode,
-    executionTimeMs: Date.now() - queryStart,
-    totalFound: scored.length,
+    executionTimeMs: numberedSourceRows ? timings.totalMs : Date.now() - queryStart,
+    timings,
+    totalFound: lexicalRanking?.rankedAnswerUnitIds.length || scored.length,
     matches: finalMatches,
+    ...(searchMode === 'debug' ? {
+      debug: {
+        ...(corpusGroundedEnglish ? { groundedEnglish: groundedPassageSearch !== null } : {}),
+        recordCandidateSourceIds: dbResult.rows.map((row) => row.source_id),
+        englishBodyEligible,
+        fuzzyQuestionSearch,
+        englishBodyAnswerUnitIds: englishBodyResult.rows.map(row=>row.matched_answer_unit_id),
+        literalTitleAnswerUnitIds: literalTitleRows.map((row) => row.matched_answer_unit_id),
+        hydratedTitleAnswerUnitIds: titleUnitRows.map((row) => row.matched_answer_unit_id),
+        preShortlistAnswerUnitIds: debugPreShortlistAnswerUnitIds,
+        candidateAnswerUnitIds: lexicalRanking
+          ? [...new Set([...debugCandidateAnswerUnitIds, ...lexicalRanking.rankedAnswerUnitIds])] : debugCandidateAnswerUnitIds,
+        scoredAnswerUnitIds: lexicalRanking?.rankedAnswerUnitIds || debugScoredAnswerUnitIds,
+        ...(experimentalEnglishPassages ? { englishPassageAnswerUnitIds: englishPassageRows.map(row => row.matched_answer_unit_id) } : {}),
+        ...(experimentalEnglishBodies || experimentalEnglishPassages ? { rankingCandidates: scored.map(match => ({
+          sourceId: match.sourceId, answerUnitId: match.answerUnitId, answerUnitHash: match.answerUnitHash,
+          totalScore: match.totalScore, englishBodyScore: match.englishBodyScore || 0,
+          ...(debugPassageFacts ? {
+            englishPassageScore: match.englishPassageScore || 0,
+            titleScore: match.titleScore,
+            discoveryScore: match.discoveryScore,
+            intentScore: match.intentScore,
+            minimalSpanScore: match.minimalSpanScore,
+            ...(match.answerUnitId && debugPassageFacts.get(match.answerUnitId)),
+          } : {}),
+        })) } : {}),
+      },
+    } : {}),
   };
 }
 
 module.exports = {
+  minimumTokenDistance,
   searchDistanceCorpus,
   scoreDiscourse,
   highlightSnippet,
   extractMultiSentenceSnippet,
+  selectMinimalCoveringSentenceRange,
   splitIntoCleanSentences,
+  classifySearchIntent,
+  scoreIntentAlignment,
+  buildConceptGroups,
+  computeMinimalCoveringSpan,
+  scoreMinimalCoveringSpan,
   resolveCorpusIDF,
   clearIdfCache,
+  queryDistancePassages,
   normalizeSpiritual,
+  normalizeSearchQuery,
+  correctFuzzyQueryToken,
+  autoFuzzinessMaxEdits,
+  boundedDamerauLevenshtein,
+  adjacentTranspositionCandidates,
+  singleEditCorpusCandidates,
+  hasSpiritualSearchContext,
+  correctCorpusSpelling,
+  correctCorpusTranspositions,
+  correctControlledMorphology,
+  correctContextualQueryTerms,
+  isSearchEligibleMetadata,
+  searchEligibilitySql,
   formatDate,
   canonicalizeSpiritualTerm,
   foldDiacritics,
   termCanonicalCache,
   LRUCache,
+  distanceCandidateKey,
+  fuseDistanceCandidateChannels,
+  hydrateSingleUnitTitleCandidates,
+  stripSearchFraming,
 };
