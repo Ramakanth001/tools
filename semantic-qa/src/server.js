@@ -17,7 +17,7 @@ app.use(express.static(publicDir));
 app.get(/.*/, async (_req, res) => {
   try {
     await fsp.access(indexPath);
-    res.sendFile(indexPath);
+    res.sendFile('index.html', { root: publicDir });
   } catch {
     res.status(503).send('UI not built. Run `npm run build` for production, or `npm run dev` for local development.');
   }
