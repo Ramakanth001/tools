@@ -1,12 +1,12 @@
 export const DEFAULT_SETTINGS = {
   settingsVersion: 6,
-  sourceConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'postgres', password: '', database: 'universal_qa_v2', sslMode: 'disable' },
+  sourceConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'postgres', password: '', database: 'universal_qa_source', sslMode: 'disable' },
   indexConnection: { connectionString: '', host: '127.0.0.1', port: 5433, user: 'postgres', password: '', database: 'universal_qa_v2', sslMode: 'disable' },
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   model: 'bge-m3',
   summaryModel: 'gemma3:4b',
-  deepSummaryModel: 'qwen3:14b-q4_K_M',
-  deepSummaryDeliberation: 'maximum',
+  deepSummaryModel: 'qwen2.5:7b',
+  deepSummaryDeliberation: 'fast',
   summaryHardwarePreference: 'auto',
   mapping: {
     schema: 'public',
@@ -19,7 +19,8 @@ export const DEFAULT_SETTINGS = {
     orderColumn: '',
   },
   topK: 35,
-  threshold: 0.45,
+  threshold: 0.49,
+  sourceType: 'all',
   searchMode: 'search',
   summaryMode: 'standard',
   summaryEnabled: true,
@@ -68,14 +69,14 @@ export const UNIVERSAL_QA_SETTINGS = {
   ...LOCAL_DEMO_SETTINGS,
   threshold: 0.49,
   model: 'bge-m3',
-  deepSummaryModel: 'qwen3:14b-q8_0',
+  deepSummaryModel: 'qwen2.5:7b',
   sourceConnection: {
     ...LOCAL_DEMO_SETTINGS.sourceConnection,
     database: 'universal_qa_source',
   },
   indexConnection: {
     ...LOCAL_DEMO_SETTINGS.indexConnection,
-    database: 'universal_qa_index',
+    database: 'universal_qa_v2',
   },
   mapping: {
     schema: 'public',
@@ -142,16 +143,16 @@ export function mergeSettings(value = {}) {
     storedIndex.user = 'postgres';
     storedIndex.database = 'universal_qa_v2';
   }
-  if (!storedSource.user || !storedSource.database || Number(storedSource.port) === 5432) {
+  if (!storedSource.user || !storedSource.database || storedSource.database === 'universal_qa_v2' || Number(storedSource.port) === 5432) {
     storedSource.host = '127.0.0.1';
     storedSource.port = 5433;
     storedSource.user = 'postgres';
-    storedSource.database = 'universal_qa_v2';
+    storedSource.database = 'universal_qa_source';
   }
   if (storedVersion < 5 && (storedIndex.database === 'universal_qa_index' || !storedIndex.database)) {
     storedIndex.database = 'universal_qa_v2';
   }
-  const modelToUse = (storedVersion < 5 && value.model === 'embeddinggemma') ? 'bge-m3' : (value.model || DEFAULT_SETTINGS.model);
+  const modelToUse = (value.model === 'embeddinggemma' || !value.model) ? 'bge-m3' : value.model;
   const thresholdToUse = storedVersion < 5 && (value.threshold === 0.49 || value.threshold === 0.60) ? 0.45 : (value.threshold ?? DEFAULT_SETTINGS.threshold);
   const storedMapping = { ...DEFAULT_SETTINGS.mapping, ...(value.mapping || {}) };
   const migrateUniversalChunks = storedSource.database === 'universal_qa_source' &&
@@ -166,8 +167,8 @@ export function mergeSettings(value = {}) {
     summaryMode: ['off', 'standard', 'deep'].includes(summaryMode) ? summaryMode : DEFAULT_SETTINGS.summaryMode,
     summaryHardwarePreference: ['auto', 'gpu', 'cpu'].includes(value.summaryHardwarePreference) ? value.summaryHardwarePreference : DEFAULT_SETTINGS.summaryHardwarePreference,
     deepSummaryMaxRecords: Math.max(1, Math.min(100, Math.trunc(Number(value.deepSummaryMaxRecords) || DEFAULT_SETTINGS.deepSummaryMaxRecords))),
-    deepSummaryModel: ['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M'].includes(value.deepSummaryModel) ? value.deepSummaryModel : DEFAULT_SETTINGS.deepSummaryModel,
-    deepSummaryDeliberation: 'maximum',
+    deepSummaryModel: ['qwen2.5:7b', 'qwen2.5:7b-instruct', 'llama3.1:8b', 'llama3.1:8b-instruct', 'qwen3:14b-q8_0', 'qwen3:14b-q4_K_M'].includes(value.deepSummaryModel) ? value.deepSummaryModel : DEFAULT_SETTINGS.deepSummaryModel,
+    deepSummaryDeliberation: ['fast', 'adaptive', 'maximum'].includes(value.deepSummaryDeliberation) ? value.deepSummaryDeliberation : DEFAULT_SETTINGS.deepSummaryDeliberation,
     deepSummaryParallelRequests: 1,
     deepSummaryTimeoutSeconds: Math.max(60, Math.min(900, Math.trunc(Number(timeoutValue) || DEFAULT_SETTINGS.deepSummaryTimeoutSeconds))),
     sourceConnection: { ...storedSource, password: '', connectionString: '' },

@@ -189,9 +189,9 @@
   margin: 0;
   min-height: 110px;
   padding: 16px 44px 16px 18px;
-  font-family: var(--sans);
-  font-size: 15px;
-  line-height: 1.6;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 18px !important;
+  line-height: 1.65 !important;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.28);
@@ -2178,4 +2178,278 @@
 
 .semantic-qa .qa-search-theme-light .us-read-more:hover {
   color: #0a463e;
+}
+
+/* ==========================================================================
+   Answer Mode Dropdown & Select Elements: Dark Mode & High Contrast
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+}
+
+.semantic-qa select,
+.semantic-qa option {
+  color-scheme: dark !important;
+}
+
+.semantic-qa option {
+  background-color: #091a2e !important;
+  color: #ffffff !important;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 14.5px !important;
+  font-weight: 500 !important;
+  padding: 10px 14px !important;
+}
+
+/* Polished Answer Mode Select & Processor Select */
+.semantic-qa .qa-summary-select {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+}
+
+.semantic-qa .qa-summary-select .field-label {
+  font-family: 'Manrope', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #93c5fd;
+  margin: 0;
+}
+
+.semantic-qa .qa-summary-select select {
+  background-color: #0d2847 !important;
+  color: #ffffff !important;
+  border: 1px solid #1e4f80 !important;
+  border-radius: 10px !important;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 14.5px !important;
+  font-weight: 600 !important;
+  padding: 8px 36px 8px 14px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+  background-position: calc(100% - 12px) center !important;
+  background-repeat: no-repeat !important;
+  background-size: 12px !important;
+  transition: all 0.15s ease;
+}
+
+.semantic-qa .qa-summary-select select:hover {
+  border-color: #38bdf8 !important;
+  background-color: #103358 !important;
+}
+
+.semantic-qa .qa-summary-select select:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25) !important;
+  outline: none;
+}
+
+/* ==========================================================================
+   Semantic Discourse Card & Large Typography
+   ========================================================================== */
+
+.semantic-qa .us-title-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  cursor: pointer;
+  text-decoration: none;
+  display: block;
+  width: 100%;
+  text-align: left !important;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 21px !important;
+  font-weight: 700 !important;
+  line-height: 1.38 !important;
+  color: #ffffff !important;
+  transition: color 0.15s ease;
+}
+
+.semantic-qa .us-title-btn:hover {
+  color: #38bdf8 !important;
+}
+
+.semantic-qa .us-card-rank-badge.best-match {
+  background: rgba(56, 189, 248, 0.25) !important;
+  color: #38bdf8 !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35) !important;
+}
+
+.semantic-qa .us-card-rank-badge.sub-threshold {
+  background: rgba(245, 158, 11, 0.2) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(245, 158, 11, 0.5) !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25) !important;
+}
+
+.semantic-qa .qa-passage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #6ee7b7;
+  margin-bottom: 2px;
+}
+
+.semantic-qa .us-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.semantic-qa .us-toggle-full-answer {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #93c5fd;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.semantic-qa .us-toggle-full-answer:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.semantic-qa .us-full-answer-inline {
+  margin-top: 12px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.semantic-qa .us-full-answer-label {
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+
+.semantic-qa .us-full-answer-text {
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 18px !important;
+  line-height: 1.85 !important;
+  letter-spacing: 0.012em;
+  color: #e2e8f0 !important;
+  white-space: pre-wrap !important;
+  word-break: break-word;
+}
+
+/* Enhanced Grounded Summary & Verbatim Selection typography */
+.semantic-qa .qa-summary-text {
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 18.5px !important;
+  line-height: 1.85 !important;
+  letter-spacing: 0.012em;
+  color: #f1f5f9 !important;
+  margin: 10px 0;
+}
+
+.semantic-qa .qa-grounded-summary .section-title {
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6ee7b7;
+  margin-top: 16px;
+}
+
+.semantic-qa .qa-evidence-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* ==========================================================================
+   Light Theme Overrides for New Elements
+   ========================================================================== */
+
+.semantic-qa .qa-search-theme-light .qa-summary-select select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230d5c52' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+}
+
+.semantic-qa .qa-search-theme-light .qa-summary-select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.semantic-qa .qa-search-theme-light .qa-summary-select .field-label {
+  color: #0d5c52 !important;
+}
+
+.semantic-qa .qa-search-theme-light .us-title-btn {
+  color: #0d5c52 !important;
+}
+
+.semantic-qa .qa-search-theme-light .us-title-btn:hover {
+  color: #047857 !important;
+}
+
+.semantic-qa .qa-search-theme-light .qa-passage-badge {
+  color: #0d5c52 !important;
+}
+
+.semantic-qa .qa-search-theme-light .us-toggle-full-answer {
+  color: #0d5c52 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.semantic-qa .qa-search-theme-light .us-toggle-full-answer:hover {
+  background: rgba(13, 92, 82, 0.08);
+}
+
+.semantic-qa .qa-search-theme-light .us-full-answer-inline {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+.semantic-qa .qa-search-theme-light .us-full-answer-text {
+  color: #1e293b !important;
+}
+
+.semantic-qa .qa-search-theme-light .qa-summary-text {
+  color: #1e293b !important;
+}
+
+.semantic-qa .qa-search-theme-light .qa-question {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.semantic-qa .qa-search-theme-light .qa-search-card {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06) !important;
 }

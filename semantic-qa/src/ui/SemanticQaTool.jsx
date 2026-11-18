@@ -473,43 +473,126 @@ function DeepSummary({ question, searchMode, job, onOpenDocument, onCancel }) {
   );
 }
 
-function MatchRecord({ match, label, searchMode = 'semantic', onOpenDocument }) {
+function highlightQueryTerms(text, query) {
+  if (!text) return '';
+  if (!query || !query.trim()) return escapeHtml(text);
+
+  const stopWords = new Set([
+    'the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'in', 'to', 'of', 'for', 'it', 'by',
+    'as', 'with', 'from', 'or', 'are', 'was', 'were', 'that', 'this', 'what', 'who', 'how',
+    'when', 'where', 'why', 'can', 'should', 'do', 'does', 'did', 'be', 'been', 'being', 'have', 'has', 'had'
+  ]);
+
+  const rawWords = query
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 2 && !stopWords.has(w));
+
+  if (!rawWords.length) return escapeHtml(text);
+
+  const words = [...new Set(rawWords)].sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(`\\b(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+
+  const parts = text.split(pattern);
+  return parts.map((part) => {
+    if (words.some((w) => w.toLowerCase() === part.toLowerCase())) {
+      return `<mark class="us-search-highlight">${escapeHtml(part)}</mark>`;
+    }
+    return escapeHtml(part);
+  }).join('');
+}
+
+function SemanticDiscourseCard({ match, originalIdx, query, onOpenDocument, hasAcceptedMatch }) {
+  const [showFullAnswer, setShowFullAnswer] = useState(false);
   const bestPassage = match.matchedPassages?.[0];
-  const open = () => onOpenDocument?.({
-    reference: match.sourceId,
-    title: match.question,
-    highlights: bestPassage ? [{ sourceId: match.sourceId, start: bestPassage.start, end: bestPassage.end, label: 'Best matching passage' }] : [],
-  });
+  const passageText = bestPassage?.text || match.snippet || (match.answer ? (match.answer.length > 380 ? match.answer.slice(0, 380) + '…' : match.answer) : '');
+  const title = match.title || match.question || `Discourse ${match.sourceId}`;
+  const sourceLabel = match.formattedDate || match.date || (match.sourceId ? `Source discourse: ${match.sourceId}` : null);
+  const relevanceScore = match.relevanceScore != null ? Number(match.relevanceScore).toFixed(3) : null;
+  const cosineScore = match.similarity != null ? Number(match.similarity).toFixed(3) : (bestPassage?.semanticSimilarity != null ? Number(bestPassage.semanticSimilarity).toFixed(3) : null);
+  const highlightedSnippetHtml = useMemo(() => highlightQueryTerms(passageText, query), [passageText, query]);
+
+  const handleOpenReader = () => {
+    onOpenDocument?.({
+      reference: match.sourceId,
+      title,
+      targetText: passageText,
+      highlights: bestPassage ? [{
+        sourceId: String(match.sourceId),
+        start: bestPassage.start,
+        end: bestPassage.end,
+        label: 'Best matching passage',
+      }] : [],
+    });
+  };
+
+  const isTopRanked = originalIdx === 0;
+  const isBestMatch = isTopRanked && Boolean(hasAcceptedMatch);
+  const isSubThreshold = isTopRanked && !hasAcceptedMatch;
+
   return (
-    <article className="card qa-answer">
-      <div className="qa-answer-head">
-        <div>
-          <span className="badge">{label}</span>
-          {match.relevanceRank != null ? <span className="badge">#{match.relevanceRank}</span> : null}
-          <span className="badge">Relevance {Number(match.relevanceScore ?? match.similarity).toFixed(3)}</span>
-          {searchMode === 'semantic' && match.relevanceScore != null ? <span className="badge">Cosine {Number(match.similarity).toFixed(3)}</span> : null}
-          {searchMode === 'search' && match.matchChannels?.length ? <span className="badge">{match.matchChannels.join(' · ')}</span> : null}
+    <article className="us-card" key={match.sourceId || originalIdx}>
+      <header className="us-card-header">
+        <div className="us-card-meta-bar">
+          <span className={`us-card-rank-badge ${isBestMatch ? 'best-match' : isSubThreshold ? 'sub-threshold' : ''}`}>
+            {isBestMatch ? '🏆 #1 Best Match' : isSubThreshold ? '🔍 Nearest Candidate' : `#${originalIdx + 1}`}
+          </span>
+          {sourceLabel ? <div className="us-card-date">{sourceLabel}</div> : null}
         </div>
-        <button className="btn qa-source-link" type="button" onClick={open}>Source {match.sourceId}</button>
+        <button
+          type="button"
+          className="us-card-title us-title-btn"
+          onClick={handleOpenReader}
+          title="Open in full discourse reader"
+        >
+          {title}
+        </button>
+      </header>
+
+      <div className="us-card-body">
+        <div className="qa-passage-badge">
+          ✨ Best Matching Answer Passage
+        </div>
+
+        <div
+          className="us-card-snippet"
+          dangerouslySetInnerHTML={{ __html: highlightedSnippetHtml }}
+        />
+
+        <div className="us-card-decision" title="Vector cosine similarity and hybrid ranking score">
+          🎯 Relevance {relevanceScore ?? '—'} · Cosine {cosineScore ?? '—'}
+          {bestPassage?.passageIndex != null ? ` · Passage #${bestPassage.passageIndex + 1}` : ''}
+        </div>
+
+        <div className="us-card-actions">
+          <button
+            type="button"
+            className="us-read-more"
+            onClick={handleOpenReader}
+          >
+            Read Full Discourse →
+          </button>
+
+          {match.answer && match.answer !== passageText ? (
+            <button
+              type="button"
+              className="us-toggle-full-answer"
+              onClick={() => setShowFullAnswer((prev) => !prev)}
+            >
+              {showFullAnswer ? 'Hide Stored Answer ▴' : 'View Stored Answer ▾'}
+            </button>
+          ) : null}
+        </div>
+
+        {showFullAnswer && match.answer ? (
+          <div className="us-full-answer-inline">
+            <div className="us-full-answer-label">Complete Stored Answer:</div>
+            <div className="us-full-answer-text">{match.answer}</div>
+          </div>
+        ) : null}
       </div>
-      <button className="qa-stored-question qa-title-button" type="button" onClick={open}>{match.question}</button>
-      {bestPassage ? (
-        <div className="qa-matched-passage">
-          <div className="section-title">Best matching answer passage</div>
-          <div className="qa-summary-text">{bestPassage.text}</div>
-          <div className="hint">{searchMode === 'search' ? `Search score ${Number(bestPassage.searchScore || match.searchScore).toFixed(3)} · ${bestPassage.matchChannels?.join(', ') || 'text match'}` : `Passage meaning ${Number(bestPassage.semanticSimilarity).toFixed(3)} · stored title/question had zero ranking weight`}</div>
-        </div>
-      ) : null}
-      <div className="section-title">Complete stored answer</div>
-      <div className="qa-verbatim">{match.answer}</div>
-      {match.metadata && Object.keys(match.metadata).length ? (
-        <dl className="qa-metadata">
-          {Object.entries(match.metadata)
-            .filter(([key]) => key !== 'source_context')
-            .map(([key, value]) => <React.Fragment key={key}><dt>{key}</dt><dd>{value == null ? '—' : String(value)}</dd></React.Fragment>)}
-        </dl>
-      ) : null}
-      {match.sourceGroup != null || match.sourceOrder != null ? <div className="hint">Source group: {match.sourceGroup ?? '—'} · Source order: {match.sourceOrder == null ? '—' : String(match.sourceOrder)}</div> : null}
     </article>
   );
 }
@@ -638,9 +721,9 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
   };
 
   // 1. Semantic Search Execution (1024-d Vectors + HNSW + Ollama / Deep AI)
-  const searchSemantic = async (event) => {
-    if (event) event.preventDefault();
-    const text = String(question || '').trim();
+  const searchSemantic = async (event, queryText = question) => {
+    if (event && event.preventDefault) event.preventDefault();
+    const text = String(queryText || '').trim();
     if (!text) return;
     setBusy(true);
     setError('');
@@ -658,6 +741,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
           searchMode: 'semantic',
           topK: settings.topK,
           threshold: settings.threshold,
+          sourceType: settings.sourceType || 'all',
           summary: {
             enabled: settings.summaryMode === 'standard',
             mode: settings.summaryMode,
@@ -712,6 +796,7 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
           question: text,
           searchMode: 'distance',
           topK: 35,
+          sourceType: settings.sourceType || 'all',
         },
         timeoutMs: 60000,
       });
@@ -798,15 +883,48 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
       {isSemantic ? (
         <>
           <form className="card qa-search-card" onSubmit={searchSemantic}>
+            <div className="qa-search-brand-row" style={{ marginBottom: 14 }}>
+              <div className="qa-brand-left">
+                <span className="qa-brand-tag">
+                  <span className="qa-brand-dot"></span>
+                  Universal-Spirituality
+                </span>
+                <span className="qa-brand-sep">•</span>
+                <span className="qa-corpus-meta">1,024-d Vector Embeddings · HNSW Cosine Index</span>
+              </div>
+
+              {/* Theme Toggle Switch */}
+              <div className="qa-theme-switch-wrapper" role="radiogroup" aria-label="Page Theme">
+                <button
+                  type="button"
+                  className={`qa-theme-toggle-btn ${theme === 'dark' ? 'active' : ''}`}
+                  onClick={() => switchTheme('dark')}
+                  aria-checked={theme === 'dark'}
+                  role="radio"
+                >
+                  🌙 Dark (Blue)
+                </button>
+                <button
+                  type="button"
+                  className={`qa-theme-toggle-btn ${theme === 'light' ? 'active' : ''}`}
+                  onClick={() => switchTheme('light')}
+                  aria-checked={theme === 'light'}
+                  role="radio"
+                >
+                  ☀️ Light
+                </button>
+              </div>
+            </div>
+
             <div className="qa-card-title">
               <div>
                 <h3>Semantic Search</h3>
                 <div className="hint">
-                  Meaning-first retrieval over independently indexed answer passages using 1,024-dimensional vector embeddings, HNSW index cosine distance, and reciprocal rank fusion.
+                  Meaning-first retrieval over independently indexed answer passages using 1,024-dimensional vector embeddings, HNSW index cosine distance, and hybrid dense-lexical ranking with discovery fusion.
                 </div>
               </div>
             </div>
-            <div className="hint">
+            <div className="hint" style={{ marginBottom: 12 }}>
               Verbatim Selection returns exact Swami passages quickly. Deep Search reads complete answers and independently adjudicates related teachings.
             </div>
             <textarea
@@ -815,7 +933,33 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
               onChange={(event) => setQuestion(event.target.value)}
               placeholder="Enter a spiritual or philosophical question to search semantically…"
             />
-            <div className="toolbar">
+
+            <div className="qa-distance-suggestions" style={{ marginTop: 12 }}>
+              <span className="qa-suggestion-label">SUGGESTED:</span>
+              <div className="qa-suggestion-chips-list">
+                {[
+                  'what is the real meaning of Gayatri mantra?',
+                  'What is the specialty of the Gayatri Mantra?',
+                  'Meaning of the Gayatri Mantra',
+                  'Clarifications on Gayathri Mantra',
+                  'Is the So-Called Gayatri Mantra, Actually the Savitri Mantra?',
+                ].map((queryText, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="qa-suggestion-chip"
+                    onClick={() => {
+                      setQuestion(queryText);
+                      searchSemantic(null, queryText);
+                    }}
+                  >
+                    {queryText}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="toolbar" style={{ marginTop: 14 }}>
               <button className="btn primary" type="submit" disabled={busy || !question.trim()}>
                 {busy ? 'Searching…' : settings.summaryMode === 'deep' ? 'Run Deep Search' : settings.summaryMode === 'standard' ? 'Select verbatim teachings' : 'Semantic Search'}
               </button>
@@ -832,6 +976,20 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
                   <option value="off">No Summary</option>
                   <option value="standard">Verbatim Selection</option>
                   <option value="deep">Deep Search</option>
+                </select>
+              </label>
+              <label className="field qa-summary-select">
+                <span className="field-label">Source</span>
+                <select
+                  value={settings.sourceType || 'all'}
+                  onChange={(event) => setSettings((current) => ({
+                    ...current,
+                    sourceType: event.target.value,
+                  }))}
+                >
+                  <option value="all">All Sources</option>
+                  <option value="discourse">Discourses Only</option>
+                  <option value="qa">Q&amp;A Only</option>
                 </select>
               </label>
               {settings.summaryMode === 'deep' ? (
@@ -854,47 +1012,59 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
               <span className="badge">Threshold {Number(settings.threshold).toFixed(2)}</span>
               <span className="badge">1,024-d HNSW</span>
               {settings.summaryMode === 'standard' ? <span className="badge">Pool up to {settings.summaryMaxRecords}</span> : null}
-              {settings.summaryMode === 'deep' ? <span className="badge">Score corpus · process top {settings.deepSummaryMaxRecords}</span> : null}
+              {settings.summaryMode === 'deep' ? <span className="badge">Deep candidate pool · process top {settings.deepSummaryMaxRecords}</span> : null}
             </div>
           </form>
 
-          {error ? <div className="alert warn">{error}</div> : null}
-          {!acceptedMatch && result?.message && !deepReady ? <div className="alert warn qa-no-match">{result.message}</div> : null}
+          {error ? <div className="alert warn" style={{ marginTop: 16 }}>{error}</div> : null}
+          {!acceptedMatch && result?.message && !deepReady ? (
+            <div className="alert warn qa-no-match" style={{ marginTop: 16 }}>
+              <strong>Notice:</strong> {result.message}
+              {(result?.matches || []).length > 0 ? (
+                <span> Showing nearest exploratory candidates below for reference.</span>
+              ) : null}
+            </div>
+          ) : null}
           {!summaryCitationValid ? (
-            <div className="alert warn qa-no-match">The summary was withheld because its evidence citations did not pass relevance validation.</div>
+            <div className="alert warn qa-no-match" style={{ marginTop: 16 }}>The summary was withheld because its evidence citations did not pass relevance validation.</div>
           ) : null}
           {summaryCitationValid ? (
             <GroundedSummary summary={result?.summary} relevantMatches={result?.relevantMatches} searchMode="semantic" onOpenDocument={setViewerRequest} />
           ) : null}
           <DeepSummary question={question} searchMode="semantic" job={deepJob} onOpenDocument={setViewerRequest} onCancel={cancelDeepSummary} />
           {acceptedMatch && result?.summary?.status === 'unavailable' ? (
-            <div className="alert warn qa-no-match">Relevant evidence was found, but its semantic summary could not be prepared. The stored answer remains available below.</div>
+            <div className="alert warn qa-no-match" style={{ marginTop: 16 }}>Relevant evidence was found, but its semantic summary could not be prepared. The stored answers remain available below.</div>
           ) : null}
-          {acceptedMatch ? (
-            <div className="qa-results">
-              <MatchRecord match={acceptedMatch} searchMode="semantic" onOpenDocument={setViewerRequest} label={result?.summary?.status === 'ready' ? 'Primary stored source' : 'Best answer'} />
-            </div>
-          ) : null}
-          {remainingMatches.length ? (
-            <details className="card qa-results-inspector">
-              <summary style={{ cursor: 'pointer', fontWeight: 800 }}>
-                {inspectorLabel} ({remainingMatches.length}) — inspection only
-              </summary>
-              <div className="hint" style={{ margin: '10px 0 14px' }}>
-                {settings.summaryMode === 'deep' ? 'Deep Search reads complete Swami units from these neighbors and may discard any of them.' : 'These are retrieval neighbors, not accepted answers and not Verbatim Selection evidence.'}
+
+          {/* Grid Based Results: Show ALL Discourses in Masonry Grid */}
+          {result && (result.matches || []).length > 0 ? (
+            <div className="qa-distance-results-container" style={{ marginTop: 18 }}>
+              <div className="qa-distance-results-meta">
+                <div className="qa-meta-left">
+                  Found <strong>{result.matches?.length || 0}</strong> discourses in <strong>{latencyMs || 0} ms</strong>
+                </div>
+                <div className="qa-meta-right">
+                  Ranked by 1,024-d HNSW Vector Cosine Distance &amp; Hybrid Discovery
+                </div>
               </div>
-              <div className="qa-results">
-                {remainingMatches.map((match, index) => (
-                  <MatchRecord
-                    match={match}
-                    searchMode="semantic"
-                    onOpenDocument={setViewerRequest}
-                    label={acceptedMatch ? 'Related / nearest source' : 'Nearest source'}
-                    key={`${match.sourceId ?? 'match'}:${match.relevanceRank ?? index}`}
-                  />
+
+              <div className="us-masonry-container">
+                {columnsData.map((colItems, colIdx) => (
+                  <div className="us-masonry-col" key={colIdx}>
+                    {colItems.map(({ match, originalIdx }) => (
+                      <SemanticDiscourseCard
+                        key={match.sourceId ? `${match.sourceId}:${originalIdx}` : originalIdx}
+                        match={match}
+                        originalIdx={originalIdx}
+                        query={question}
+                        onOpenDocument={setViewerRequest}
+                        hasAcceptedMatch={Boolean(acceptedMatch)}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
-            </details>
+            </div>
           ) : null}
         </>
       ) : (
@@ -1007,6 +1177,25 @@ function SearchScreen({ runtime, settings, setSettings, onNavigate }) {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="toolbar" style={{ marginTop: 10, justifyContent: 'flex-start', gap: 12, alignItems: 'center' }}>
+              <label className="field qa-summary-select" style={{ flexDirection: 'row', alignItems: 'center', gap: 8, margin: 0 }}>
+                <span className="field-label" style={{ margin: 0 }}>Filter:</span>
+                <select
+                  value={settings.sourceType || 'all'}
+                  onChange={(event) => {
+                    const newType = event.target.value;
+                    setSettings((current) => ({ ...current, sourceType: newType }));
+                    if (question.trim()) searchDistance(question);
+                  }}
+                >
+                  <option value="all">All Sources</option>
+                  <option value="discourse">Discourses Only</option>
+                  <option value="qa">Q&amp;A Only</option>
+                </select>
+              </label>
+              <span className="badge">Lexical Proximity &amp; Title Tiers</span>
             </div>
           </div>
 
@@ -1149,17 +1338,99 @@ function IndexScreen({ runtime, settings }) {
   const indexConfigured = connectionConfigured(settings.indexConnection);
   const syncConfigured = indexConfigured && connectionConfigured(settings.sourceConnection) && mappingConfigured(settings.mapping);
 
+  const followJob = (jobId) => {
+    eventSource.current?.close();
+    const source = new EventSource(authQuery(joinPath(runtime.apiBasePath, `/sync/${encodeURIComponent(jobId)}/events`)));
+    eventSource.current = source;
+    const update = (event) => {
+      try {
+        const next = JSON.parse(event.data);
+        setJob(next);
+        if (['completed', 'failed', 'cancelled'].includes(next.status)) {
+          source.close();
+          void refresh();
+        }
+      } catch { /* ignore malformed event */ }
+    };
+    ['status', 'progress', 'log'].forEach((name) => source.addEventListener(name, update));
+  };
+
+  const loadRun = async (runId) => {
+    setMessage(null);
+    try {
+      const res = await api(runtime, `/sync/${encodeURIComponent(runId)}`, { method: 'GET' });
+      if (res?.job) {
+        setJob(res.job);
+        if (['running', 'queued'].includes(res.job.status)) {
+          followJob(runId);
+        }
+        return;
+      }
+    } catch {
+      const run = status?.recentRuns?.find((r) => r.id === runId);
+      if (run) {
+        setJob({
+          id: run.id,
+          mode: run.mode,
+          status: run.status,
+          processed: run.processed,
+          changed: run.changed,
+          total: run.total,
+          percent: run.total ? Math.round((run.processed / run.total) * 100) : 0,
+          error: run.error,
+          logs: run.error ? [`[${run.startedAt}] Status: ${run.status}`, `Error: ${run.error}`] : [`[${run.startedAt}] Status: ${run.status}`],
+          createdAt: run.startedAt,
+          finishedAt: run.finishedAt,
+        });
+        return;
+      }
+      setMessage({ kind: 'error', message: `Run ${runId} details are no longer available in server memory.` });
+    }
+  };
+
   const refresh = async () => {
     setBusy(true);
     setMessage(null);
     try {
-      setStatus(await api(runtime, '/index/status', { body: { indexConnection: settings.indexConnection } }));
+      const nextStatus = await api(runtime, '/index/status', { body: { indexConnection: settings.indexConnection } });
+      setStatus(nextStatus);
+      const runningRun = nextStatus?.recentRuns?.find((r) => ['running', 'queued'].includes(r.status));
+      if (runningRun) {
+        try {
+          const res = await api(runtime, `/sync/${encodeURIComponent(runningRun.id)}`, { method: 'GET' });
+          if (res?.job) {
+            setJob(res.job);
+            followJob(runningRun.id);
+          }
+        } catch { /* ignore */ }
+      }
     } catch (error) {
       setMessage({ kind: 'error', message: error.message });
     } finally { setBusy(false); }
   };
 
-  useEffect(() => () => eventSource.current?.close(), []);
+  useEffect(() => {
+    if (indexConfigured) {
+      void refresh();
+    }
+    return () => eventSource.current?.close();
+  }, []);
+
+  useEffect(() => {
+    if (!job?.id || !['running', 'queued'].includes(job.status)) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api(runtime, `/sync/${encodeURIComponent(job.id)}`, { method: 'GET' });
+        if (res?.job) {
+          setJob(res.job);
+          if (!['running', 'queued'].includes(res.job.status)) {
+            void refresh();
+          }
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [job?.id, job?.status]);
 
   const initialize = async () => {
     setBusy(true);
@@ -1179,23 +1450,6 @@ function IndexScreen({ runtime, settings }) {
       await refresh();
     } catch (error) { setMessage({ kind: 'error', message: error.message }); }
     finally { setBusy(false); }
-  };
-
-  const followJob = (jobId) => {
-    eventSource.current?.close();
-    const source = new EventSource(authQuery(joinPath(runtime.apiBasePath, `/sync/${encodeURIComponent(jobId)}/events`)));
-    eventSource.current = source;
-    const update = (event) => {
-      try {
-        const next = JSON.parse(event.data);
-        setJob(next);
-        if (['completed', 'failed', 'cancelled'].includes(next.status)) {
-          source.close();
-          void refresh();
-        }
-      } catch { /* ignore malformed event */ }
-    };
-    ['status', 'progress', 'log'].forEach((name) => source.addEventListener(name, update));
   };
 
   const startSync = async (mode) => {
@@ -1218,10 +1472,29 @@ function IndexScreen({ runtime, settings }) {
     finally { setBusy(false); }
   };
 
-  const cancel = async () => {
-    if (!job?.id) return;
-    try { setJob((await api(runtime, `/sync/${job.id}/cancel`, { body: {} })).job); }
-    catch (error) { setMessage({ kind: 'error', message: error.message }); }
+  const activeRunningRun = ['queued', 'running'].includes(job?.status)
+    ? job
+    : status?.recentRuns?.find((r) => ['queued', 'running'].includes(r.status));
+  const isSyncRunning = Boolean(activeRunningRun);
+
+  const cancel = async (targetId) => {
+    const runId = targetId || job?.id || activeRunningRun?.id;
+    if (!runId) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api(runtime, `/sync/${encodeURIComponent(runId)}/cancel`, {
+        body: { indexConnection: settings.indexConnection },
+      });
+      setJob(response.job || { id: runId, status: 'cancelled' });
+      setMessage({ kind: 'success', message: `Sync job ${runId} stopped.` });
+      await refresh();
+    } catch (error) {
+      setMessage({ kind: 'error', message: error.message });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -1241,20 +1514,102 @@ function IndexScreen({ runtime, settings }) {
           <div><span>Last sync</span><strong>{status?.corpus?.lastSyncedAt ? new Date(status.corpus.lastSyncedAt).toLocaleString() : '—'}</strong></div>
         </div>
         <div className="toolbar" style={{ marginTop: 16 }}>
-          <button className="btn" onClick={initialize} disabled={!indexConfigured || busy || ['queued', 'running'].includes(job?.status)}>Initialize</button>
-          <button className="btn primary" onClick={() => startSync('incremental')} disabled={!syncConfigured || status?.requiresRebuild || busy || ['queued', 'running'].includes(job?.status)}>Incremental sync</button>
-          <button className="btn danger" onClick={() => startSync('rebuild')} disabled={!syncConfigured || busy || ['queued', 'running'].includes(job?.status)}>Full rebuild</button>
-          {['queued', 'running'].includes(job?.status) ? <button className="btn" onClick={cancel}>Cancel</button> : null}
+          <button className="btn" onClick={initialize} disabled={!indexConfigured || busy || isSyncRunning}>Initialize</button>
+          <button className="btn primary" onClick={() => startSync('incremental')} disabled={!syncConfigured || status?.requiresRebuild || busy || isSyncRunning}>Incremental sync</button>
+          <button className="btn danger" onClick={() => startSync('rebuild')} disabled={!syncConfigured || busy || isSyncRunning}>Full rebuild</button>
+          {isSyncRunning ? (
+            <button
+              className="btn danger"
+              onClick={() => cancel(activeRunningRun.id)}
+              disabled={busy}
+              style={{ background: '#b91c1c', borderColor: '#ef4444', color: '#fff', fontWeight: 600 }}
+            >
+              Stop rebuild
+            </button>
+          ) : null}
         </div>
       </div>
-      {job ? <div className="card">
-        <div className="qa-card-title"><h3>Sync {job.id}</h3><span className="badge">{job.status}</span></div>
-        <div className="qa-progress"><span style={{ width: `${job.percent || 0}%` }} /></div>
-        <div className="hint">{job.processed} / {job.total} scanned · {job.changed} records changed · {job.passages || 0} answer passages embedded · {job.percent || 0}%</div>
-        {job.error ? <div className="alert warn" style={{ marginTop: 12 }}>{job.error}</div> : null}
-        <pre className="qa-log">{(job.logs || []).join('\n')}</pre>
-      </div> : null}
-      {status?.recentRuns?.length ? <div className="card"><h3>Recent runs</h3><div className="qa-run-list">{status.recentRuns.map((run) => <div key={run.id}><span className="mono">{run.id}</span><span>{run.mode}</span><span className="badge">{run.status}</span><span>{run.changed} changed</span></div>)}</div></div> : null}
+      {job ? (() => {
+        const elapsedSec = job.createdAt ? Math.max(0, Math.round((Date.now() - new Date(job.createdAt).getTime()) / 1000)) : 0;
+        const processedRecords = job.processed || 0;
+        const totalRecords = job.total || 6010;
+        const remainingRecords = Math.max(0, totalRecords - processedRecords);
+        // When resuming, exclude pre-staged numbers so fast-forwarding doesn't distort ETA
+        const resumeLog = (job.logs || []).find((l) => l.includes('already staged'));
+        const resumeMatch = resumeLog ? resumeLog.match(/(\d+) records, (\d+) answer passages/) : null;
+        const initialPassages = resumeMatch ? Number(resumeMatch[2]) : 0;
+        const sessionPassages = Math.max(0, (job.passages || 0) - initialPassages);
+        const passageRate = sessionPassages > 0 && elapsedSec > 5 ? sessionPassages / elapsedSec : 2.15;
+        // Remaining discourses average ~8.5 passages/doc
+        const estimatedRemainingPassages = remainingRecords * 8.5;
+        const etaSec = remainingRecords > 0 && passageRate > 0
+          ? Math.round(estimatedRemainingPassages / passageRate)
+          : null;
+        const progressPercent = totalRecords > 0
+          ? Math.min(100, Math.round((processedRecords / totalRecords) * 100))
+          : Math.min(100, job.percent || 0);
+        return (
+          <div className="card">
+            <div className="qa-card-title">
+              <h3>Sync {job.id}</h3>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {job.status === 'running' && etaSec != null ? (
+                  <span className="badge" style={{ background: '#0369a1', color: '#fff' }}>ETA: {formatDuration(etaSec)}</span>
+                ) : null}
+                <span className="badge">{job.status}</span>
+                {['queued', 'running'].includes(job.status) ? (
+                  <button
+                    className="btn danger"
+                    onClick={() => cancel(job.id)}
+                    disabled={busy}
+                    style={{ background: '#b91c1c', borderColor: '#ef4444', color: '#fff', padding: '3px 12px', fontSize: 13, fontWeight: 600 }}
+                  >
+                    Stop rebuild
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="qa-progress"><span style={{ width: `${progressPercent}%` }} /></div>
+            <div className="hint">
+              {job.processed} / {job.total} scanned · {job.changed} records changed · {job.passages || 0} answer passages embedded · {progressPercent}%
+              {elapsedSec > 0 ? ` · elapsed ${formatDuration(elapsedSec)}` : ''}
+              {job.status === 'running' && etaSec != null ? ` · estimated remaining ${formatDuration(etaSec)}` : ''}
+            </div>
+            {job.error ? <div className="alert warn" style={{ marginTop: 12 }}>{job.error}</div> : null}
+            <pre className="qa-log">{(job.logs || []).join('\n')}</pre>
+          </div>
+        );
+      })() : null}
+      {status?.recentRuns?.length ? (
+        <div className="card">
+          <h3>Recent runs</h3>
+          <div className="qa-run-list">
+            {status.recentRuns.map((run) => (
+              <div
+                key={run.id}
+                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: 4 }}
+                title="Click to view details and logs"
+                onClick={() => loadRun(run.id)}
+              >
+                <span className="mono">{run.id}</span>
+                <span>{run.mode}</span>
+                <span className="badge">{run.status}</span>
+                <span>{run.changed} changed</span>
+                {['queued', 'running'].includes(run.status) ? (
+                  <button
+                    className="btn danger"
+                    onClick={(e) => { e.stopPropagation(); cancel(run.id); }}
+                    disabled={busy}
+                    style={{ background: '#b91c1c', borderColor: '#ef4444', color: '#fff', padding: '1px 8px', fontSize: 12, marginLeft: 8 }}
+                  >
+                    Stop
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1340,7 +1695,7 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
         <div className="form-grid">
           <label className="field"><span className="field-label">Base URL</span><input value={settings.ollamaBaseUrl} onChange={(event) => setSettings((current) => ({ ...current, ollamaBaseUrl: event.target.value }))} /></label>
           <label className="field"><span className="field-label">Embedding model</span><input value={settings.model} onChange={(event) => setSettings((current) => ({ ...current, model: event.target.value }))} /></label>
-          <label className="field"><span className="field-label">Deep Search reasoning model</span><select value={settings.deepSummaryModel} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryModel: event.target.value }))}><option value="qwen3:14b-q8_0">qwen3:14b-q8_0 (default)</option><option value="qwen3:14b-q4_K_M">qwen3:14b-q4_K_M</option></select><span className="hint">Thinking is mandatory. Gemma and other non-thinking models are rejected.</span></label>
+          <label className="field"><span className="field-label">Deep Search model</span><select value={settings.deepSummaryModel} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryModel: event.target.value }))}><option value="qwen2.5:7b">qwen2.5:7b (default)</option><option value="qwen2.5:7b-instruct">qwen2.5:7b-instruct</option><option value="llama3.1:8b">llama3.1:8b</option><option value="llama3.1:8b-instruct">llama3.1:8b-instruct</option><option value="qwen3:14b-q8_0">qwen3:14b-q8_0 (thinking)</option><option value="qwen3:14b-q4_K_M">qwen3:14b-q4_K_M (thinking)</option></select><span className="hint">Selects and classifies stored source text. Qwen 3 uses thinking with 32K context; Qwen 2.5 and Llama use structured responses with 8K context.</span></label>
           <label className="field"><span className="field-label">Deep Search processor</span><select value={settings.summaryHardwarePreference} onChange={(event) => setSettings((current) => ({ ...current, summaryHardwarePreference: event.target.value }))}><option value="auto">Auto (recommended)</option><option value="gpu">Prefer GPU</option><option value="cpu">CPU only</option></select><span className="hint">Auto lets Ollama choose. Prefer GPU requests maximum layer offload; CPU only disables GPU offload.</span></label>
         </div>
         <div className="toolbar" style={{ marginTop: 12 }}><button className="btn" disabled={busy} onClick={() => call('/ollama/test', { ollamaBaseUrl: settings.ollamaBaseUrl, model: settings.model }, (response) => `Ollama connected; ${response.model} returns ${response.dimension} dimensions.`)}>Test Ollama</button><button className="btn" disabled={hardwareBusy} onClick={() => void detectHardware()}>{hardwareBusy ? 'Detecting hardware…' : 'Refresh hardware detection'}</button></div>
@@ -1378,14 +1733,14 @@ function SettingsScreen({ runtime, settings, setSettings, catalog, setCatalog })
       <div className="card">
         <h3>Retrieval and sync defaults</h3>
         <div className="form-grid">
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Result count</span><input type="number" min="1" max="20" value={settings.topK} onChange={(event) => setSettings((current) => ({ ...current, topK: Number(event.target.value) }))} /></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Result count</span><input type="number" min="1" max="100" value={settings.topK} onChange={(event) => setSettings((current) => ({ ...current, topK: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Clear-match threshold</span><input type="number" min="-1" max="1" step="0.01" value={settings.threshold} onChange={(event) => setSettings((current) => ({ ...current, threshold: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Verbatim source pool</span><input type="number" min="1" max="15" value={settings.summaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxRecords: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Maximum selected teachings</span><input type="number" min="1" max="5" value={settings.summaryMaxLines} onChange={(event) => setSettings((current) => ({ ...current, summaryMaxLines: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Source page size</span><input type="number" min="25" max="1000" value={settings.fetchSize} onChange={(event) => setSettings((current) => ({ ...current, fetchSize: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Embedding batch size</span><input type="number" min="1" max="64" value={settings.embeddingBatchSize} onChange={(event) => setSettings((current) => ({ ...current, embeddingBatchSize: Number(event.target.value) }))} /></label>
           <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Deep Search candidate limit</span><input type="number" min="1" max="100" value={settings.deepSummaryMaxRecords} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryMaxRecords: Number(event.target.value) }))} /><span className="hint">Complete answer units from this many fused source candidates can enter adjudication.</span></label>
-          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Qwen request limit (seconds)</span><input type="number" min="60" max="600" step="30" value={settings.deepSummaryTimeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryTimeoutSeconds: Number(event.target.value) }))} /><span className="hint">One Qwen generation runs at a time. Each call is capped at ten minutes; the complete job is capped at 45 minutes.</span></label>
+          <label className="field" style={{ gridColumn: 'span 3' }}><span className="field-label">Model request limit (seconds)</span><input type="number" min="60" max="900" step="30" value={settings.deepSummaryTimeoutSeconds} onChange={(event) => setSettings((current) => ({ ...current, deepSummaryTimeoutSeconds: Number(event.target.value) }))} /><span className="hint">One generation per job runs at a time. The selected limit applies to each call; the complete job is capped at 90 minutes.</span></label>
         </div>
         <label className="field" style={{ marginTop: 12, maxWidth: 360 }}><span className="field-label">Default answer mode</span><select value={settings.summaryMode} onChange={(event) => setSettings((current) => ({ ...current, summaryMode: event.target.value, summaryEnabled: event.target.value === 'standard' }))}><option value="off">No Summary</option><option value="standard">Verbatim Selection</option><option value="deep">Deep Search</option></select></label>
         <div className="hint" style={{ marginTop: 10 }}>Both answer modes display only exact stored Swami text. Deep Search adds role-aware complete-answer reading and independent adjudication.</div>

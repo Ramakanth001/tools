@@ -2042,7 +2042,7 @@ async function getAnswerUnits(connection, references) {
              r.answer AS "displayText",
              u.content_hash AS "contentHash", u.context_complete AS "contextComplete"
       FROM resolved
-      JOIN semantic_qa.answer_units u ON u.source_id = resolved.source_id
+      JOIN semantic_qa.answer_units u ON (u.source_id = resolved.source_id OR u.answer_unit_id = resolved.reference)
         AND (resolved.answer_unit_id IS NULL OR u.answer_unit_id = resolved.answer_unit_id)
       JOIN semantic_qa.records r ON r.source_id = u.source_id
       ORDER BY array_position($1::text[], resolved.reference), u.unit_index

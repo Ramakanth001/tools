@@ -163,6 +163,12 @@ test('an explicit non-Swami byline is withheld rather than defaulted to Swami', 
   assert.equal(parsed.ambiguities.length, 1);
 });
 
+test('explicit devotee bylines cannot become Swami teachings', () => {
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:4291', sourceType: 'discourse', text: '[By Shri Veena Datta]\n\nMy experience with Swami.' });
+  assert.equal(parsed.author, 'Shri Veena Datta');
+  assert.equal(parsed.units.length, 0);
+});
+
 test('document authorship does not leak into an explicitly labeled Swami reply unit', () => {
   const text = '[By Dr. Devotee]\n\nA personal introduction.\n\nSwami replied: Exact teaching.';
   const parsed = parseAnswerUnits({
@@ -224,4 +230,75 @@ test('named non-Swami speaker transitions cannot leak into the preceding reply',
   const parsed = parseAnswerUnits({ sourceId: 'discourse:10', sourceType: 'discourse', text });
   assert.deepEqual(parsed.units.map((unit) => unit.text), ['Do the right action.', 'Leave the fruit to God.']);
   assert.ok(parsed.ignored.some((item) => item.text === 'Thank you.'));
+});
+
+test('Phase 1 validation: God-preacher Shri Datta spoke in Gita context is parsed as Swami', () => {
+  const text = 'God-preacher Shri Datta spoke:-\n\nSacrifice of fruit of work is the highest practical devotion.';
+  const parsed = parseAnswerUnits({ sourceId: 'gita:1', sourceType: 'discourse', question: 'Gita Chapter 1', text });
+  assert.equal(parsed.units.length, 1);
+  assert.equal(parsed.units[0].author, 'Swami');
+  assert.equal(parsed.units[0].text, 'Sacrifice of fruit of work is the highest practical devotion.');
+  assert.equal(parsed.ignored.length, 0);
+});
+
+test('Phase 1 validation: orphan subheadings without terminal punctuation are merged into passage', () => {
+  const text = 'Introduction to Duty\n\nOne should always perform duty without expecting the fruit.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:orphan', sourceType: 'discourse', text });
+  const passages = buildAnswerPassages(text, parsed.units);
+  assert.equal(passages.length, 1);
+  assert.equal(passages[0].text, text);
+});
+
+test('Phase 1 validation: discovery texts carry answerUnitId matching units', () => {
+  const text = 'Devotee asked: What is Jnana?\nSwami replied:- Jnana is knowledge.\n\nDevotee asked: What is Bhakti?\nSwami replied:- Bhakti is devotion.';
+  const parsed = parseAnswerUnits({ sourceId: 'discourse:multia', sourceType: 'discourse', text });
+  const discovery = buildDiscoveryTexts({ sourceId: 'discourse:multia', question: 'Discourse', answer: text, metadata: {} }, parsed);
+  assert.ok(discovery.length >= 2);
+  const titleDiscovery = discovery.find((item) => item.text === 'Discourse');
+  assert.ok(titleDiscovery, 'Expected title discovery');
+  assert.equal(titleDiscovery.answerUnitId, null, 'Document title in multi-unit discourse must remain unpaired (null)');
+  const jnanaDiscovery = discovery.find((item) => item.text.includes('Jnana'));
+  const bhaktiDiscovery = discovery.find((item) => item.text.includes('Bhakti'));
+  assert.ok(jnanaDiscovery);
+  assert.ok(bhaktiDiscovery);
+  assert.notEqual(jnanaDiscovery.answerUnitId, bhaktiDiscovery.answerUnitId);
+});
+
+test('buildDiscoveryTexts deduplicates by text AND answerUnitId, preserving distinct links', () => {
+  const parsed = {
+    units: [
+      { answerUnitId: 'unit_1', start: 0, end: 50, associatedQuestion: 'What is the highest devotion?' },
+      { answerUnitId: 'unit_2', start: 60, end: 110, associatedQuestion: 'What is the highest devotion?' },
+    ],
+    ignored: [],
+  };
+  const discovery = buildDiscoveryTexts({
+    sourceId: 'doc:dup-q',
+    question: 'Title of Discourse',
+    answer: 'Some answer text',
+    metadata: {},
+  }, parsed);
+  const questionMatches = discovery.filter((item) => item.text === 'What is the highest devotion?');
+  assert.equal(questionMatches.length, 2, 'Expected separate discovery entries for identical question on distinct units');
+  assert.equal(questionMatches[0].answerUnitId, 'unit_1');
+  assert.equal(questionMatches[1].answerUnitId, 'unit_2');
+});
+
+test('Item 8 validation: short paragraphs ending with punctuation are merged into measured target sizes within answer unit', () => {
+  const p1 = 'God is the creator of the entire universe and all living beings.';
+  const p2 = 'Devotion must be practical through sacrifice of work and fruit.';
+  const p3 = 'Theoretical devotion alone cannot yield the ultimate divine fruit.';
+  const p4 = 'The real test of love is sacrifice. When a parent loves a child, they sacrifice their hard-earned money and time without expecting anything in return. Similarly, true devotion to the contemporary human incarnation of God is proved only through practical sacrifice and selfless service in the divine mission.';
+  const text = `${p1}\n\n${p2}\n\n${p3}\n\n${p4}`;
+
+  const parsed = parseAnswerUnits({ sourceId: 'doc:target-chunking', sourceType: 'discourse', text });
+  const passages = buildAnswerPassages(text, parsed.units);
+
+  assert.ok(passages.length >= 1 && passages.length <= 2, `Expected 1 or 2 cohesive passages, got ${passages.length}`);
+  for (const passage of passages) {
+    assert.equal(text.slice(passage.start, passage.end), passage.text);
+    assert.equal(text.slice(passage.citationStart, passage.citationEnd), passage.citationText);
+    assert.ok(passage.text.length >= 180, `Passage too short: ${passage.text.length} chars`);
+    assert.ok(passage.text.length <= 800, `Passage too long: ${passage.text.length} chars`);
+  }
 });

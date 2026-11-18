@@ -1,0 +1,608 @@
+{
+  "summary": {
+    "benchmarkVersion": 1,
+    "split": "tune",
+    "totalCases": 30,
+    "passed": 30,
+    "positiveCases": 10,
+    "negativeCases": 20,
+    "positiveAdmissionRate": 1,
+    "negativeRejectionRate": 1,
+    "positiveRecallAt5": 1,
+    "positiveTop1Accuracy": 1,
+    "meanReciprocalRank": 1,
+    "falseAcceptRate": 0,
+    "categoryBreakdown": {
+      "positive_paraphrase": {
+        "total": 10,
+        "passed": 10,
+        "falseAccepts": 0,
+        "positiveHits": 10,
+        "top1Hits": 10
+      },
+      "lexical_trap": {
+        "total": 5,
+        "passed": 5,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "physical_and_recipes": {
+        "total": 5,
+        "passed": 5,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "general_knowledge": {
+        "total": 4,
+        "passed": 4,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "unanswered_spiritual": {
+        "total": 3,
+        "passed": 3,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      },
+      "noisy_and_transliterated": {
+        "total": 3,
+        "passed": 3,
+        "falseAccepts": 0,
+        "positiveHits": 0,
+        "top1Hits": 0
+      }
+    },
+    "gatesPassed": {
+      "positiveAdmissionGte95": true,
+      "recallAt5Gte95": true,
+      "top1Gte90": true,
+      "falseAcceptLte02": true
+    }
+  },
+  "results": [
+    {
+      "id": "pos-31",
+      "question": "What is the genuine purpose of rituals and mantras according to the ancient Vedas?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:453",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:2632",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2632",
+        "discourse:1039",
+        "discourse:73",
+        "discourse:255",
+        "discourse:2669"
+      ]
+    },
+    {
+      "id": "pos-32",
+      "question": "How do past life sanskaras determine the spiritual inclinations of an individual in this life?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1504",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:1443",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1443",
+        "discourse:1056",
+        "discourse:2409",
+        "discourse:3105",
+        "discourse:2815"
+      ]
+    },
+    {
+      "id": "pos-33",
+      "question": "What does the Gita mean when it says that sacrifice without expectation of fruit is true renunciation?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:476",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:4568",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:4568",
+        "discourse:1774",
+        "discourse:1605",
+        "qa:414",
+        "discourse:1541"
+      ]
+    },
+    {
+      "id": "pos-34",
+      "question": "Why is internal repentance and non-repetition of sin required before divine forgiveness can occur?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:4214",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:1006",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1006",
+        "discourse:2170",
+        "discourse:605",
+        "discourse:1897",
+        "discourse:151"
+      ]
+    },
+    {
+      "id": "pos-35",
+      "question": "How does chanting the divine name with mental focus purify the mind from negative thoughts?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:1863",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:3007",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:3007",
+        "discourse:860",
+        "discourse:2840",
+        "discourse:5105",
+        "discourse:853"
+      ]
+    },
+    {
+      "id": "pos-36",
+      "question": "Can astrology alter divine destiny or does it merely indicate the fruits of past karma?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:4321",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:1575",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1575",
+        "discourse:4887",
+        "discourse:150",
+        "discourse:972",
+        "discourse:3765"
+      ]
+    },
+    {
+      "id": "pos-37",
+      "question": "Where can devotees receive the printed discourses and spiritual books of Shri Datta Swami?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:2854",
+      "strongMatch": true,
+      "acceptedSourceId": "qa:320",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "qa:320",
+        "discourse:3985",
+        "discourse:3386",
+        "discourse:1113",
+        "discourse:5451"
+      ]
+    },
+    {
+      "id": "pos-38",
+      "question": "What should be the attitude of a disciple when entering the presence of the spiritual Master?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:3985",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:1113",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1113",
+        "discourse:5106",
+        "discourse:1200",
+        "discourse:5213",
+        "discourse:504"
+      ]
+    },
+    {
+      "id": "pos-39",
+      "question": "How does Datta incarnate in different religions under various names like Father of Heaven and Allah?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "discourse:5568",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:2184",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2184",
+        "discourse:3359",
+        "discourse:1540",
+        "discourse:2025",
+        "discourse:2658"
+      ]
+    },
+    {
+      "id": "pos-40",
+      "question": "Why did Lord Krishna declare in the Bhagavad Gita that He alone is the ultimate goal of all paths?",
+      "category": "positive_paraphrase",
+      "shouldAbstain": false,
+      "expectedSourceId": "qa:162",
+      "strongMatch": true,
+      "acceptedSourceId": "discourse:1377",
+      "rank": 1,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1377",
+        "discourse:3970",
+        "discourse:1087",
+        "discourse:2314",
+        "discourse:473"
+      ]
+    },
+    {
+      "id": "trap-16",
+      "question": "Can holy water sanitize surgical scalpels in an intensive care hospital?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2189",
+        "discourse:1192",
+        "discourse:5266",
+        "discourse:4732",
+        "discourse:1730"
+      ]
+    },
+    {
+      "id": "trap-17",
+      "question": "Can deep meditation replace drinking water in the Sahara desert?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:452",
+        "qa:156",
+        "discourse:560",
+        "discourse:4532",
+        "discourse:2486"
+      ]
+    },
+    {
+      "id": "trap-18",
+      "question": "Can chanting hymns weld broken steel beams in a collapsed skyscraper?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2681",
+        "discourse:1257",
+        "discourse:1613",
+        "discourse:5238",
+        "qa:220"
+      ]
+    },
+    {
+      "id": "trap-19",
+      "question": "Can a clay oil lamp power an electric refrigerator in summer?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:632",
+        "discourse:2551",
+        "discourse:1841",
+        "discourse:1691",
+        "discourse:2806"
+      ]
+    },
+    {
+      "id": "trap-20",
+      "question": "Can coconut water be used as engine motor oil in a commercial truck?",
+      "category": "lexical_trap",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:4545",
+        "discourse:802",
+        "discourse:106",
+        "discourse:1690",
+        "discourse:2806"
+      ]
+    },
+    {
+      "id": "phys-16",
+      "question": "What is the correct tire pressure in PSI for a Toyota RAV4 during hot summer?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:5353",
+        "discourse:3007",
+        "discourse:2680",
+        "discourse:3367",
+        "qa:217"
+      ]
+    },
+    {
+      "id": "phys-17",
+      "question": "How to cultivate hydroponic tomatoes in an indoor greenhouse with nutrient solutions?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "qa:242",
+        "discourse:4419",
+        "discourse:4789",
+        "discourse:1954",
+        "discourse:2491"
+      ]
+    },
+    {
+      "id": "phys-18",
+      "question": "What is the chemical composition and shelf life of lithium-ion NMC batteries?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "qa:226",
+        "discourse:3862",
+        "discourse:5353",
+        "discourse:4384",
+        "discourse:4069"
+      ]
+    },
+    {
+      "id": "phys-19",
+      "question": "How do I tune a six-string acoustic guitar to open D tuning?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "qa:430",
+        "discourse:2129",
+        "discourse:2052",
+        "discourse:1273",
+        "discourse:81"
+      ]
+    },
+    {
+      "id": "phys-20",
+      "question": "What are the symptoms and blood glucose threshold for diagnosing Type 2 Diabetes?",
+      "category": "physical_and_recipes",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1096",
+        "discourse:3860",
+        "discourse:4911",
+        "discourse:5441",
+        "discourse:4727"
+      ]
+    },
+    {
+      "id": "gen-13",
+      "question": "What is the speed of light in vacuum measured in meters per second?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:273",
+        "discourse:588",
+        "discourse:1258",
+        "discourse:965",
+        "discourse:1434"
+      ]
+    },
+    {
+      "id": "gen-14",
+      "question": "Which artist painted the famous Renaissance portrait known as the Mona Lisa?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2730",
+        "qa:200",
+        "discourse:1199",
+        "discourse:1282",
+        "qa:173"
+      ]
+    },
+    {
+      "id": "gen-15",
+      "question": "What is the tallest mountain peak in North America above sea level?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2208",
+        "discourse:2235",
+        "qa:339",
+        "qa:168",
+        "qa:282"
+      ]
+    },
+    {
+      "id": "gen-16",
+      "question": "Who discovered penicillin and revolutionized antibiotic medicine?",
+      "category": "general_knowledge",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1027",
+        "discourse:427",
+        "discourse:568",
+        "discourse:891",
+        "discourse:1445"
+      ]
+    },
+    {
+      "id": "unans-10",
+      "question": "How does Baháʼí Faith explain the dispensation of the Báb in Shiraz in 1844?",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1195",
+        "discourse:1882",
+        "discourse:2129",
+        "qa:161",
+        "discourse:1485"
+      ]
+    },
+    {
+      "id": "unans-11",
+      "question": "What are the seven chakras according to the specific 10th-century Kubjikamata Tantra manuscript?",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1911",
+        "discourse:2096",
+        "discourse:1709",
+        "discourse:5316",
+        "discourse:1861"
+      ]
+    },
+    {
+      "id": "unans-12",
+      "question": "What is the Jain philosophical doctrine of Syadvada and sevenfold predication (saptabhangi)?",
+      "category": "unanswered_spiritual",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:1649",
+        "discourse:4310",
+        "discourse:5343",
+        "discourse:2123",
+        "discourse:2386"
+      ]
+    },
+    {
+      "id": "noisy-10",
+      "question": "asdf qwer zxcv poiuy lkjhg",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:861",
+        "discourse:2946",
+        "discourse:2916",
+        "discourse:5700",
+        "discourse:5386"
+      ]
+    },
+    {
+      "id": "noisy-11",
+      "question": "xyzzy plugh 1234567890 !@#$",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:2754",
+        "discourse:1071",
+        "discourse:1857",
+        "qa:373",
+        "discourse:2513"
+      ]
+    },
+    {
+      "id": "noisy-12",
+      "question": "swami god datta bla bla bla nonsense word salad random text",
+      "category": "noisy_and_transliterated",
+      "shouldAbstain": true,
+      "expectedSourceId": null,
+      "strongMatch": false,
+      "acceptedSourceId": null,
+      "rank": null,
+      "pass": true,
+      "topSourceIds": [
+        "discourse:453",
+        "discourse:662",
+        "discourse:346",
+        "discourse:755",
+        "discourse:900"
+      ]
+    }
+  ]
+}

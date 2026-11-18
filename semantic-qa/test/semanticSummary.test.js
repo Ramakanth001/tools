@@ -104,6 +104,64 @@ test('an exact structured Q&A reply precedes denser semantic neighbors', async (
   assert.equal(result.summary.evidence[0].exactQaDiscovery, undefined);
 });
 
+test('selectGroundedEvidence selects exact answer unit B over sibling unit A with higher cosine', async () => {
+  const answerA = 'Answer unit A has higher cosine similarity but is on an unrelated question.';
+  const answerB = 'Answer unit B has exact question match and lower cosine similarity.';
+  const fullAnswer = `${answerA}\n\n${answerB}`;
+  const result = await buildSemanticSummary({
+    question: 'Devotee question matching B',
+    threshold: 0.49,
+    maxLines: 1,
+    matches: [
+      {
+        sourceId: 'discourse:multia',
+        question: 'Discourse Title',
+        answer: fullAnswer,
+        relevanceScore: 1.0,
+        similarity: 0.85,
+        rankingSignals: { exactQaDiscovery: true },
+        matchedPassages: [
+          {
+            text: answerA,
+            citationText: answerA,
+            start: 0,
+            end: answerA.length,
+            citationStart: 0,
+            citationEnd: answerA.length,
+            semanticSimilarity: 0.85,
+            passageRelevance: 0.85,
+            isExact: false,
+            discoveryExact: false,
+            author: 'Swami',
+            unitKind: 'swami_reply',
+            contextComplete: true,
+            storyComplete: true,
+          },
+          {
+            text: answerB,
+            citationText: answerB,
+            start: answerA.length + 2,
+            end: fullAnswer.length,
+            citationStart: answerA.length + 2,
+            citationEnd: fullAnswer.length,
+            semanticSimilarity: 0.50,
+            passageRelevance: 1.0,
+            isExact: true,
+            discoveryExact: true,
+            author: 'Swami',
+            unitKind: 'swami_reply',
+            contextComplete: true,
+            storyComplete: true,
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(result.summary.status, 'ready');
+  assert.equal(result.summary.answerStatus, 'direct');
+  assert.equal(result.summary.evidence[0].text, answerB);
+});
+
 test('invalid offsets cannot become displayed teaching text', async () => {
   const answer = 'The stored teaching remains exact.';
   const result = await buildSemanticSummary({
@@ -114,7 +172,7 @@ test('invalid offsets cannot become displayed teaching text', async () => {
     }],
   });
   assert.equal(result.summary.status, 'not_available');
-  assert.equal(result.summary.reason, 'no_semantically_relevant_passages');
+  assert.equal(result.summary.reason, 'no_relevant_passages');
 });
 
 test('non-Swami, context-incomplete, and story-incomplete passages are excluded', async () => {
@@ -131,7 +189,7 @@ test('non-Swami, context-incomplete, and story-incomplete passages are excluded'
         matchedPassages: [{ text: answer, start: 0, end: answer.length, semanticSimilarity: 0.7, ...flags }] }],
     });
     assert.equal(result.summary.status, 'not_available');
-    assert.equal(result.summary.reason, 'no_complete_swami_evidence');
+    assert.equal(result.summary.reason, 'no_relevant_passages');
   }
 });
 

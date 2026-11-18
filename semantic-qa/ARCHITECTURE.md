@@ -25,8 +25,8 @@ EmbeddingGemma is already trained. This application does not fine-tune it, updat
 | Standalone UI/API | `http://localhost:8790` |
 | Ollama | `http://127.0.0.1:11434` |
 | Embedding model | `embeddinggemma` |
-| Deep Search model | `qwen3:14b-q8_0` by default; explicit Q4 optional |
-| Deep Search context | 32K, `think: true`, one active generation |
+| Deep Search model | `qwen2.5:7b` by default; configurable reasoning models supported |
+| Deep Search context | Qwen 3: 32K; Qwen 2.5/Llama: 8K; one active generation per job |
 | Vector dimension | 768 floating-point values |
 | Source PostgreSQL | `127.0.0.1:5433/universal_qa_source` |
 | Index PostgreSQL | `127.0.0.1:5433/universal_qa_index` |
@@ -62,7 +62,7 @@ flowchart LR
 
     subgraph Embeddings["Local embedding runtime"]
         OLLAMA["Ollama"]
-        MODEL["EmbeddingGemma + Qwen3 14B"]
+        MODEL["BGE-M3 / EmbeddingGemma + Qwen 2.5 7B"]
     end
 
     subgraph Index["Vector index database"]
@@ -485,8 +485,8 @@ sequenceDiagram
     participant User
     participant UI
     participant API
-    participant Embed as EmbeddingGemma
-    participant Qwen as Qwen3 14B
+    participant Embed as Embedding Model
+    participant Qwen as Reasoning Model (Qwen 2.5 7B default)
     participant PG as PostgreSQL + pgvector
 
     User->>UI: Enter one question
@@ -513,7 +513,7 @@ Step by step:
 1. The API reads the model name, immutable digest, dimension, and format versions recorded with the live corpus.
 2. It rejects stale formats or a configured Ollama model whose current digest differs from the indexed digest.
 3. Verbatim Selection uses the initial retrieval and deterministic exact passage selection without a generation call.
-4. Deep Search rejects any model except the approved Qwen3 14B Q8/Q4 tags and requires Ollama's `thinking` capability. It never falls back silently.
+4. Deep Search defaults to `qwen2.5:7b`; supported tags are allowlisted in `ollama.js`. Qwen 3 requires thinking and uses 32K context, while Qwen 2.5 and Llama use structured JSON with 8K context and thinking disabled. Model quality is evaluated separately; parity is not assumed. Deliberation defaults to fast and preserves explicit adaptive/maximum settings. Calls run serially with a default ten-minute timeout, a twenty-minute server cap and a ninety-minute job deadline. It never falls back silently.
 5. Qwen preserves the question's meaning and produces focused probes. Every probe searches answer and discovery channels independently using dense, lexical, exact-phrase, and fuzzy signals.
 6. Discovery passages may add a source to the shortlist but are never transferred into evidence.
 7. Every shortlisted complete Swami reply or teaching section is reconstructed and read. The model does not adjudicate 720-character fragments.

@@ -127,7 +127,7 @@ test('search uses the corpus embedding format and ranks indexed answer passages'
     },
   });
   assert.equal(embeddedText, 'task: question answering | query: Who is Datta Swami?');
-  assert.equal(lexicalQuery, 'datta OR swami');
+  assert.ok(lexicalQuery.includes('datta') && lexicalQuery.includes('swami') && lexicalQuery.includes('dattatreya'));
   assert.equal(candidateLimit, 200);
   assert.equal(discoveryQuestion, 'Who is Datta Swami?');
 });
@@ -167,7 +167,7 @@ test('search preserves exact structured Q&A precedence while hiding internal ran
           asPassage({
             sourceId: 'paired-qa', question: 'Why is "karma fruit" emphasized?',
             answer: 'Swami gives the complete explanation without repeating that wording.', similarity: 0.73,
-            discoverySimilarity: 0.95, discoveryExact: true,
+            discoverySimilarity: 0.95, discoveryExact: true, answerUnitId: 'paired', discoveryAnswerUnitId: 'paired',
             sourceGroup: 'paired-qa', metadata: { source_type: 'qa' },
           }),
         ],
@@ -426,7 +426,7 @@ test('fast verbatim mode labels a semantic neighbor as related without composing
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         indexConnection: { host: 'db', user: 'writer', database: 'index' },
-        question: 'Can an oil lamp heat my house?', threshold: 0.49,
+        question: 'Does an oil lamp provide light?', threshold: 0.49,
         summary: { enabled: true },
       }),
     });

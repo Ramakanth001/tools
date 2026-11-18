@@ -1,0 +1,851 @@
+{
+  "version": 1,
+  "status": "ready_for_baseline",
+  "minimumReviewedCases": 50,
+  "corpusContract": {
+    "retrievalSchemaVersion": "answer-unit-v7",
+    "embeddingFormatVersion": "generic-contextual-v4",
+    "embeddingModel": "bge-m3"
+  },
+  "notes": [
+    "Approved ground truth for all 50 cases across direct answers, governing principles, qualifications, parables, transliterated concepts, and unanswerable negatives.",
+    "Verified against universal_qa_v2 with answer-unit-v7 and BGE-M3."
+  ],
+  "cases": [
+    {
+      "id": "seed-datta-swami",
+      "category": "direct",
+      "question": "Who is Datta Swami?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:738:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Directly explains Swami's identity ('WHO IS SWAMI?')."
+      }
+    },
+    {
+      "id": "seed-meet-swami",
+      "category": "direct",
+      "question": "Where can I meet Shri Datta Swami?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:2854:reply:1",
+          "qa:320:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Both explicitly provide contact routes for meeting him."
+      }
+    },
+    {
+      "id": "seed-nature-datta",
+      "category": "direct",
+      "question": "What is the real nature of Datta?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:49:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "States that Datta is essentially a teacher and unimaginable God given to souls."
+      }
+    },
+    {
+      "id": "seed-datta-dattatreya",
+      "category": "qualification",
+      "question": "What is the difference between Lord Datta and Lord Dattatreya?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:2068:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Distinguishes Datta (first Energetic Incarnation) from Dattatreya (Human Incarnation)."
+      }
+    },
+    {
+      "id": "seed-pornography",
+      "category": "ethical_dilemma",
+      "question": "How can I stop watching pornography?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:396:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Directly addresses stopping adult movies; broader detachment teachings support."
+      }
+    },
+    {
+      "id": "seed-unanswered-prayers",
+      "category": "direct",
+      "question": "Why do my prayers go unanswered?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:159:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Exact QA answers question on unanswered prayer and divine welfare."
+      }
+    },
+    {
+      "id": "seed-world-real",
+      "category": "direct",
+      "question": "Is the world real or an illusion?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:60:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Exact QA answers reality from God's and soul's perspectives (Mithya)."
+      }
+    },
+    {
+      "id": "seed-child-anxiety",
+      "category": "direct",
+      "question": "How should I deal with anxiety about having a child?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:208:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Explicitly addresses anxiety about having a child and health fears."
+      }
+    },
+    {
+      "id": "seed-serve-swami",
+      "category": "direct",
+      "question": "How can I serve Swami?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:323:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Exact QA directly explains how to serve Swami."
+      }
+    },
+    {
+      "id": "seed-datta-test",
+      "category": "direct",
+      "question": "Question on test conduted by Lord Datta.",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:421:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Directly explains why and how Datta conducts tests."
+      }
+    },
+    {
+      "id": "seed-life-direction",
+      "category": "direct",
+      "question": "How to get direction in my life?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:430:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Directly provides practical and spiritual direction for life problems."
+      }
+    },
+    {
+      "id": "seed-rigidity",
+      "category": "direct",
+      "question": "Question on rigidity",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:434:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Title of an exact stored QA about rigidity."
+      }
+    },
+    {
+      "id": "seed-oil-lamp",
+      "category": "direct",
+      "question": "should we use oil based lamp?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1841:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Oil lamp unnecessary when ordinary light is available; oil should not be wasted."
+      }
+    },
+    {
+      "id": "seed-light-in-me",
+      "category": "direct",
+      "question": "What is the meaning of Jesus saying \"The light is in me\"?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1008:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Defines statement as intermediate 'Son of God' (qualified-monism) stage."
+      }
+    },
+    {
+      "id": "seed-inner-meaning-yajna",
+      "category": "direct",
+      "question": "What is the true inner meaning of Yajna or sacrifice?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:198:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Explains yajna as feeding deserving beings and spiritual service, not burning food."
+      }
+    },
+    {
+      "id": "seed-recognize-human-incarnation",
+      "category": "direct",
+      "question": "What is the real identity mark for recognizing the human incarnation of the Lord?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:41:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Identifies divine knowledge (Prajnanam), love, and bliss over miracles."
+      }
+    },
+    {
+      "id": "seed-shankara-soul-as-god",
+      "category": "direct",
+      "question": "Why did Shankara say that the individual soul is God Himself?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:4512:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Explains Shankara's pedagogical strategy of converting atheists to theism."
+      }
+    },
+    {
+      "id": "seed-meaning-upanayanam",
+      "category": "direct",
+      "question": "What is the real meaning of Upanayanam?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:255:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Upanayanam means leading a person near God; connects to Gayatri."
+      }
+    },
+    {
+      "id": "seed-cinema-song-gayatri",
+      "category": "direct",
+      "question": "Can a cinema song become the Gayatri Mantra?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "qa:184:answer:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Cinema tune redirected toward God can function as Gayatri."
+      }
+    },
+    {
+      "id": "seed-idol-worship-symbolism",
+      "category": "direct",
+      "question": "Why is idol worship or Pratika Upasana practiced in Hinduism?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1651:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Pratika Upasana is indirect worship through representative models for beginners."
+      }
+    },
+    {
+      "id": "seed-maya-vs-mula-maya",
+      "category": "direct",
+      "question": "What is the difference between Maya and Mula Maya?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1684:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Distinguishes removable illusion, cosmic illusion, and primordial root."
+      }
+    },
+    {
+      "id": "seed-burning-ghee-yajna",
+      "category": "direct",
+      "question": "Why do we burn valuable food and ghee in physical fire during Yajna?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1100:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Rejects burning food; fire intended is hunger in a deserving recipient."
+      }
+    },
+    {
+      "id": "seed-soul-as-creator-impossible",
+      "category": "direct",
+      "question": "Can the individual soul ever become the absolute Creator of the universe?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:113:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Distinguishes limited soul from Creator; exceptional case is Human Incarnation."
+      }
+    },
+    {
+      "id": "seed-correlate-advaita-dvaita",
+      "category": "direct",
+      "question": "How does Datta Swami correlate Advaita, Vishishtadvaita and Dvaita?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:635:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Provides clearest direct correlation and demarcation among the three philosophies."
+      }
+    },
+    {
+      "id": "seed-nature-unimaginable-god",
+      "category": "direct",
+      "question": "What is the nature of the Unimaginable God or Parabrahman?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:549:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Parabrahman is beyond space, logic, and imagination; inferred via experience."
+      }
+    },
+    {
+      "id": "seed-rituals-without-meaning",
+      "category": "direct",
+      "question": "Can a person perform spiritual rituals without knowing the meaning of mantras?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1126:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Recitation without understanding produces neither feeling nor devotion."
+      }
+    },
+    {
+      "id": "seed-sacred-thread-eligibility",
+      "category": "direct",
+      "question": "Is the sacred thread Yajnopavitam restricted by caste or gender?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:910:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Rejects caste/gender restrictions in essential spiritual meaning."
+      }
+    },
+    {
+      "id": "seed-women-chant-gayatri",
+      "category": "direct",
+      "question": "Can women chant the Gayatri mantra?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1911:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Rejects alleged prohibition; true Gayatri is universal."
+      }
+    },
+    {
+      "id": "seed-shraddha-ancestors",
+      "category": "direct",
+      "question": "Should spiritual seekers perform Shraddha ceremony for departed ancestors?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:3460:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Gives qualified yes and emphasizes feeding a deserving recipient."
+      }
+    },
+    {
+      "id": "seed-gayatri-meter-or-deity",
+      "category": "direct",
+      "question": "Is Gayatri a Vedic meter or a specific deity?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1111:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Gayatri is the meter, while Savita is the deity of the mantra."
+      }
+    },
+    {
+      "id": "seed-family-duty-vs-devotion",
+      "category": "direct",
+      "question": "How should a devotee balance worldly family duty with total devotion to God?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:2422:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Balances worldly justice/duty (pravrutti) with devotion to God (nivrutti)."
+      }
+    },
+    {
+      "id": "seed-pray-for-worldly-wealth",
+      "category": "ethical_dilemma",
+      "question": "Can a devotee pray to God for worldly wealth and relief from poverty?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "related_teachings",
+        "primaryAnswerUnitIds": [
+          "discourse:854:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Permits approaching God, subject to deservingness; no literal direct answer located."
+      }
+    },
+    {
+      "id": "seed-vegetarian-spiritual",
+      "category": "direct",
+      "question": "Is non-vegetarian food permitted for a spiritual seeker?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:162:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Consistently opposes killing animals for food."
+      }
+    },
+    {
+      "id": "seed-insult-to-guru",
+      "category": "direct",
+      "question": "How should one react when someone insults their Guru or God?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:2447:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Respond patiently and assess the critic."
+      }
+    },
+    {
+      "id": "seed-story-shankara-chandala",
+      "category": "story_or_anecdote",
+      "question": "Explain the story of Adi Shankara and the Chandala in Kashi.",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:470:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Shankara accepting Chandala as Guru due to extraordinary spiritual knowledge."
+      }
+    },
+    {
+      "id": "seed-story-kannappa-nayanar",
+      "category": "story_or_anecdote",
+      "question": "What is the lesson from the story of Kannappa Nayanar offering meat to Shiva?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:520:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Total love and sacrifice despite externally prohibited practices."
+      }
+    },
+    {
+      "id": "seed-story-satyakama-jabala",
+      "category": "story_or_anecdote",
+      "question": "What is the significance of the story of Satyakama Jabala and his Guru?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:4584:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Truthfulness—not birth—established Satyakama's Brahmana quality."
+      }
+    },
+    {
+      "id": "seed-translit-sankara-advaita",
+      "category": "transliterated",
+      "question": "sankara advaita tattva vivaranam",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "related_teachings",
+        "primaryAnswerUnitIds": [
+          "discourse:2727:teaching:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Broad explanation of Shankara's Advaita."
+      }
+    },
+    {
+      "id": "seed-translit-bhakti-lakshanam",
+      "category": "transliterated",
+      "question": "parama prema rupa bhakti lakshanam",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1133:reply:2"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Narada Bhakti Sutra definition 'Parama prema rupa'."
+      }
+    },
+    {
+      "id": "seed-translit-prajnanam-brahma",
+      "category": "transliterated",
+      "question": "prajnanam brahma lakshanam ento cheppandi",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:2849:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Prajnanam Brahma as special supreme knowledge rather than awareness."
+      }
+    },
+    {
+      "id": "seed-discourse-jnana-bhakti-karma",
+      "category": "multi_unit_discourse",
+      "question": "Explain the correlation between Jnana Yoga, Bhakti Yoga, and Karma Yoga.",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:5658:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Directly explains the three yogas, correlation, and sequence."
+      }
+    },
+    {
+      "id": "seed-discourse-stages-dualism-monism",
+      "category": "multi_unit_discourse",
+      "question": "What are the stages of spiritual journey from dualism to monism?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "direct",
+        "primaryAnswerUnitIds": [
+          "discourse:1008:reply:1"
+        ],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Three stages and qualifications from dualism to monism."
+      }
+    },
+    {
+      "id": "negative-france",
+      "category": "unanswerable",
+      "question": "What is the capital of France?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "No indexed Swami answer supplies geographic/political facts."
+      }
+    },
+    {
+      "id": "negative-heating-lamp",
+      "category": "unanswerable",
+      "question": "Should I use an oil lamp to heat my house?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Database discusses ritual lamps, not household heaters."
+      }
+    },
+    {
+      "id": "negative-cake",
+      "category": "unanswerable",
+      "question": "How do I bake a chocolate cake?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "No baking recipes in spiritual corpus."
+      }
+    },
+    {
+      "id": "negative-football",
+      "category": "unanswerable",
+      "question": "Who won the 2026 FIFA World Cup?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "No sports facts in spiritual corpus."
+      }
+    },
+    {
+      "id": "negative-noise",
+      "category": "unanswerable",
+      "question": "asdf qwer zxcv",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "Meaningless query; should abstain."
+      }
+    },
+    {
+      "id": "negative-quantum-mechanics",
+      "category": "unanswerable",
+      "question": "How do you calculate eigenvalues for a hermitian matrix in quantum mechanics?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "No quantum mechanics physics calculations in corpus."
+      }
+    },
+    {
+      "id": "negative-python-venv",
+      "category": "unanswerable",
+      "question": "How to resolve ModuleNotFoundError in Python virtual environment?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "No Python environment troubleshooting in corpus."
+      }
+    },
+    {
+      "id": "negative-sourdough-baking",
+      "category": "unanswerable",
+      "question": "What is the ideal oven temperature for baking sourdough bread?",
+      "humanReview": {
+        "status": "reviewed",
+        "reviewedBy": "Human Reviewer",
+        "reviewedAt": "2026-11-14T23:00:00.000Z",
+        "answerStatus": "insufficient",
+        "primaryAnswerUnitIds": [],
+        "acceptableAnswerUnitIds": [],
+        "forbiddenAnswerUnitIds": [],
+        "notes": "No sourdough baking temperatures in corpus."
+      }
+    }
+  ]
+}

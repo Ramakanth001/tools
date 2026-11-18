@@ -2,6 +2,8 @@ const crypto = require('node:crypto');
 
 const SWAMI_AUTHOR = 'Swami';
 const MAX_RETRIEVAL_CHARACTERS = 1600;
+const TARGET_PASSAGE_MIN = 250;
+const TARGET_PASSAGE_MAX = 800;
 
 const REPLY_MARKERS = [
   /(?:^|\n)\s*(?:Original\s+Message|New\s+Reply)\s+of\s+(?:(?:Shri|Sri|Śrī)\s+)?(?:Datta\s*)?S[vw][aā]+m[iīy](?:ji)?\s*(?::\s*-?|-)\s*/giu,
@@ -29,8 +31,7 @@ const QUESTION_MARKERS = [
 
 const NON_SWAMI_SPEAKER_MARKERS = [
   /(?:^|\n)\s*\[\s*By\s+(?![^\]\n]{0,160}(?:s[vw][aā]+m[iīy]|datta))[^\]\n]{1,160}\]\s*/giu,
-  /(?:^|\n)\s*(?:(?:Ms|Mrs|Mr|Dr|Prof)\.?\s+[^\n:]{1,100}|(?:Shri|Sri)\.?\s+[^\n:]{1,100}\s+(?:spoke|said|asked|comments?(?:\s+on[^\n:]*)?)|Mother(?:\s+of\s+[^\n:]{1,80})?|Father|Priest|Devotee|Questioner|Interviewer)\s*:\s*/giu,
-  /(?:^|\n)\s*God-preacher\s+(?:(?:Shri|Sri|Śrī)\s+)?Datta\s+(?:spoke|said|re?r?plied|answered)\s*(?::\s*-?|-)\s*/giu,
+  /(?:^|\n)\s*(?:(?:Ms|Mrs|Mr|Dr|Prof)\.?\s+[^\n:]{1,100}|(?:Shri|Sri)\.?\s+(?!(?:Datta\s+)?S[vw][aā]+m[iīy]|Datta)[^\n:]{1,100}\s+(?:spoke|said|asked|comments?(?:\s+on[^\n:]*)?)|Mother(?:\s+of\s+[^\n:]{1,80})?|Father|Priest|Devotee|Questioner|Interviewer)\s*:\s*/giu,
   /(?:^|\n)\s*(?:ഫാദർ|പുരോഹിതൻ|ഭക്തൻ|ചോദ്യകർത്താവ്)\s*:\s*/gu,
   /(?:^|\n)\s*(?:ఫాదర్|భక్తుడు|ప్రశ్నకర్త)\s*:\s*/gu,
 ];
@@ -63,7 +64,13 @@ function markerEvents(text) {
       }
     }
   };
+  const hasDiscipleOfDatta = /(?:^|\n)\s*Disciple\s+of\s+Datta/iu.test(text);
+  const godPreacherMarker = /(?:^|\n)\s*God-preacher\s+(?:(?:Shri|Sri|Śrī)\s+)?Datta\s+(?:spoke|said|re?r?plied|answered)\s*(?::\s*-?|-)\s*/giu;
+
   collect(REPLY_MARKERS, 'swami_reply');
+  if (!hasDiscipleOfDatta) {
+    collect([godPreacherMarker], 'swami_reply');
+  }
   for (const reply of events.filter((event) => event.role === 'swami_reply')) {
     const lookbackStart = Math.max(0, reply.start - 7000);
     const beforeReply = text.slice(lookbackStart, reply.start);
@@ -80,15 +87,27 @@ function markerEvents(text) {
   }
   collect(QUESTION_MARKERS, 'devotee_question');
   collect(NON_SWAMI_SPEAKER_MARKERS, 'other_speaker');
+  if (hasDiscipleOfDatta) {
+    collect([godPreacherMarker], 'other_speaker');
+  }
   const rolePriority = { swami_reply: 0, devotee_question: 1, other_speaker: 2 };
   return events
     .sort((left, right) => left.start - right.start || rolePriority[left.role] - rolePriority[right.role] || left.contentStart - right.contentStart)
     .filter((event, index, values) => !index || event.start !== values[index - 1].start);
 }
 
+function explicitByline(text) {
+  return String(text || '').match(/^\s*\[By\s+([^\]\r\n]+)\]/iu)?.[1]?.trim() || '';
+}
+
+function isCitableSwamiUnit(unit) {
+  const byline = explicitByline(unit.text) || (unit.unitKind !== 'swami_reply' ? explicitByline(unit.displayText) : '');
+  return unit.author === SWAMI_AUTHOR && (!byline || /^(?:(?:Shri|Sri)\s+)?(?:Datta\s*Swami|Swami)$/iu.test(byline));
+}
+
 function parseAnswerUnits({ text: input, sourceId = '', sourceType = '', question = '', language = '', author = '' } = {}) {
   const text = String(input || '');
-  const resolvedAuthor = String(author || '').trim() || SWAMI_AUTHOR;
+  const resolvedAuthor = explicitByline(text) || String(author || '').trim() || SWAMI_AUTHOR;
   const events = markerEvents(text);
   const replyEvents = events.filter((event) => event.role === 'swami_reply');
   const questionEvents = events.filter((event) => event.role === 'devotee_question');
@@ -110,6 +129,15 @@ function parseAnswerUnits({ text: input, sourceId = '', sourceType = '', questio
   }
 
   if (!replyEvents.length) {
+    if (resolvedAuthor !== SWAMI_AUTHOR && !isCitableSwamiUnit({ author: SWAMI_AUTHOR, text })) {
+      ignored.push({ role: 'other_speaker', start: 0, end: text.length, text });
+      ambiguities.push({ sourceId, reason: 'explicit non-Swami byline has no recognized Swami reply', offsets: [0] });
+      return { units, ignored, ambiguities, author: resolvedAuthor };
+    }
+    if (resolvedAuthor !== SWAMI_AUTHOR && !explicitByline(text)) {
+      ignored.push({ role: 'other_speaker', start: 0, end: text.length, text });
+      return { units, ignored, ambiguities, author: resolvedAuthor };
+    }
     if (otherSpeakerEvents.length) {
       ambiguities.push({
         sourceId,
@@ -272,12 +300,65 @@ function retrievalWindows(text, citationSpan, maxCharacters = MAX_RETRIEVAL_CHAR
     .flatMap((window) => hardCharacterWindows(text, window, maxCharacters));
 }
 
+function isOrphanFragment(text) {
+  const t = String(text || '').trim();
+  if (t.length < 25) return true;
+  if (!/[.!?。！？।]['"”’\)\]]*$/u.test(t) && t.length < 120) return true;
+  return false;
+}
+
+function mergeOrphanLogicalSpans(text, spans, maxCharacters = MAX_RETRIEVAL_CHARACTERS) {
+  if (spans.length <= 1) return spans;
+  const merged = [];
+  let current = spans[0];
+  for (let i = 1; i < spans.length; i++) {
+    const next = spans[i];
+    const gap = text.slice(current.end, next.start);
+    const combinedLength = next.end - current.start;
+    if (/^\s*$/.test(gap) && (isOrphanFragment(current.text) || isOrphanFragment(next.text)) && combinedLength <= maxCharacters) {
+      current = trimRange(text, current.start, next.end);
+    } else {
+      merged.push(current);
+      current = next;
+    }
+  }
+  merged.push(current);
+  return merged;
+}
+
+function mergeCohesiveParagraphSpans(text, spans, maxCharacters = MAX_RETRIEVAL_CHARACTERS) {
+  if (spans.length <= 1) return spans;
+  const orphanMerged = mergeOrphanLogicalSpans(text, spans, maxCharacters);
+  if (orphanMerged.length <= 1) return orphanMerged;
+
+  const merged = [];
+  let current = orphanMerged[0];
+  for (let i = 1; i < orphanMerged.length; i++) {
+    const next = orphanMerged[i];
+    const gap = text.slice(current.end, next.start);
+    const combinedLength = next.end - current.start;
+    const isContiguous = /^\s*$/.test(gap);
+    const isShortParagraph = current.text.length < TARGET_PASSAGE_MIN || next.text.length < TARGET_PASSAGE_MIN;
+    const canMergeTarget = combinedLength <= TARGET_PASSAGE_MAX && combinedLength <= maxCharacters;
+
+    if (isContiguous && canMergeTarget && (isShortParagraph || combinedLength <= 500)) {
+      current = trimRange(text, current.start, next.end);
+    } else {
+      merged.push(current);
+      current = next;
+    }
+  }
+  merged.push(current);
+  return merged;
+}
+
 function buildAnswerPassages(text, units, { maxCharacters = MAX_RETRIEVAL_CHARACTERS } = {}) {
   const passages = [];
   for (const unit of units || []) {
-    const logicalSpans = paragraphSpans(text, unit.start, unit.end)
+    const rawSpans = paragraphSpans(text, unit.start, unit.end)
       .flatMap((span) => stanzaSpans(text, span))
       .filter((span) => !nonCitableContextKind(span.text));
+    const logicalSpans = mergeCohesiveParagraphSpans(text, rawSpans, maxCharacters);
     for (const citation of logicalSpans) {
       for (const window of retrievalWindows(text, citation, maxCharacters)) {
         passages.push({
@@ -310,32 +391,84 @@ function storyCompleteness(value) {
 }
 
 function buildDiscoveryTexts(record, parsed = null) {
-  const values = [record?.question, record?.metadata?.question_context, record?.metadata?.source_context]
-    .map((value) => String(value || '').trim())
-    .filter(Boolean);
-  for (const ignored of parsed?.ignored || []) values.push(String(ignored.text || '').trim());
-  const displayText = String(record?.answer || '');
+  const items = [];
+  const add = (text, answerUnitId = null, kind = 'context') => {
+    const clean = String(text || '').trim();
+    if (clean && !items.some((i) => i.text === clean && i.answerUnitId === answerUnitId && i.kind === kind)) {
+      items.push({ text: clean, answerUnitId, kind });
+    }
+  };
+  const isMultiUnit = (parsed?.units?.length || 0) > 1;
+  const singleUnitId = (!isMultiUnit && parsed?.units?.[0]?.answerUnitId) || null;
+  if (record?.question) add(record.question, null, 'title');
+  const isQa = record?.metadata?.source_type === 'qa';
+  if (record?.metadata?.question_context) add(record.metadata.question_context, singleUnitId, isQa ? 'paired_question' : 'context');
+  if (record?.metadata?.source_context) add(record.metadata.source_context, null);
   for (const unit of parsed?.units || []) {
+    if (unit.associatedQuestion) {
+      const hasParsedQuestion = (parsed?.ignored || []).some((item) => item.role === 'devotee_question' &&
+        (item.text.includes(unit.associatedQuestion) || unit.associatedQuestion.includes(item.text)));
+      add(unit.associatedQuestion, unit.answerUnitId, isQa || hasParsedQuestion ? 'paired_question' : 'context');
+    }
+    const displayText = String(record?.answer || '');
     for (const span of paragraphSpans(displayText, unit.start, unit.end)) {
-      if (nonCitableContextKind(span.text)) values.push(span.text);
+      if (nonCitableContextKind(span.text)) add(span.text, unit.answerUnitId);
     }
   }
-  const windows = [...new Set(values)].flatMap((text) => {
-    const span = trimRange(text, 0, text.length);
-    return retrievalWindows(text, span).map((window) => window.text);
-  });
-  return [...new Set(windows)].map((text, index) => ({
-    sourceId: String(record.sourceId), discoveryIndex: index, text,
+  for (const ignored of parsed?.ignored || []) {
+    let matchedUnitId = null;
+    const ignoredText = String(ignored.text || '').trim();
+    if (parsed?.units) {
+      const match = parsed.units.find((u) => u.associatedQuestion && (
+        u.associatedQuestion.includes(ignoredText) || ignoredText.includes(u.associatedQuestion)
+      ));
+      if (match) {
+        matchedUnitId = match.answerUnitId;
+      } else {
+        const nextUnit = parsed.units.find((u) => u.start >= ignored.end);
+        if (nextUnit) matchedUnitId = nextUnit.answerUnitId;
+      }
+    }
+    add(ignored.text, matchedUnitId || singleUnitId,
+      ignored.role === 'devotee_question' ? 'paired_question' : 'context');
+  }
+  const windows = [];
+  for (const item of items) {
+    const span = trimRange(item.text, 0, item.text.length);
+    for (const window of retrievalWindows(item.text, span)) {
+      if (window.text) windows.push({ text: window.text, answerUnitId: item.answerUnitId, kind: item.kind });
+    }
+  }
+  const seen = new Map();
+  for (const w of windows) {
+    const key = JSON.stringify([w.text, w.answerUnitId, w.kind]);
+    if (!seen.has(key)) {
+      seen.set(key, w);
+    }
+  }
+  const unique = Array.from(seen.values());
+  return unique.map((item, index) => ({
+    sourceId: String(record.sourceId),
+    discoveryIndex: index,
+    text: item.text,
+    answerUnitId: item.answerUnitId || null,
+    kind: item.kind,
   }));
 }
 
 module.exports = {
+  explicitByline,
+  isCitableSwamiUnit,
   MAX_RETRIEVAL_CHARACTERS,
   SWAMI_AUTHOR,
+  TARGET_PASSAGE_MIN,
+  TARGET_PASSAGE_MAX,
   buildAnswerPassages,
   buildDiscoveryTexts,
   hardCharacterWindows,
   markerEvents,
+  mergeCohesiveParagraphSpans,
+  mergeOrphanLogicalSpans,
   nonCitableContextKind,
   parseAnswerUnits,
   sha256,

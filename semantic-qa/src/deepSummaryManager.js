@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
+const { performance } = require('node:perf_hooks');
 const ollama = require('./ollama');
-const { sha256 } = require('./corpusStructure');
+const { sha256, isCitableSwamiUnit } = require('./corpusStructure');
 const { sanitizeError } = require('./syncManager');
 
 const MAX_DEEP_RECORDS = 100;
@@ -8,10 +9,12 @@ const DEFAULT_DEEP_RECORDS = 60;
 const DEFAULT_DEEP_PARALLEL_REQUESTS = 1;
 const MAX_DEEP_PARALLEL_REQUESTS = 1;
 const DEFAULT_DEEP_REQUEST_TIMEOUT_MS = 600000;
-const MAX_DEEP_REQUEST_TIMEOUT_MS = 600000;
-const DEEP_JOB_TIMEOUT_MS = 45 * 60 * 1000;
-const ADJUDICATION_BATCH_CHARACTERS = 42000;
-const MAX_ADJUDICATION_CHARACTERS = 84000;
+const MAX_DEEP_REQUEST_TIMEOUT_MS = 1200000;
+const DEEP_JOB_TIMEOUT_MS = 90 * 60 * 1000;
+const ADJUDICATION_BATCH_CHARACTERS = 4500;
+const MAX_READING_UNIT_CHARACTERS = 3500;
+const MAX_ADJUDICATION_CHARACTERS = 28000;
+const MAX_ADJUDICATION_UNITS = 20;
 const MODEL_CALL_ATTEMPTS = 2;
 
 const DEEP_PHASE_DEFINITIONS = [
@@ -57,6 +60,36 @@ function phasePercent(phase) {
   return Math.min(100, Math.round((phase.processed / phase.total) * 100));
 }
 
+function roundedMilliseconds(value) {
+  return Math.max(0, Math.round((Number(value) || 0) * 100) / 100);
+}
+
+function metricsSnapshot(job, { includeCandidateIds = job.status === 'completed' } = {}) {
+  const metrics = job.metrics || {};
+  const candidateFlow = { ...(metrics.candidateFlow || {}) };
+  if (!includeCandidateIds) delete candidateFlow.candidateAnswerUnitIds;
+  return {
+    queueDurationMs: metrics.queueDurationMs == null ? null : roundedMilliseconds(metrics.queueDurationMs),
+    modelLoadDurationMs: roundedMilliseconds(metrics.modelLoadDurationMs),
+    promptEvalDurationMs: roundedMilliseconds(metrics.promptEvalDurationMs),
+    generationDurationMs: roundedMilliseconds(metrics.generationDurationMs),
+    terminationReason: job.terminationReason || null,
+    phases: Object.fromEntries(Object.entries(metrics.phases || {}).map(([id, phase]) => [id, {
+      durationMs: phase.durationMs == null ? null : roundedMilliseconds(phase.durationMs),
+      processed: Number(phase.processed) || 0,
+      total: Number(phase.total) || 0,
+    }])),
+    modelCalls: (metrics.modelCalls || []).map((call) => ({ ...call, durationMs: roundedMilliseconds(call.durationMs) })),
+    probeRetrievals: (metrics.probeRetrievals || []).map((probe) => ({ ...probe, durationMs: roundedMilliseconds(probe.durationMs) })),
+    tokenUsage: {
+      prompt: Number(metrics.tokenUsage?.prompt) || 0,
+      completion: Number(metrics.tokenUsage?.completion) || 0,
+      total: (Number(metrics.tokenUsage?.prompt) || 0) + (Number(metrics.tokenUsage?.completion) || 0),
+    },
+    candidateFlow,
+  };
+}
+
 function progressSnapshot(job) {
   const now = Date.now();
   const phases = job.phases.map((phase) => ({
@@ -72,7 +105,7 @@ function progressSnapshot(job) {
   return {
     phases,
     overallPercent: job.status === 'completed' ? 100 : Math.min(99, Math.round(weighted)),
-    elapsedSeconds: Math.max(0, Math.round((now - job.startedAtMs) / 1000)),
+    elapsedSeconds: Math.max(0, Math.round(((job.finishedAt ? Date.parse(job.finishedAt) : now) - job.startedAtMs) / 1000)),
     etaSeconds: null,
     estimatedTotalSeconds: null,
     estimatedCompletionAt: null,
@@ -99,9 +132,11 @@ function publicJob(job) {
     ...progress,
     error: job.error,
     logs: [...job.logs],
+    metrics: metricsSnapshot(job),
     result: job.result,
     createdAt: job.createdAt,
     finishedAt: job.finishedAt,
+    terminationReason: job.terminationReason || null,
   };
 }
 
@@ -142,6 +177,7 @@ function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, 
         matchChannels: match.matchChannels || passage.matchChannels || [],
         bestProbeRank: Number(match.bestProbeRank) || Number.POSITIVE_INFINITY,
         matchedProbeCount: Number(match.matchedProbeCount) || 0,
+        originalQueryRank: Number(match.originalQueryRank) || Number.POSITIVE_INFINITY,
       });
       if (evidence.length >= candidateLimit) break;
     }
@@ -157,6 +193,33 @@ function collectCandidateEvidence(matches, { maxRecords = DEFAULT_DEEP_RECORDS, 
   };
 }
 
+function mergePassages(existingPassages, newPassages) {
+  const merged = new Map();
+  const makeKey = (p) => (p.answerUnitId ? String(p.answerUnitId) : `${p.start}:${p.end}:${p.text}`);
+
+  for (const p of (Array.isArray(existingPassages) ? existingPassages : [])) {
+    if (p) merged.set(makeKey(p), { ...p });
+  }
+
+  for (const p of (Array.isArray(newPassages) ? newPassages : [])) {
+    if (!p) continue;
+    const key = makeKey(p);
+    const prev = merged.get(key);
+    if (!prev) {
+      merged.set(key, { ...p });
+    } else {
+      merged.set(key, {
+        ...prev,
+        relevanceScore: Math.max(Number(prev.relevanceScore || 0), Number(p.relevanceScore || 0)),
+        semanticSimilarity: Math.max(Number(prev.semanticSimilarity || 0), Number(p.semanticSimilarity || 0)),
+        matchChannels: [...new Set([...(prev.matchChannels || []), ...(p.matchChannels || [])])],
+      });
+    }
+  }
+
+  return [...merged.values()].sort((a, b) => Number(b.relevanceScore || 0) - Number(a.relevanceScore || 0));
+}
+
 function fuseMatches(resultSets, maximum) {
   const fused = new Map();
   const reserved = new Set();
@@ -166,12 +229,29 @@ function fuseMatches(resultSets, maximum) {
       const match = matches[rank];
       const key = String(match.sourceId);
       if (rank < perProbeQuota) reserved.add(key);
-      const existing = fused.get(key) || { match, score: 0, ranks: 0, bestProbeRank: Number.POSITIVE_INFINITY };
-      existing.score += 1 / (60 + rank + 1);
-      existing.ranks += 1;
-      existing.bestProbeRank = Math.min(existing.bestProbeRank, rank + 1);
-      if (Number(match.relevanceScore || 0) > Number(existing.match.relevanceScore || 0)) existing.match = match;
-      fused.set(key, existing);
+      const existing = fused.get(key);
+      if (!existing) {
+        fused.set(key, {
+          match: {
+            ...match,
+            matchedPassages: Array.isArray(match.matchedPassages) ? [...match.matchedPassages] : [],
+          },
+          score: 1 / (60 + rank + 1),
+          ranks: 1,
+          bestProbeRank: rank + 1,
+        });
+      } else {
+        existing.score += 1 / (60 + rank + 1);
+        existing.ranks += 1;
+        existing.bestProbeRank = Math.min(existing.bestProbeRank, rank + 1);
+        const mergedPassages = mergePassages(existing.match.matchedPassages, match.matchedPassages);
+        const baseMatch = Number(match.relevanceScore || 0) > Number(existing.match.relevanceScore || 0) ? match : existing.match;
+        existing.match = {
+          ...baseMatch,
+          relevanceScore: Math.max(Number(existing.match.relevanceScore || 0), Number(match.relevanceScore || 0)),
+          matchedPassages: mergedPassages,
+        };
+      }
     }
   }
   const sorted = [...fused.values()].sort((left, right) => (
@@ -183,6 +263,7 @@ function fuseMatches(resultSets, maximum) {
     ...sorted.filter((entry) => !reserved.has(String(entry.match.sourceId))),
   ].slice(0, maximum).map(({ match, score, ranks, bestProbeRank }) => ({
     ...match,
+    originalQueryRank: (resultSets[0] || []).findIndex((item) => String(item.sourceId) === String(match.sourceId)) + 1 || Number.POSITIVE_INFINITY,
     fusedProbeScore: score,
     matchedProbeCount: ranks,
     bestProbeRank,
@@ -191,17 +272,25 @@ function fuseMatches(resultSets, maximum) {
 
 function augmentDeepSearchProbes(question, planned) {
   const exactQuestion = String(question || '').trim();
-  const probes = [exactQuestion];
-  if (/\b(?:promotion|career|job|interview|workplace|professional)\b/iu.test(exactQuestion)) {
-    probes.push(
-      'Can a devotee pray to God for success in a job interview, competition, test, or career promotion?',
-      'How can a devotee love God without aspiring for a practical worldly fruit or boon in return?',
-      'Can a devotee ask God for a peaceful worldly life or protection from difficulties at work?',
-      'Does God grant worldly benefits and fulfill desires requested in prayer?',
-    );
+  const rawPlanned = Array.isArray(planned) ? planned : [];
+  const normalizedExact = exactQuestion.toLowerCase();
+
+  const probes = [];
+  const seen = new Set();
+  if (exactQuestion) {
+    probes.push(exactQuestion);
+    seen.add(normalizedExact);
   }
-  probes.push(...(Array.isArray(planned) ? planned : []));
-  return [...new Set(probes.map((value) => String(value || '').trim()).filter(Boolean))].slice(0, 6);
+  for (const item of rawPlanned) {
+    const probe = String(item || '').trim();
+    if (!probe) continue;
+    const norm = probe.toLowerCase();
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      probes.push(probe);
+    }
+  }
+  return probes.slice(0, 6);
 }
 
 function batchesByCharacters(units, maximumCharacters = ADJUDICATION_BATCH_CHARACTERS) {
@@ -234,7 +323,33 @@ function fallbackUnits(evidence) {
   }));
 }
 
-function selectAdjudicationUnits(units, evidence, maximumCharacters = MAX_ADJUDICATION_CHARACTERS) {
+function boundedReadingUnit(unit, question, maximum = MAX_READING_UNIT_CHARACTERS) {
+  const text = String(unit.text || '');
+  if (text.length <= maximum) return unit;
+  const paragraphs = [...text.matchAll(/[^\n]+(?:\n(?!\n)[^\n]+)*/gu)];
+  const tokens = [...new Set(directMatchTokens(question))];
+  const ranked = paragraphs.map((match) => ({ match, score: tokens.filter((token) => directMatchTokens(match[0]).includes(token)).length / Math.sqrt(Math.max(1, match[0].length / 500)) }))
+    .filter(({ match }) => match[0].length <= maximum)
+    .sort((a, b) => b.score - a.score || a.match.index - b.match.index);
+  if (!ranked.length) return null; // Never cut an oversized paragraph mid-sentence.
+  const anchor = ranked[0].match;
+  const index = paragraphs.indexOf(anchor);
+  let first = index;
+  let last = index;
+  while (last + 1 < paragraphs.length && paragraphs[last + 1].index + paragraphs[last + 1][0].length - paragraphs[first].index <= maximum) last++;
+  while (first > 0 && paragraphs[last].index + paragraphs[last][0].length - paragraphs[first - 1].index <= maximum) first--;
+  const offset = paragraphs[first].index;
+  const excerpt = text.slice(offset, paragraphs[last].index + paragraphs[last][0].length);
+  return { ...unit, text: excerpt, displayText: unit.displayText ?? text, start: unit.start + offset, end: unit.start + offset + excerpt.length, contentHash: sha256(excerpt), readingTruncated: true };
+}
+
+function selectAdjudicationUnits(
+  units,
+  evidence,
+  maximumCharacters = MAX_ADJUDICATION_CHARACTERS,
+  maximumUnits = MAX_ADJUDICATION_UNITS,
+  question = '',
+) {
   const candidates = new Map();
   for (const item of Array.isArray(evidence) ? evidence : []) {
     if (!item.answerUnitId) continue;
@@ -244,25 +359,27 @@ function selectAdjudicationUnits(units, evidence, maximumCharacters = MAX_ADJUDI
       matchedProbeCount: 0,
       relevanceScore: 0,
       semanticSimilarity: 0,
+      originalQueryRank: Number.POSITIVE_INFINITY,
     };
     current.bestProbeRank = Math.min(current.bestProbeRank, Number(item.bestProbeRank) || Number.POSITIVE_INFINITY);
     current.matchedProbeCount = Math.max(current.matchedProbeCount, Number(item.matchedProbeCount) || 0);
     current.relevanceScore = Math.max(current.relevanceScore, Number(item.relevanceScore) || 0);
     current.semanticSimilarity = Math.max(current.semanticSimilarity, Number(item.semanticSimilarity) || 0);
+    current.originalQueryRank = Math.min(current.originalQueryRank, Number(item.originalQueryRank) || Number.POSITIVE_INFINITY);
     candidates.set(key, current);
   }
   const sourceUnits = Array.isArray(units) ? units : [];
-  const eligible = candidates.size
+  const eligible = (candidates.size
     ? sourceUnits.filter((unit) => candidates.has(String(unit.answerUnitId)))
-    : sourceUnits;
-  const ranked = eligible.map((unit) => {
+    : sourceUnits).filter((unit) => isCitableSwamiUnit(unit));
+  const ranked = eligible.map((unit) => boundedReadingUnit(unit, question)).filter(Boolean).map((unit) => {
     const signals = candidates.get(String(unit.answerUnitId)) || {};
     const length = String(unit.text || '').length;
     const bestProbeRank = Number(signals.bestProbeRank) || Number.POSITIVE_INFINITY;
     return {
       unit,
       cost: length + 500,
-      priority: bestProbeRank + Math.log2(1 + length / 1000),
+      priority: (Number(signals.originalQueryRank) <= 3 ? -200 + Number(signals.originalQueryRank) : 0) + (question && isLiteralDirectQuestionMatch(question, unit.associatedQuestion || unit.title) ? -100 : 0) + bestProbeRank + Math.log2(1 + length / 1000),
       matchedProbeCount: Number(signals.matchedProbeCount) || 0,
       relevanceScore: Number(signals.relevanceScore) || 0,
       semanticSimilarity: Number(signals.semanticSimilarity) || 0,
@@ -277,6 +394,7 @@ function selectAdjudicationUnits(units, evidence, maximumCharacters = MAX_ADJUDI
   const selected = [];
   let characters = 0;
   for (const item of ranked) {
+    if (selected.length >= maximumUnits) break;
     if (selected.length && characters + item.cost > maximumCharacters) continue;
     selected.push(item.unit);
     characters += item.cost;
@@ -291,6 +409,31 @@ function createDeepSummaryManager({
   inspectHardware = null,
 } = {}) {
   const jobs = new Map();
+  const queue = [];
+  let activeJobId = null;
+
+  function processQueue() {
+    if (activeJobId !== null) {
+      const activeJob = jobs.get(activeJobId);
+      if (activeJob && activeJob.status === 'running') {
+        return;
+      }
+      activeJobId = null;
+    }
+
+    while (queue.length > 0) {
+      const next = queue.shift();
+      const job = next.job;
+      if (['cancelled', 'failed', 'completed'].includes(job.status)) {
+        continue;
+      }
+      activeJobId = job.id;
+      job.startedRunningAtMs = Date.now();
+      job.metrics.queueDurationMs = Math.max(0, job.startedRunningAtMs - job.startedAtMs);
+      queueMicrotask(() => void run(job, { ...next.config, hardwarePreference: job.hardwarePreference }));
+      return;
+    }
+  }
 
   function publish(job, event = 'progress') {
     const payload = JSON.stringify(publicJob(job));
@@ -325,12 +468,14 @@ function createDeepSummaryManager({
     job.currentOperation = operation || phase.name;
     job.phaseProcessed = 0;
     job.phaseTotal = phase.total;
+    job.metrics.phases[id] = { startedAtMs: performance.now(), durationMs: null, processed: 0, total: phase.total };
     publish(job);
   }
 
   function advance(job, amount = 1, operation = null) {
     const phase = job.phases.find((item) => item.id === job.currentPhaseId);
     phase.processed = Math.min(phase.total, phase.processed + amount);
+    if (job.metrics.phases[phase.id]) job.metrics.phases[phase.id].processed = phase.processed;
     job.phaseProcessed = phase.processed;
     if (operation) job.currentOperation = operation;
     publish(job);
@@ -341,6 +486,12 @@ function createDeepSummaryManager({
     phase.processed = phase.total;
     phase.status = 'completed';
     phase.finishedAt = new Date().toISOString();
+    const timing = job.metrics.phases[phase.id];
+    if (timing) {
+      timing.durationMs = performance.now() - timing.startedAtMs;
+      timing.processed = phase.processed;
+      timing.total = phase.total;
+    }
     job.phaseProcessed = phase.processed;
     publish(job);
   }
@@ -354,39 +505,82 @@ function createDeepSummaryManager({
     job.activeRequests = 1;
     job.currentOperation = operation;
     publish(job);
+    const startedAtMs = performance.now();
+    let attempts = 0;
+    let status = 'failed';
     try {
       for (let attempt = 1; attempt <= MODEL_CALL_ATTEMPTS; attempt += 1) {
+        attempts = attempt;
+        let onAbort = null;
         try {
-          return await callback();
+          const callPromise = Promise.resolve().then(() => callback());
+          const abortPromise = new Promise((_, reject) => {
+            if (job.abortController.signal.aborted) {
+              const reason = job.abortController.signal.reason;
+              reject(reason instanceof Error ? reason : new Error('Deep Search cancelled'));
+              return;
+            }
+            onAbort = () => {
+              const reason = job.abortController.signal.reason;
+              reject(reason instanceof Error ? reason : new Error('Deep Search cancelled'));
+            };
+            job.abortController.signal.addEventListener('abort', onAbort, { once: true });
+          });
+          const result = await Promise.race([callPromise, abortPromise]);
+          status = 'succeeded';
+          return result;
         } catch (error) {
           throwIfStopped(job);
-          const permanent = ['OLLAMA_MODEL_NOT_ALLOWED', 'OLLAMA_THINKING_REQUIRED'].includes(error?.code);
+          const permanent = ['OLLAMA_MODEL_NOT_ALLOWED', 'OLLAMA_THINKING_REQUIRED', 'OLLAMA_REQUEST_CANCELLED', 'DEEP_SEARCH_CANCELLED', 'DEEP_SEARCH_TIMEOUT'].includes(error?.code);
           if (attempt >= MODEL_CALL_ATTEMPTS || permanent) throw error;
           log(job, `${operation} failed once; retrying the same bounded model call.`);
           job.currentOperation = `${operation} · retry ${attempt + 1} of ${MODEL_CALL_ATTEMPTS}`;
           publish(job);
+        } finally {
+          if (onAbort) {
+            job.abortController.signal.removeEventListener('abort', onAbort);
+          }
         }
       }
       throw new Error(`${operation} did not return a result`);
+    } finally {
+      job.metrics.modelCalls.push({
+        operation,
+        attempts,
+        status,
+        durationMs: performance.now() - startedAtMs,
+      });
+      job.activeRequests = 0;
+      publish(job);
     }
-    finally { job.activeRequests = 0; publish(job); }
   }
 
   async function run(job, config) {
+    const jobTimeoutMs = Number.isFinite(config.jobTimeoutMs) ? config.jobTimeoutMs : DEEP_JOB_TIMEOUT_MS;
     const deadline = setTimeout(() => {
-      const error = new Error('Deep Search exceeded its 45-minute job limit');
-      error.code = 'DEEP_SEARCH_DEADLINE';
+      const error = new Error('Deep Search timed out');
+      error.code = 'DEEP_SEARCH_TIMEOUT';
       job.abortController.abort(error);
-    }, DEEP_JOB_TIMEOUT_MS);
+    }, jobTimeoutMs);
     deadline.unref?.();
     try {
+      throwIfStopped(job);
       job.status = 'running';
+      job.startedRunningAtMs = Date.now();
+      job.metrics.queueDurationMs = Math.max(0, job.startedRunningAtMs - job.startedAtMs);
       const common = {
         baseUrl: config.baseUrl,
         model: config.model,
         hardwarePreference: config.hardwarePreference,
         timeoutMs: Math.min(MAX_DEEP_REQUEST_TIMEOUT_MS, Math.max(60000, Number(config.requestTimeoutMs) || DEFAULT_DEEP_REQUEST_TIMEOUT_MS)),
         signal: job.abortController.signal,
+        onMetrics: (usage) => {
+          job.metrics.tokenUsage.prompt += Number(usage?.promptTokens) || 0;
+          job.metrics.tokenUsage.completion += Number(usage?.completionTokens) || 0;
+          job.metrics.modelLoadDurationMs += (Number(usage?.loadDurationNs) || 0) / 1e6;
+          job.metrics.promptEvalDurationMs += (Number(usage?.promptDurationNs) || 0) / 1e6;
+          job.metrics.generationDurationMs += (Number(usage?.completionDurationNs) || 0) / 1e6;
+        },
       };
 
       beginPhase(job, 'plan', 1, `Checking thinking capability for ${config.model}`);
@@ -398,15 +592,71 @@ function createDeepSummaryManager({
       log(job, `Planned ${probes.length} focused probes without changing the user question.`);
 
       beginPhase(job, 'retrieve', probes.length, 'Searching citable teachings and non-citable discovery context');
-      const resultSets = [Array.isArray(config.matches) ? config.matches : []];
+      const resultSets = [];
+      const hasInitialMatches = Array.isArray(config.matches) && config.matches.length > 0;
+      if (hasInitialMatches) {
+        resultSets.push(config.matches);
+      }
+
+      const pendingProbes = [];
       for (let index = 0; index < probes.length; index += 1) {
-        throwIfStopped(job);
         const probe = probes[index];
-        if (typeof config.retrieveProbe === 'function') resultSets.push(await config.retrieveProbe(probe, job.abortController.signal));
-        advance(job, 1, `Searching probe ${index + 1} of ${probes.length}`);
+        if (index === 0 && hasInitialMatches && probe.toLowerCase() === String(config.question || '').trim().toLowerCase()) {
+          job.metrics.probeRetrievals.push({
+            probeNumber: 1,
+            resultCount: config.matches.length,
+            durationMs: 0,
+            reusedInitial: true,
+          });
+          advance(job, 1, `Reusing initial search results for probe 1 of ${probes.length}`);
+        } else {
+          pendingProbes.push({ index, probe });
+        }
+      }
+
+      if (pendingProbes.length > 0) {
+        throwIfStopped(job);
+        if (typeof config.retrieveProbes === 'function') {
+          const probeStrings = pendingProbes.map((p) => p.probe);
+          const retrievalStartedAtMs = performance.now();
+          const batchResults = await config.retrieveProbes(probeStrings, job.abortController.signal);
+          const totalDurationMs = performance.now() - retrievalStartedAtMs;
+          const avgDuration = totalDurationMs / pendingProbes.length;
+          for (let i = 0; i < pendingProbes.length; i += 1) {
+            const matches = Array.isArray(batchResults[i]) ? batchResults[i] : [];
+            resultSets.push(matches);
+            job.metrics.probeRetrievals.push({
+              probeNumber: pendingProbes[i].index + 1,
+              resultCount: matches.length,
+              durationMs: avgDuration,
+            });
+            advance(job, 1, `Searching probe ${pendingProbes[i].index + 1} of ${probes.length}`);
+          }
+        } else if (typeof config.retrieveProbe === 'function') {
+          for (const { index, probe } of pendingProbes) {
+            throwIfStopped(job);
+            const retrievalStartedAtMs = performance.now();
+            const matches = await config.retrieveProbe(probe, job.abortController.signal);
+            resultSets.push(matches);
+            job.metrics.probeRetrievals.push({
+              probeNumber: index + 1,
+              resultCount: Array.isArray(matches) ? matches.length : 0,
+              durationMs: performance.now() - retrievalStartedAtMs,
+            });
+            advance(job, 1, `Searching probe ${index + 1} of ${probes.length}`);
+          }
+        }
       }
       const fusedMatches = fuseMatches(resultSets, Math.max(1, Math.min(MAX_DEEP_RECORDS, Number(config.maxRecords) || DEFAULT_DEEP_RECORDS)));
       const collected = collectCandidateEvidence(fusedMatches, config);
+      job.metrics.candidateFlow = {
+        probes: probes.length,
+        rawRetrievedMatches: resultSets.reduce((total, set) => total + set.length, 0),
+        fusedSources: fusedMatches.length,
+        candidatePassages: collected.evidence.length,
+        candidateAnswerUnitIds: [...new Set(collected.evidence.map((item) => item.answerUnitId).filter(Boolean))],
+        candidatesTruncated: collected.candidatesTruncated,
+      };
       completePhase(job);
 
       beginPhase(job, 'read', fusedMatches.length, 'Reconstructing complete Swami replies and teachings');
@@ -414,11 +664,19 @@ function createDeepSummaryManager({
         ? await config.readAnswerUnits(fusedMatches.map((match) => match.sourceId))
         : [];
       if (!units.length) units = fallbackUnits(collected.evidence);
-      units = units.filter((unit) => String(unit.author || 'Swami') === 'Swami' && ['swami_reply', 'swami_teaching'].includes(unit.unitKind || 'swami_teaching'));
+      units = units.filter((unit) => isCitableSwamiUnit(unit) && ['swami_reply', 'swami_teaching'].includes(unit.unitKind || 'swami_teaching'));
       const readUnits = units;
       const sourceIdsRead = [...new Set(readUnits.map((unit) => String(unit.sourceId)))];
-      const selected = selectAdjudicationUnits(readUnits, collected.evidence);
+      const maxUnits = config.deliberation === 'fast' ? 10 : (config.deliberation === 'adaptive' ? 14 : MAX_ADJUDICATION_UNITS);
+      const maxChars = config.deliberation === 'fast' ? 14000 : (config.deliberation === 'adaptive' ? 20000 : MAX_ADJUDICATION_CHARACTERS);
+      const selected = selectAdjudicationUnits(readUnits, collected.evidence, maxChars, maxUnits, config.question);
       units = selected.units;
+      Object.assign(job.metrics.candidateFlow, {
+        sourcesRead: sourceIdsRead.length,
+        answerUnitsRead: readUnits.length,
+        answerUnitsAdjudicated: units.length,
+        adjudicationCharacters: selected.characters,
+      });
       advance(job, fusedMatches.length);
       completePhase(job);
       log(job, `Read ${readUnits.length} complete citable Swami answer units from ${sourceIdsRead.length} sources; shortlisted ${units.length} units (${selected.characters} characters) for bounded adjudication.`);
@@ -438,60 +696,115 @@ function createDeepSummaryManager({
         return;
       }
 
+      const deliberationMode = config.deliberation || 'maximum';
       const batches = batchesByCharacters(units);
-      beginPhase(job, 'adjudicate', batches.length * 2, 'Running independent Qwen adjudication 1');
       const first = new Map();
       const second = new Map();
-      for (let index = 0; index < batches.length; index += 1) {
-        const batch = batches[index];
-        const decisions = await oneModelCall(job, `Independent adjudication 1 · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 1 }));
-        for (const decision of decisions) first.set(decision.answerUnitId, decision);
-        advance(job, 1);
-      }
-      for (let index = 0; index < batches.length; index += 1) {
-        const batch = batches[index];
-        const decisions = await oneModelCall(job, `Independent adjudication 2 · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 2 }));
-        for (const decision of decisions) second.set(decision.answerUnitId, decision);
-        advance(job, 1);
-      }
-      const disagreements = units.filter((unit) => {
-        const left = first.get(unit.answerUnitId);
-        const right = second.get(unit.answerUnitId);
-        return !left || !right || left.classification !== right.classification || left.contextComplete !== right.contextComplete || left.storyComplete !== right.storyComplete;
-      });
       const third = new Map();
-      if (disagreements.length) {
-        const disagreementBatches = batchesByCharacters(disagreements);
-        job.phases.find((phase) => phase.id === 'adjudicate').total += disagreementBatches.length;
-        job.phaseTotal += disagreementBatches.length;
-        for (let index = 0; index < disagreementBatches.length; index += 1) {
-          const batch = disagreementBatches[index];
-          const decisions = await oneModelCall(job, `Resolving adjudication disagreements · batch ${index + 1} of ${disagreementBatches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 3 }));
-          for (const decision of decisions) third.set(decision.answerUnitId, decision);
+      let disagreementsCount = 0;
+
+      if (deliberationMode === 'maximum') {
+        beginPhase(job, 'adjudicate', batches.length * 2, 'Running independent Qwen adjudication 1');
+        for (let index = 0; index < batches.length; index += 1) {
+          const batch = batches[index];
+          const decisions = await oneModelCall(job, `Independent adjudication 1 · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 1 }));
+          for (const decision of decisions) first.set(decision.answerUnitId, decision);
           advance(job, 1);
         }
+        for (let index = 0; index < batches.length; index += 1) {
+          const batch = batches[index];
+          const decisions = await oneModelCall(job, `Independent adjudication 2 · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 2 }));
+          for (const decision of decisions) second.set(decision.answerUnitId, decision);
+          advance(job, 1);
+        }
+        const disagreements = units.filter((unit) => {
+          const left = first.get(unit.answerUnitId);
+          const right = second.get(unit.answerUnitId);
+          return !left || !right || left.classification !== right.classification || left.contextComplete !== right.contextComplete || left.storyComplete !== right.storyComplete;
+        });
+        disagreementsCount = disagreements.length;
+        if (disagreements.length) {
+          const disagreementBatches = batchesByCharacters(disagreements);
+          job.phases.find((phase) => phase.id === 'adjudicate').total += disagreementBatches.length;
+          job.phaseTotal += disagreementBatches.length;
+          for (let index = 0; index < disagreementBatches.length; index += 1) {
+            const batch = disagreementBatches[index];
+            const decisions = await oneModelCall(job, `Resolving adjudication disagreements · batch ${index + 1} of ${disagreementBatches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 3 }));
+            for (const decision of decisions) third.set(decision.answerUnitId, decision);
+            advance(job, 1);
+          }
+        }
+        completePhase(job);
+      } else if (deliberationMode === 'adaptive') {
+        beginPhase(job, 'adjudicate', batches.length, 'Running Qwen teaching unit adjudication');
+        for (let index = 0; index < batches.length; index += 1) {
+          const batch = batches[index];
+          const decisions = await oneModelCall(job, `Adjudication · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 1 }));
+          for (const decision of decisions) first.set(decision.answerUnitId, decision);
+          advance(job, 1);
+        }
+
+        const riskyUnits = units.filter((unit) => {
+          const dec = first.get(unit.answerUnitId);
+          if (!dec) return false;
+          if (dec.classification === 'direct_answer') return true;
+          if (dec.contextComplete === false || dec.storyComplete === false) return true;
+          return false;
+        });
+        disagreementsCount = riskyUnits.length;
+
+        if (riskyUnits.length > 0) {
+          const riskyBatches = batchesByCharacters(riskyUnits);
+          job.phases.find((phase) => phase.id === 'adjudicate').total += riskyBatches.length;
+          job.phaseTotal += riskyBatches.length;
+          for (let index = 0; index < riskyBatches.length; index += 1) {
+            const batch = riskyBatches[index];
+            const decisions = await oneModelCall(job, `Targeted critique of ${riskyUnits.length} candidate teaching units · batch ${index + 1} of ${riskyBatches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 2 }));
+            for (const decision of decisions) second.set(decision.answerUnitId, decision);
+            advance(job, 1);
+          }
+        }
+        completePhase(job);
+      } else {
+        beginPhase(job, 'adjudicate', batches.length, 'Running single-pass Qwen adjudication');
+        for (let index = 0; index < batches.length; index += 1) {
+          const batch = batches[index];
+          const decisions = await oneModelCall(job, `Single-pass adjudication · batch ${index + 1} of ${batches.length}`, () => adjudicate({ ...common, question: config.question, units: batch, reviewer: 1 }));
+          for (const decision of decisions) first.set(decision.answerUnitId, decision);
+          advance(job, 1);
+        }
+        completePhase(job);
       }
-      completePhase(job);
 
       const adjudicated = units.map((unit) => {
         const left = first.get(unit.answerUnitId);
         const right = second.get(unit.answerUnitId);
-        const decision = third.get(unit.answerUnitId) || (left?.classification === right?.classification ? left : null);
-        return { unit, decision };
+        if (deliberationMode === 'maximum') {
+          const decision = third.get(unit.answerUnitId) || (left?.classification === right?.classification ? left : null);
+          return { unit, decision };
+        }
+        if (deliberationMode === 'adaptive') {
+          if (right) {
+            const isBothDirect = left?.classification === 'direct_answer' && right?.classification === 'direct_answer';
+            const contextOk = left?.contextComplete !== false && right?.contextComplete !== false;
+            const storyOk = left?.storyComplete !== false && right?.storyComplete !== false;
+            const chosenDecision = isBothDirect ? right : (right.classification === 'irrelevant' ? right : right);
+            return {
+              unit,
+              decision: {
+                ...chosenDecision,
+                contextComplete: contextOk,
+                storyComplete: storyOk,
+              },
+            };
+          }
+          return { unit, decision: left };
+        }
+        return { unit, decision: left };
       });
-      const accepted = adjudicated.filter(({ decision }) => decision && decision.classification !== 'irrelevant' && decision.contextComplete === true &&
-        (decision.classification !== 'illustration' || decision.storyComplete === true)).map((item) => {
-        const sourceQuestion = item.unit.associatedQuestion || item.unit.title || '';
-        if (item.decision.classification !== 'direct_answer' || isLiteralDirectQuestionMatch(config.question, sourceQuestion)) return item;
-        return {
-          ...item,
-          decision: {
-            ...item.decision,
-            classification: 'governing_principle',
-            relationship: item.decision.relationship || 'This teaching governs the question without literally asking the same thing.',
-          },
-        };
-      });
+      const accepted = adjudicated.filter(({ unit, decision }) => decision && !(unit.readingTruncated && decision.classification === 'illustration') && decision.classification !== 'irrelevant' && decision.contextComplete === true &&
+        (decision.classification !== 'illustration' || decision.storyComplete === true));
+      job.metrics.candidateFlow.acceptedAfterAdjudication = accepted.length;
 
       beginPhase(job, 'cluster', accepted.length, 'Grouping distinct teachings without rewriting them');
       const clusters = new Map();
@@ -515,7 +828,7 @@ function createDeepSummaryManager({
           ? displayText.slice(start, end)
           : '';
         const hashValid = !unit.contentHash || sha256(String(unit.text || '')) === unit.contentHash;
-        const unitValid = unit.author === 'Swami' && exact === unit.text && hashValid && item.decision.contextComplete &&
+        const unitValid = isCitableSwamiUnit(unit) && exact === unit.text && hashValid && item.decision.contextComplete &&
           (item.decision.classification !== 'illustration' || item.decision.storyComplete);
         if (unitValid) {
           const candidates = collected.evidence.filter((candidate) =>
@@ -541,6 +854,7 @@ function createDeepSummaryManager({
         advance(job, 1);
       }
       completePhase(job);
+      job.metrics.candidateFlow.finalVerified = verified.length;
 
       const evidence = verified.map((item, index) => ({
         evidenceNumber: index + 1,
@@ -603,13 +917,16 @@ function createDeepSummaryManager({
           answerUnitsRead: readUnits.length,
           answerUnitsAdjudicated: units.length,
           rejectedEvidence: units.length - verified.length,
-          disagreements: disagreements.length,
+          disagreements: disagreementsCount,
           finalVerification: verified.length,
           scannedPassages: Number(config.retrievalCoverage?.scannedPassages) || 0,
+          retrievalCoverage: config.retrievalCoverage || {},
+          performance: metricsSnapshot(job, { includeCandidateIds: true }),
         },
       };
       job.processed = job.total;
       job.status = 'completed';
+      job.terminationReason = 'completed';
       job.phase = 'Complete';
       job.currentOperation = 'Complete';
       job.finishedAt = new Date().toISOString();
@@ -620,7 +937,10 @@ function createDeepSummaryManager({
       publish(job, 'status');
     } catch (error) {
       const cancelled = error?.code === 'DEEP_SEARCH_CANCELLED';
+      const isTimeout = error?.code === 'DEEP_SEARCH_TIMEOUT';
       job.status = cancelled ? 'cancelled' : 'failed';
+      job.activeRequests = 0;
+      job.terminationReason = cancelled ? 'cancelled' : (isTimeout ? 'timeout' : (error?.code || error?.message || 'failed'));
       const phase = job.phases.find((item) => item.status === 'running');
       if (phase) { phase.status = job.status; phase.finishedAt = new Date().toISOString(); }
       job.phase = job.status;
@@ -634,46 +954,116 @@ function createDeepSummaryManager({
       if (job.heartbeat) clearInterval(job.heartbeat);
       for (const listener of [...job.listeners]) { try { listener.end(); } catch { /* ignore */ } }
       job.listeners.clear();
+      pruneJobs();
+      if (activeJobId === job.id) {
+        activeJobId = null;
+      }
+      processQueue();
+    }
+  }
+
+  const MAX_STORED_JOBS = 20;
+  const JOB_TTL_MS = 30 * 60 * 1000;
+
+  function pruneJobs() {
+    const now = Date.now();
+    const completed = [];
+    for (const [id, job] of jobs.entries()) {
+      if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+        const finishedMs = job.finishedAt ? Date.parse(job.finishedAt) : job.startedAtMs;
+        if (now - finishedMs > JOB_TTL_MS) {
+          jobs.delete(id);
+        } else {
+          completed.push({ id, finishedMs });
+        }
+      }
+    }
+    if (jobs.size > MAX_STORED_JOBS) {
+      completed.sort((a, b) => a.finishedMs - b.finishedMs);
+      while (jobs.size > MAX_STORED_JOBS && completed.length) {
+        const oldest = completed.shift();
+        jobs.delete(oldest.id);
+      }
     }
   }
 
   function start(config) {
+    pruneJobs();
     const id = `deep_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
     const job = {
       id, status: 'queued', phase: 'queued', currentOperation: 'Queued', processed: 0, total: 1,
       phaseProcessed: 0, phaseTotal: 0, activeRequests: 0,
       hardwarePreference: ollama.normalizeHardwarePreference(config.hardwarePreference), hardware: null,
       phases: DEEP_PHASE_DEFINITIONS.map((phase) => ({ ...phase, status: 'pending', processed: 0, total: 0, startedAt: null, finishedAt: null })),
-      currentPhaseId: null, error: null, result: null, startedAtMs: Date.now(), abortController: new AbortController(),
+      currentPhaseId: null, error: null, result: null, startedAtMs: Date.now(), queuedAtMs: Date.now(), startedRunningAtMs: null,
+      abortController: new AbortController(), terminationReason: null,
       logs: [], listeners: new Set(), createdAt: new Date().toISOString(), finishedAt: null,
+      metrics: {
+        queueDurationMs: null,
+        modelLoadDurationMs: 0,
+        promptEvalDurationMs: 0,
+        generationDurationMs: 0,
+        phases: {},
+        modelCalls: [],
+        probeRetrievals: [],
+        tokenUsage: { prompt: 0, completion: 0 },
+        candidateFlow: {},
+      },
     };
     jobs.set(id, job);
     job.heartbeat = setInterval(() => { if (job.status === 'running') publish(job); }, 1000);
     job.heartbeat.unref?.();
-    queueMicrotask(() => void run(job, { ...config, hardwarePreference: job.hardwarePreference }));
+    queue.push({ job, config });
+    processQueue();
     return publicJob(job);
   }
 
   function get(id) { return jobs.has(id) ? publicJob(jobs.get(id)) : null; }
+
   function cancel(id) {
     const job = jobs.get(id);
-    if (job && !job.abortController.signal.aborted) {
-      const error = new Error('Deep Search cancelled');
-      error.code = 'DEEP_SEARCH_CANCELLED';
-      job.abortController.abort(error);
+    if (!job) return null;
+    const error = new Error('Deep Search cancelled');
+    error.code = 'DEEP_SEARCH_CANCELLED';
+    job.abortController.abort(error);
+    job.status = 'cancelled';
+    job.phase = 'cancelled';
+    job.currentOperation = 'Cancelled';
+    job.terminationReason = 'cancelled';
+    job.activeRequests = 0;
+    job.finishedAt = new Date().toISOString();
+    const queueIdx = queue.findIndex((q) => q.job.id === id);
+    if (queueIdx !== -1) {
+      queue.splice(queueIdx, 1);
     }
-    return job ? publicJob(job) : null;
+    pruneJobs();
+    publish(job, 'status');
+    return publicJob(job);
   }
+
   function subscribe(id, response) {
     const job = jobs.get(id);
     if (!job) return false;
+    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     job.listeners.add(response);
     response.write(`event: status\ndata: ${JSON.stringify(publicJob(job))}\n\n`);
     return true;
   }
-  function unsubscribe(id, response) { jobs.get(id)?.listeners.delete(response); }
 
-  return { start, get, cancel, subscribe, unsubscribe, _jobs: jobs };
+  function unsubscribe(id, response) {
+    const job = jobs.get(id);
+    if (job) job.listeners.delete(response);
+  }
+
+  return {
+    start,
+    get,
+    cancel,
+    subscribe,
+    unsubscribe,
+    getActiveJobId: () => activeJobId,
+    getQueueLength: () => queue.length,
+  };
 }
 
 module.exports = {
@@ -690,4 +1080,7 @@ module.exports = {
   isLiteralDirectQuestionMatch,
   publicJob,
   selectAdjudicationUnits,
+  batchesByCharacters,
+  fallbackUnits,
+  boundedReadingUnit,
 };

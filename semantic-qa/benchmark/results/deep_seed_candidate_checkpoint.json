@@ -1,0 +1,112 @@
+{
+  "executedCases": 1,
+  "reviewedCases": 50,
+  "completeBenchmarkRun": false,
+  "benchmarkVersion": 1,
+  "variant": "deliberation-fast",
+  "deliberation": "fast",
+  "createdAt": "2026-11-16T16:49:29.783Z",
+  "corpusContract": {
+    "retrievalSchemaVersion": "answer-unit-v7",
+    "embeddingFormatVersion": "generic-contextual-v4",
+    "embeddingModel": "bge-m3"
+  },
+  "summary": {
+    "cases": 1,
+    "latencyMs": {
+      "p50": 426848,
+      "p95": 426848
+    },
+    "candidateRecall": 1,
+    "evidenceRecall": 1,
+    "evidencePrecision": 0.3333333333333333,
+    "forbiddenEvidenceRate": 0,
+    "answerStatusAccuracy": 1,
+    "abstentionAccuracy": 1,
+    "exactEvidenceRate": 1,
+    "promptTokens": 4777,
+    "completionTokens": 682
+  },
+  "results": [
+    {
+      "id": "seed-datta-swami",
+      "category": "direct",
+      "latencyMs": 426848,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "direct",
+      "answerStatusCorrect": true,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:4291:teaching:1",
+        "discourse:1322:reply:1",
+        "discourse:1309:reply:1",
+        "discourse:1116:reply:1",
+        "discourse:737:reply:5",
+        "discourse:453:teaching:1",
+        "discourse:1113:reply:1",
+        "discourse:1517:reply:1",
+        "discourse:4893:reply:6",
+        "discourse:738:teaching:1",
+        "discourse:5072:reply:5",
+        "qa:345:answer:1",
+        "discourse:4318:teaching:1",
+        "discourse:2804:reply:1",
+        "discourse:993:teaching:1",
+        "discourse:1504:reply:1",
+        "discourse:476:teaching:1",
+        "discourse:4214:reply:1",
+        "discourse:4294:teaching:1",
+        "qa:314:answer:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:738:teaching:1",
+        "discourse:1113:reply:1",
+        "qa:314:answer:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4777,
+        "completion": 682,
+        "total": 5459
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 106475.19,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 50320.49,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 574.2,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 267641.93,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.33,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.53,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true
+    }
+  ]
+}

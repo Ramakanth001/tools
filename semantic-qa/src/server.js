@@ -34,5 +34,15 @@ function shutdown(signal) {
   server.close(() => process.exit(0));
 }
 
+process.on('uncaughtException', (err) => {
+  console.error('[semantic-qa] Uncaught exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[semantic-qa] Unhandled rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));

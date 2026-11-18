@@ -40,11 +40,19 @@ For a newcomer-oriented explanation of Ollama, EmbeddingGemma, model training ve
 
 Verbatim Selection returns exact accepted source spans. Deep Search can discard evidence at every stage and abstains when no responsibly relevant Swami teaching survives. Personal experiences and success anecdotes are excluded unless the question explicitly asks for examples. A story is citable only when its consequence and Swami's stated lesson are present.
 
+### Retrieval contract upgrade
+
+The current retrieval contract is `answer-unit-v7`. Passage boundaries, Unicode tokenization, and typed discovery pairing changed, so existing v5/v6 indexes require a **full rebuild** from their original source. Incremental sync refuses these older contracts. Use the configured source and index connections in the UI's full rebuild action; the previous index stays active until staging is promoted atomically. GPT can continue reading the older contracts during this upgrade.
+
+Titles and general context remain discovery signals. Only an exact `paired_question` discovery attached to the retrieved passage's answer unit can receive exact-answer priority. Deep Search reports the distinct answer passages collected by its bounded candidate queries, including discovery, separately from the candidates retained for ranking. This count is not the number of internal HNSW nodes visited and does not imply that every passage was read or verified by a model.
+
+For the local Universal database preset, run `npm run preflight:universal:v5` before `npm run rebuild:universal:v5`. These legacy script names build the current contract. Verify the connections in `scripts/universalV5Config.js` before using this preset. After rebuilding, run the corpus evaluation scripts against the same active index.
+
 ## Prerequisites
 
 ### 1. Node.js
 
-Use the Node.js version used by the parent tools workspace, then install dependencies:
+Use Node.js 22.12 or newer. The workspace `.node-version` pins the validated Node 22 release. With fnm, run `fnm use` from the workspace before installing dependencies:
 
 ```bash
 npm install
@@ -357,7 +365,7 @@ With **Verbatim Selection**, deterministic code selects exact stored passages fr
 
 With **Deep Search**, Qwen first plans focused probes for the practical request, governing principle, qualifications, and counter-teachings. Each probe searches citable answer passages and non-citable discovery passages separately. Deep Search then reconstructs every shortlisted complete Swami unit, runs two independent adjudications, uses a third only on disagreements, groups distinct teachings, and verifies role, context, story completeness, hashes, and offsets. Evidence may be rejected at any phase.
 
-Deep Search uses `qwen3:14b-q8_0` by default and permits `qwen3:14b-q4_K_M` only by explicit choice. Ollama must report the `thinking` capability. Calls use `think: true`, a 32K context, one active generation, a ten-minute per-call limit, and a 45-minute job limit. Reasoning traces are discarded and never returned or persisted. There is no silent fallback to `gemma3:4b`.
+Deep Search defaults to `qwen2.5:7b` and supports the allowlisted Qwen 2.5, Llama 3.1 and Qwen 3 tags shown in settings. Qwen 3 requires Ollama's `thinking` capability and uses a 32K context; Qwen 2.5 and Llama use structured JSON with an 8K context and thinking disabled. Generations run serially with a default ten-minute call timeout (server maximum twenty minutes) and a ninety-minute job deadline. Deliberation defaults to `fast`; stored `adaptive` and `maximum` choices are preserved. Reasoning traces are discarded. Model quality and latency must be measured for the chosen model and hardware; no model parity is assumed.
 
 Deep results use three honest outcomes: `direct`, `related_teachings`, or `insufficient`. Neutral status and cluster labels may be generated; teaching text may not. Up to two exact primary passages are shown per teaching cluster, with additional verified passages in the evidence section.
 
@@ -406,7 +414,7 @@ All API routes use the parent workspace's optional `TOOLS_AUTH_TOKEN` protection
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `Cannot reach Ollama` | Install/start Ollama, verify port `11434`, then pull `embeddinggemma` and `qwen3:14b-q8_0` (or explicitly choose the supported Q4 model). |
+| `Cannot reach Ollama` | Install/start Ollama, verify port `11434`, then pull the required embedding model (e.g. `bge-m3`) and Deep Search reasoning model (`qwen2.5:7b` default). |
 | `model ... not found` | Pull the exact model configured in Settings. |
 | PostgreSQL `connection refused` or `no response` | Start the database server or correct its host/port. Installing `psql` alone does not start PostgreSQL. |
 | `server does not support SSL` | Choose SSL mode `disable` for a local database. |

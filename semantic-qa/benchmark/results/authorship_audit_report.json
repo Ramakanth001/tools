@@ -1,0 +1,1310 @@
+{
+  "startedAt": "2026-11-16T16:36:05.477Z",
+  "database": "universal_qa_v2",
+  "totalRecordsAudited": 6010,
+  "recordsWithByline": 116,
+  "bylineBreakdown": {
+    "Kum. Laxmi Thrylokya": 1,
+    "Priyanka Seethepalli": 1,
+    "Shri Suryanarayana": 4,
+    "Shri Bharath Krishna": 2,
+    "Shri. Phani Kumar": 2,
+    "Shri. Lakshman Ganapathy": 1,
+    "Shri Ganesh Venkatesh": 1,
+    "Shri K. Ravinder Reddy": 1,
+    "Smt. Chhanda Chandra": 3,
+    "Shri Durgaprasad": 2,
+    "Shri Anil Antony": 4,
+    "Smt. Sudharani": 1,
+    "Shri B. S. K. D. Manikanta": 1,
+    "Smt. Archana Srivastava": 1,
+    "Shri. Ajay": 1,
+    "Shri. Hrushikesh": 1,
+    "Shri Ajay": 4,
+    "Shri. Nithin Bhosle": 2,
+    "Smt. Padmaram": 1,
+    "Shri Ganesh": 2,
+    "Suganya Raman": 1,
+    "Ms.Swathi": 1,
+    "Ms.Geetha Lahari": 1,
+    "Shri. Jayesh Pandey": 1,
+    "Shri Phani Kumar": 3,
+    "Shri G. Lakshman": 1,
+    "Shri S. Phani Kumar": 1,
+    "Dr. Nikhil": 2,
+    "Dr. Nikhil. K": 1,
+    "Smt. Sudha Rani": 1,
+    "Shri Pavan": 3,
+    "Shri Soumyadip Mondal": 1,
+    "Ms. Bhanu Samykya": 3,
+    "Shri Shankara Datta": 1,
+    "Shri Vishnu": 1,
+    "Smt. Rama Sundari": 1,
+    "Smt. S.K.Lochana": 1,
+    "Dasika Naga Lakshmi": 1,
+    "Shri. Sai Krishna Chaitanya": 1,
+    "Shri. Kishore Ram": 2,
+    "Shri Shri Diwakar Rao": 1,
+    "Shri Karthik": 1,
+    "Ms.Laxmi Thrylokya": 1,
+    "Dr. Geetha Lahari": 2,
+    "Shri Kishore Ram": 1,
+    "Shri Abhiram": 2,
+    "Shri Srivatsa Datta": 1,
+    "Dr J.S.R. Prasad": 1,
+    "Shri Hrushikesh": 2,
+    "Shri Karthik & Shri Hrushikesh": 1,
+    "Ms. Swathika": 2,
+    "Dr. Nikhil and Devi": 1,
+    "Shri Sai Krishna Chaitanya": 2,
+    "Shri PVNM Sharma": 1,
+    "Shri Lakshman Ganapathy": 1,
+    "Shri Gopi Krishna": 1,
+    "Surya": 3,
+    "Ms.Thrylokya": 3,
+    "Ms. Noishadha Chatterjee": 1,
+    "Shri Nitin": 1,
+    "Shri Manikanta": 1,
+    "Shri Srinivasa Pavan Kuppa": 1,
+    "B Geetha Lahari": 1,
+    "Shri Veena Datta": 1,
+    "Shri Kunal Chatterjee": 1,
+    "Shri Jitendra Datta": 1,
+    "Ms. Thrylokya": 1,
+    "Dr. JSR Prasad": 1,
+    "Smt. Priyanka Seethepalli, Canada": 1,
+    "Shri Nithin": 1,
+    "Shri Satthireddy": 1,
+    "Shri Phani": 1,
+    "Noishadha": 1,
+    "Smt. Chhanda": 1,
+    "Smt. Priyanka": 2,
+    "Prof.JSR Prasad": 1,
+    "Shri Anil Anthony": 1,
+    "Shri Divakar": 1,
+    "Shri Ramakanth": 1,
+    "Shri Narasimha, Hyderabad": 1,
+    "Ms Bhanu Samaikya": 1,
+    "Ms. Lakshmi Lavanya": 1
+  },
+  "nonSwamiBylineRecords": 116,
+  "nonSwamiCitableUnitsCreated": 0,
+  "mixedDocumentsAudited": 8,
+  "flaggedViolations": [],
+  "auditedEntries": [
+    {
+      "sourceId": "discourse:2753",
+      "detectedByline": "Kum. Laxmi Thrylokya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2757",
+      "detectedByline": "Priyanka Seethepalli",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2761",
+      "detectedByline": "Shri Suryanarayana",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2762",
+      "detectedByline": "Shri Bharath Krishna",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2763",
+      "detectedByline": "Shri. Phani Kumar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 7,
+      "citableSwamiUnits": 7,
+      "ignoredSpans": 8,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:2763:reply:1",
+        "discourse:2763:reply:2",
+        "discourse:2763:reply:3",
+        "discourse:2763:reply:4",
+        "discourse:2763:reply:5",
+        "discourse:2763:reply:6",
+        "discourse:2763:reply:7"
+      ]
+    },
+    {
+      "sourceId": "discourse:2764",
+      "detectedByline": "Shri. Lakshman Ganapathy",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2765",
+      "detectedByline": "Shri Ganesh Venkatesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2766",
+      "detectedByline": "Shri K. Ravinder Reddy",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2767",
+      "detectedByline": "Smt. Chhanda Chandra",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2768",
+      "detectedByline": "Shri Durgaprasad",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2772",
+      "detectedByline": "Shri Anil Antony",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2861",
+      "detectedByline": "Smt. Sudharani",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2862",
+      "detectedByline": "Shri B. S. K. D. Manikanta",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 1,
+      "citableSwamiUnits": 1,
+      "ignoredSpans": 1,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:2862:reply:1"
+      ]
+    },
+    {
+      "sourceId": "discourse:2863",
+      "detectedByline": "Smt. Archana Srivastava",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2864",
+      "detectedByline": "Shri Anil Antony",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2865",
+      "detectedByline": "Shri. Ajay",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2866",
+      "detectedByline": "Shri. Hrushikesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2867",
+      "detectedByline": "Shri. Phani Kumar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2868",
+      "detectedByline": "Shri Ajay",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2869",
+      "detectedByline": "Shri. Nithin Bhosle",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2870",
+      "detectedByline": "Smt. Padmaram",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2871",
+      "detectedByline": "Shri Suryanarayana",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2872",
+      "detectedByline": "Shri Ajay",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2873",
+      "detectedByline": "Shri Ganesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2874",
+      "detectedByline": "Suganya Raman",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2875",
+      "detectedByline": "Ms.Swathi",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2876",
+      "detectedByline": "Ms.Geetha Lahari",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2877",
+      "detectedByline": "Shri. Jayesh Pandey",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2878",
+      "detectedByline": "Shri Phani Kumar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 2,
+      "citableSwamiUnits": 2,
+      "ignoredSpans": 2,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:2878:reply:1",
+        "discourse:2878:reply:2"
+      ]
+    },
+    {
+      "sourceId": "discourse:2879",
+      "detectedByline": "Shri G. Lakshman",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2880",
+      "detectedByline": "Shri S. Phani Kumar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2881",
+      "detectedByline": "Dr. Nikhil",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2882",
+      "detectedByline": "Shri Phani Kumar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 1,
+      "citableSwamiUnits": 1,
+      "ignoredSpans": 1,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:2882:reply:1"
+      ]
+    },
+    {
+      "sourceId": "discourse:2883",
+      "detectedByline": "Dr. Nikhil. K",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2898",
+      "detectedByline": "Smt. Sudha Rani",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2913",
+      "detectedByline": "Shri Pavan",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2914",
+      "detectedByline": "Shri Soumyadip Mondal",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2915",
+      "detectedByline": "Ms. Bhanu Samykya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2917",
+      "detectedByline": "Shri Pavan",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2918",
+      "detectedByline": "Shri Shankara Datta",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2934",
+      "detectedByline": "Shri Vishnu",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2935",
+      "detectedByline": "Shri Suryanarayana",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2936",
+      "detectedByline": "Smt. Rama Sundari",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2937",
+      "detectedByline": "Shri. Nithin Bhosle",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2938",
+      "detectedByline": "Smt. S.K.Lochana",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2939",
+      "detectedByline": "Dasika Naga Lakshmi",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 1,
+      "citableSwamiUnits": 1,
+      "ignoredSpans": 1,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:2939:reply:1"
+      ]
+    },
+    {
+      "sourceId": "discourse:2964",
+      "detectedByline": "Shri. Sai Krishna Chaitanya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2965",
+      "detectedByline": "Shri. Kishore Ram",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:2999",
+      "detectedByline": "Ms. Bhanu Samykya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3008",
+      "detectedByline": "Shri Shri Diwakar Rao",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3036",
+      "detectedByline": "Shri. Kishore Ram",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3064",
+      "detectedByline": "Shri Pavan",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3066",
+      "detectedByline": "Shri Karthik",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3099",
+      "detectedByline": "Shri Durgaprasad",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3117",
+      "detectedByline": "Shri Ganesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3121",
+      "detectedByline": "Ms.Laxmi Thrylokya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3139",
+      "detectedByline": "Ms. Bhanu Samykya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3145",
+      "detectedByline": "Dr. Geetha Lahari",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3178",
+      "detectedByline": "Shri Suryanarayana",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3179",
+      "detectedByline": "Shri Kishore Ram",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3180",
+      "detectedByline": "Shri Anil Antony",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3189",
+      "detectedByline": "Shri Abhiram",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3192",
+      "detectedByline": "Shri Srivatsa Datta",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3193",
+      "detectedByline": "Dr J.S.R. Prasad",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3195",
+      "detectedByline": "Shri Hrushikesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3208",
+      "detectedByline": "Shri Anil Antony",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3209",
+      "detectedByline": "Shri Karthik & Shri Hrushikesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3210",
+      "detectedByline": "Ms. Swathika",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3223",
+      "detectedByline": "Ms. Swathika",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3224",
+      "detectedByline": "Dr. Nikhil and Devi",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3289",
+      "detectedByline": "Shri Ajay",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3352",
+      "detectedByline": "Shri Sai Krishna Chaitanya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3354",
+      "detectedByline": "Shri PVNM Sharma",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3371",
+      "detectedByline": "Shri Phani Kumar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3372",
+      "detectedByline": "Shri Lakshman Ganapathy",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3509",
+      "detectedByline": "Shri Gopi Krishna",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3684",
+      "detectedByline": "Surya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3685",
+      "detectedByline": "Ms.Thrylokya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 1,
+      "citableSwamiUnits": 1,
+      "ignoredSpans": 1,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:3685:reply:1"
+      ]
+    },
+    {
+      "sourceId": "discourse:3701",
+      "detectedByline": "Dr. Geetha Lahari",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3764",
+      "detectedByline": "Ms. Noishadha Chatterjee",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3786",
+      "detectedByline": "Ms.Thrylokya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3792",
+      "detectedByline": "Smt. Chhanda Chandra",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 1,
+      "citableSwamiUnits": 1,
+      "ignoredSpans": 1,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:3792:reply:1"
+      ]
+    },
+    {
+      "sourceId": "discourse:3854",
+      "detectedByline": "Shri Bharath Krishna",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3924",
+      "detectedByline": "Surya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3971",
+      "detectedByline": "Surya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3984",
+      "detectedByline": "Shri Nitin",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:3990",
+      "detectedByline": "Shri Manikanta",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4006",
+      "detectedByline": "Shri Ajay",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4071",
+      "detectedByline": "Dr. Nikhil",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4160",
+      "detectedByline": "Shri Srinivasa Pavan Kuppa",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4254",
+      "detectedByline": "B Geetha Lahari",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4291",
+      "detectedByline": "Shri Veena Datta",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4292",
+      "detectedByline": "Shri Kunal Chatterjee",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4294",
+      "detectedByline": "Shri Jitendra Datta",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4387",
+      "detectedByline": "Ms. Thrylokya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4389",
+      "detectedByline": "Dr. JSR Prasad",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4391",
+      "detectedByline": "Smt. Priyanka Seethepalli, Canada",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4440",
+      "detectedByline": "Shri Nithin",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4468",
+      "detectedByline": "Shri Satthireddy",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4477",
+      "detectedByline": "Shri Phani",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4485",
+      "detectedByline": "Noishadha",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4514",
+      "detectedByline": "Smt. Chhanda",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4569",
+      "detectedByline": "Shri Hrushikesh",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4595",
+      "detectedByline": "Smt. Priyanka",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4716",
+      "detectedByline": "Smt. Chhanda Chandra",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4731",
+      "detectedByline": "Prof.JSR Prasad",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4754",
+      "detectedByline": "Shri Anil Anthony",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:4791",
+      "detectedByline": "Shri Divakar",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5136",
+      "detectedByline": "Shri Sai Krishna Chaitanya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5174",
+      "detectedByline": "Shri Abhiram",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5470",
+      "detectedByline": "Smt. Priyanka",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5545",
+      "detectedByline": "Shri Ramakanth",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 1,
+      "citableSwamiUnits": 1,
+      "ignoredSpans": 1,
+      "ambiguities": 0,
+      "unitIds": [
+        "discourse:5545:reply:1"
+      ]
+    },
+    {
+      "sourceId": "discourse:5558",
+      "detectedByline": "Ms.Thrylokya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5589",
+      "detectedByline": "Shri Narasimha, Hyderabad",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5728",
+      "detectedByline": "Ms Bhanu Samaikya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    },
+    {
+      "sourceId": "discourse:5769",
+      "detectedByline": "Ms. Lakshmi Lavanya",
+      "isSwamiByline": false,
+      "totalUnitsParsed": 0,
+      "citableSwamiUnits": 0,
+      "ignoredSpans": 1,
+      "ambiguities": 1,
+      "unitIds": []
+    }
+  ],
+  "databaseIndexAudit": {
+    "totalAnswerUnitsInDb": 11355,
+    "nonSwamiBylineUnitsInDb": [
+      {
+        "answerUnitId": "discourse:2918:teaching:1",
+        "sourceId": "discourse:2918",
+        "byline": "Shri Shankara Datta"
+      },
+      {
+        "answerUnitId": "discourse:3192:teaching:1",
+        "sourceId": "discourse:3192",
+        "byline": "Shri Srivatsa Datta"
+      },
+      {
+        "answerUnitId": "discourse:4291:teaching:1",
+        "sourceId": "discourse:4291",
+        "byline": "Shri Veena Datta"
+      },
+      {
+        "answerUnitId": "discourse:4294:teaching:1",
+        "sourceId": "discourse:4294",
+        "byline": "Shri Jitendra Datta"
+      }
+    ],
+    "offsetMismatchCount": 0,
+    "offsetMismatches": [],
+    "contentHashMismatchCount": 0,
+    "contentHashMismatches": []
+  },
+  "finishedAt": "2026-11-16T16:36:11.692Z",
+  "success": true
+}

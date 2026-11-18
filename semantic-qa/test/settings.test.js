@@ -25,7 +25,7 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(LOCAL_DEMO_SETTINGS.mapping.orderColumn, '');
   assert.ok(LOCAL_DEMO_SETTINGS.mapping.metadataColumns.includes('category'));
   assert.equal(UNIVERSAL_QA_SETTINGS.sourceConnection.database, 'universal_qa_source');
-  assert.equal(UNIVERSAL_QA_SETTINGS.indexConnection.database, 'universal_qa_index');
+  assert.equal(UNIVERSAL_QA_SETTINGS.indexConnection.database, 'universal_qa_v2');
   assert.equal(UNIVERSAL_QA_SETTINGS.mapping.table, 'corpus_documents');
   assert.equal(UNIVERSAL_QA_SETTINGS.mapping.idColumn, 'document_id');
   assert.equal(UNIVERSAL_QA_SETTINGS.mapping.answerColumn, 'display_text');
@@ -35,7 +35,7 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(UNIVERSAL_QA_SETTINGS.summaryMaxLines, 3);
   assert.equal(UNIVERSAL_QA_SETTINGS.summaryHardwarePreference, 'auto');
   assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryMaxRecords, 60);
-  assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryModel, 'qwen3:14b-q8_0');
+  assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryModel, 'qwen2.5:7b');
   assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryParallelRequests, 1);
   assert.equal(UNIVERSAL_QA_SETTINGS.deepSummaryTimeoutSeconds, 600);
 
@@ -50,6 +50,10 @@ test('persisted UI settings remove both passwords and connection strings', async
   assert.equal(mergeSettings({ searchMode: 'semantic' }).searchMode, 'semantic');
   assert.equal(mergeSettings({ searchMode: 'search' }).searchMode, 'search');
   assert.equal(mergeSettings({ searchMode: 'invalid' }).searchMode, 'search');
+  for (const deliberation of ['fast', 'adaptive', 'maximum']) {
+    assert.equal(mergeSettings({ deepSummaryDeliberation: deliberation }).deepSummaryDeliberation, deliberation);
+  }
+  assert.equal(mergeSettings({ deepSummaryDeliberation: 'invalid' }).deepSummaryDeliberation, 'fast');
 
   const migratedUniversal = mergeSettings({
     settingsVersion: 3,

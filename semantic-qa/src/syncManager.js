@@ -10,7 +10,7 @@ const { embedTexts, testOllama } = require('./ollama');
 const { buildAnswerPassages, buildDiscoveryTexts, parseAnswerUnits } = require('./corpusStructure');
 const { clearIdfCache } = require('./distanceSearch');
 
-const MAX_SINGLE_PASSAGE_RETRIES = 2;
+const MAX_SINGLE_PASSAGE_RETRIES = 5;
 
 function connectionDatabase(connection = {}) {
   if (String(connection.database || '').trim()) return String(connection.database).trim();
@@ -34,7 +34,7 @@ function assertRoleAwareUniversalSource(config = {}) {
 }
 
 function isRetriableEmbeddingError(error) {
-  return /timed out|temporar|fetch failed|socket|econnreset|econnrefused|enotfound|http 5\d\d/i
+  return /timed out|temporar|fetch failed|socket|econnreset|econnrefused|enotfound|http 5\d\d|cannot reach ollama/i
     .test(String(error?.message || error || ''));
 }
 
@@ -123,7 +123,11 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
         answerUnits.push(unit);
       }
       const recordPassages = buildAnswerPassages(record.answer, parsed.units)
-        .map((passage, passageIndex) => ({ ...passage, passageIndex }));
+        .map((passage, passageIndex) => ({
+          ...passage,
+          passageIndex,
+          docTitle: String(record.question || '').trim(),
+        }));
       for (const passage of recordPassages) {
         if (record.answer.slice(passage.start, passage.end) !== passage.text ||
             record.answer.slice(passage.citationStart, passage.citationEnd) !== passage.citationText) {
@@ -154,9 +158,11 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
         return await embed({
           baseUrl: config.ollamaBaseUrl,
           model: config.model,
-          texts: batch.map((passage) => buildPassageEmbeddingText(passage.text, {
+          texts: batch.map((passage) => buildPassageEmbeddingText(passage, {
             model: config.model,
             formatVersion: config.embeddingFormatVersion,
+            title: passage.docTitle || '',
+            associatedQuestion: passage.associatedQuestion || '',
           })),
           timeoutMs: 300000,
         });
@@ -199,18 +205,41 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
   }
 
   async function embedAndStageDiscovery(job, config, indexClient, tableName, rows, batchSize) {
+    async function embedBatch(batch, singleAttempt = 0) {
+      throwIfCancelled(job);
+      try {
+        return await embed({
+          baseUrl: config.ollamaBaseUrl,
+          model: config.model,
+          texts: batch.map((item) => buildPassageEmbeddingText(item.text, {
+            model: config.model,
+            formatVersion: config.embeddingFormatVersion,
+          })),
+          timeoutMs: 300000,
+        });
+      } catch (error) {
+        if (!isRetriableEmbeddingError(error)) throw error;
+        if (batch.length > 1) {
+          const midpoint = Math.ceil(batch.length / 2);
+          log(job, `Discovery embedding batch was interrupted; retrying it as ${midpoint} + ${batch.length - midpoint} passages.`);
+          await new Promise((r) => setTimeout(r, 1000));
+          const left = await embedBatch(batch.slice(0, midpoint));
+          const right = await embedBatch(batch.slice(midpoint));
+          return [...left, ...right];
+        }
+        if (singleAttempt < MAX_SINGLE_PASSAGE_RETRIES) {
+          log(job, `Discovery passage was interrupted; retrying (${singleAttempt + 1}/${MAX_SINGLE_PASSAGE_RETRIES}).`);
+          await new Promise((r) => setTimeout(r, 2000));
+          return embedBatch(batch, singleAttempt + 1);
+        }
+        throw error;
+      }
+    }
+
     for (let index = 0; index < rows.length; index += batchSize) {
       throwIfCancelled(job);
       const batch = rows.slice(index, index + batchSize);
-      const vectors = await embed({
-        baseUrl: config.ollamaBaseUrl,
-        model: config.model,
-        texts: batch.map((item) => buildPassageEmbeddingText(item.text, {
-          model: config.model,
-          formatVersion: config.embeddingFormatVersion,
-        })),
-        timeoutMs: 300000,
-      });
+      const vectors = await embedBatch(batch);
       await db.insertStageDiscoveryPassages(indexClient, tableName, batch.map((item, vectorIndex) => ({
         ...item,
         embedding: vectors[vectorIndex],
@@ -247,7 +276,15 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       }
 
       await db.createSyncRun(indexClient, job);
-      stageNames = await db.createSyncStage(indexClient, job.id, dimension);
+      const stageJobId = job.mode === 'rebuild' ? 'rebuild' : job.id;
+      stageNames = await db.createSyncStage(indexClient, stageJobId, dimension, { resume: Boolean(config.resume ?? true) });
+      const initialCounts = await db.getStageCounts?.(indexClient, stageNames);
+      if (initialCounts?.records > 0 && job.mode === 'rebuild') {
+        job.changed = initialCounts.records;
+        job.passages = initialCounts.passages;
+        job.discoveryPassages = initialCounts.discoveryPassages;
+        log(job, `Resuming rebuild from existing staging data: ${initialCounts.records} records, ${initialCounts.passages} answer passages, ${initialCounts.discoveryPassages} discovery passages already staged.`);
+      }
       sourceSnapshot = await db.openSourceSnapshot(config.sourceConnection, config.mapping);
       const normalizedMapping = sourceSnapshot.mapping;
       job.total = sourceSnapshot.total;
@@ -264,9 +301,16 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
         await db.insertSeen(indexClient, stageNames.seen, records.map((record) => record.sourceId));
         const hashed = records.map((record) => ({ ...record, contentHash: contentHash(record) }));
         const existing = job.mode === 'rebuild'
-          ? new Map()
+          ? await db.getExistingHashes(indexClient, hashed.map((record) => record.sourceId), stageNames.stage)
           : await db.getExistingHashes(indexClient, hashed.map((record) => record.sourceId));
         const changed = hashed.filter((record) => existing.get(record.sourceId) !== record.contentHash);
+
+        if (changed.length === 0) {
+          job.processed += records.length;
+          await db.updateSyncRun(indexClient, job);
+          publish(job, 'progress');
+          continue;
+        }
 
         for (let index = 0; index < changed.length; index += embeddingBatchSize) {
           throwIfCancelled(job);
@@ -326,7 +370,11 @@ function createSyncManager({ db = database, embed = embedTexts, probe = testOlla
       job.finishedAt = new Date().toISOString();
       log(job, job.error);
       if (sourceSnapshot) await sourceSnapshot.close(false).catch(() => undefined);
-      if (indexClient && stageNames) await db.dropSyncStage(indexClient, stageNames).catch(() => undefined);
+      // For incremental sync, clean up staging on failure or cancellation.
+      // For full rebuild, PRESERVE staging tables on both failure and cancellation so hours of vector compute are never lost!
+      if (indexClient && stageNames && job.mode === 'incremental') {
+        await db.dropSyncStage(indexClient, stageNames).catch(() => undefined);
+      }
       if (indexClient) await db.updateSyncRun(indexClient, job).catch(() => undefined);
     } finally {
       if (indexClient) indexClient.release();

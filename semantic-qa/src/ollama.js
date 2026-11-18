@@ -1,10 +1,114 @@
 const os = require('node:os');
+const http = require('node:http');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
 const HARDWARE_PREFERENCES = new Set(['auto', 'gpu', 'cpu']);
 let localHardwareCache = null;
+
+const defaultFetch = globalThis.fetch;
+
+function rawHttpRequest(urlStr, { method = 'GET', headers = {}, body = null } = {}, timeoutMs = 120000, signal = null) {
+  return new Promise((resolve, reject) => {
+    let deadline = null;
+    const resolveOnce = (value) => {
+      if (deadline) clearTimeout(deadline);
+      resolve(value);
+    };
+    const rejectOnce = (error) => {
+      if (deadline) clearTimeout(deadline);
+      reject(error);
+    };
+    const url = new URL(urlStr);
+    const req = http.request({
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port || 80,
+      path: url.pathname + url.search,
+      method,
+      headers,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let payload;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = text;
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          const errMsg = (payload && typeof payload === 'object' && payload.error) || `Ollama returned HTTP ${res.statusCode}`;
+          const err = new Error(errMsg);
+          err.statusCode = res.statusCode;
+          rejectOnce(err);
+          return;
+        }
+        resolveOnce(payload);
+      });
+      res.on('error', rejectOnce);
+    });
+
+    req.on('error', rejectOnce);
+
+    if (timeoutMs && timeoutMs > 0) {
+      // ClientRequest#setTimeout is only an inactivity timeout. Ollama can keep a
+      // connection active without completing a generation, so enforce a hard
+      // wall-clock deadline as well.
+      deadline = setTimeout(() => {
+        const err = new Error('Ollama request timed out');
+        err.name = 'AbortError';
+        req.destroy(err);
+      }, timeoutMs);
+      deadline.unref?.();
+    }
+
+    if (signal) {
+      const onAbort = () => {
+        const err = signal.reason instanceof Error ? signal.reason : new Error('Ollama request cancelled');
+        req.destroy(err);
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        req.on('close', () => signal.removeEventListener('abort', onAbort));
+      }
+    }
+
+    if (body) {
+      req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    }
+    req.end();
+  });
+}
+
+async function dispatchOllamaRequest(urlStr, options = {}, timeoutMs = 120000, signal = null) {
+  if (globalThis.fetch !== defaultFetch) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abortFromCaller = () => controller.abort(signal?.reason);
+    if (signal?.aborted) abortFromCaller();
+    else signal?.addEventListener('abort', abortFromCaller, { once: true });
+    try {
+      const response = await globalThis.fetch(urlStr, {
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        ...(options.body ? { body: options.body } : {}),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `Ollama returned HTTP ${response.status}`);
+      return payload;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abortFromCaller);
+    }
+  }
+  return rawHttpRequest(urlStr, options, timeoutMs, signal);
+}
 
 function normalizeOllamaBaseUrl(value) {
   const url = new URL(String(value || 'http://127.0.0.1:11434'));
@@ -28,58 +132,55 @@ function applyHardwarePreference(options, preference) {
   return { ...(options || {}) };
 }
 
-async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000, signal = null) {
+async function ollamaRequest(baseUrl, path, body, timeoutMs = 120000, signal = null, { maxAttempts = 3 } = {}) {
   const normalizedBaseUrl = normalizeOllamaBaseUrl(baseUrl);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const abortFromCaller = () => controller.abort(signal?.reason);
-  if (signal?.aborted) abortFromCaller();
-  else signal?.addEventListener('abort', abortFromCaller, { once: true });
-  try {
-    const response = await fetch(`${normalizedBaseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Ollama returned HTTP ${response.status}`);
-    return payload;
-  } catch (error) {
-    if (signal?.aborted) {
-      if (signal.reason instanceof Error) throw signal.reason;
-      const cancelled = new Error('Ollama request cancelled');
-      cancelled.code = 'OLLAMA_REQUEST_CANCELLED';
-      throw cancelled;
+  const attemptsLimit = Math.max(1, Number.isInteger(maxAttempts) ? maxAttempts : 3);
+  let lastError;
+  for (let attempt = 1; attempt <= attemptsLimit; attempt++) {
+    try {
+      return await dispatchOllamaRequest(`${normalizedBaseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }, timeoutMs, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        if (signal.reason instanceof Error) throw signal.reason;
+        const cancelled = new Error('Ollama request cancelled');
+        cancelled.code = 'OLLAMA_REQUEST_CANCELLED';
+        throw cancelled;
+      }
+      lastError = error;
+      if (error?.name === 'AbortError') {
+        const timeout = new Error('Ollama request timed out');
+        timeout.code = 'OLLAMA_REQUEST_TIMEOUT';
+        throw timeout;
+      }
+      const isTransient = error instanceof TypeError ||
+        /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(String(error?.message || ''));
+      if (isTransient && attempt < attemptsLimit && !signal?.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        continue;
+      }
+      if (error instanceof TypeError || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(error?.message || ''))) {
+        throw new Error(`Cannot reach Ollama at ${normalizedBaseUrl}. Install/start Ollama and pull the configured embedding model.`);
+      }
+      throw error;
     }
-    if (error?.name === 'AbortError') throw new Error('Ollama request timed out');
-    if (error instanceof TypeError || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(error?.message || ''))) {
-      throw new Error(`Cannot reach Ollama at ${normalizedBaseUrl}. Install/start Ollama and pull the configured embedding model.`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', abortFromCaller);
   }
+  throw lastError;
 }
 
 async function ollamaGet(baseUrl, path, timeoutMs = 30000) {
   const normalizedBaseUrl = normalizeOllamaBaseUrl(baseUrl);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${normalizedBaseUrl}${path}`, { signal: controller.signal });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Ollama returned HTTP ${response.status}`);
-    return payload;
+    return await dispatchOllamaRequest(`${normalizedBaseUrl}${path}`, { method: 'GET' }, timeoutMs);
   } catch (error) {
     if (error?.name === 'AbortError') throw new Error('Ollama hardware inspection timed out');
     if (error instanceof TypeError || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(error?.message || ''))) {
       throw new Error(`Cannot reach Ollama at ${normalizedBaseUrl}. Install/start Ollama and pull the configured model.`);
     }
     throw error;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -183,12 +284,8 @@ function normalizeModelReference(value) {
 
 async function getModelIdentity({ baseUrl, model, timeoutMs = 30000 }) {
   const normalizedBaseUrl = normalizeOllamaBaseUrl(baseUrl);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${normalizedBaseUrl}/api/tags`, { signal: controller.signal });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Ollama returned HTTP ${response.status}`);
+    const payload = await dispatchOllamaRequest(`${normalizedBaseUrl}/api/tags`, { method: 'GET' }, timeoutMs);
     const requested = normalizeModelReference(model);
     const models = Array.isArray(payload.models) ? payload.models : [];
     const entry = models.find((candidate) =>
@@ -209,8 +306,6 @@ async function getModelIdentity({ baseUrl, model, timeoutMs = 30000 }) {
       throw new Error(`Cannot reach Ollama at ${normalizedBaseUrl}. Install/start Ollama and pull the configured embedding model.`);
     }
     throw error;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -228,7 +323,7 @@ async function embedTexts({ baseUrl, model, texts, timeoutMs }) {
   return payload.embeddings;
 }
 
-async function chat({ baseUrl, model, messages, format, options, think = false, hardwarePreference = 'auto', timeoutMs = 180000, signal = null }) {
+async function chat({ baseUrl, model, messages, format, options, think = false, hardwarePreference = 'auto', timeoutMs = 600000, signal = null, onMetrics = null, maxAttempts = 1 }) {
   const payload = await ollamaRequest(baseUrl, '/api/chat', {
     model: String(model),
     messages,
@@ -239,38 +334,74 @@ async function chat({ baseUrl, model, messages, format, options, think = false, 
       temperature: 0.1,
       ...(options || {}),
     }, hardwarePreference),
-  }, timeoutMs, signal);
-  const content = payload?.message?.content;
+  }, timeoutMs, signal, { maxAttempts });
+  let content = payload?.message?.content;
+  if ((typeof content !== 'string' || !content.trim()) && typeof payload?.message?.thinking === 'string' && payload.message.thinking.trim()) {
+    content = payload.message.thinking;
+  }
   if (typeof content !== 'string' || !content.trim()) {
     throw new Error('Ollama returned an empty chat response');
+  }
+  if (typeof onMetrics === 'function') {
+    onMetrics({
+      promptTokens: Number(payload.prompt_eval_count) || 0,
+      completionTokens: Number(payload.eval_count) || 0,
+      totalDurationNs: Number(payload.total_duration) || 0,
+      loadDurationNs: Number(payload.load_duration) || 0,
+      promptDurationNs: Number(payload.prompt_eval_duration) || 0,
+      completionDurationNs: Number(payload.eval_duration) || 0,
+    });
   }
   return content.trim();
 }
 
-const DEEP_SUMMARY_MODELS = new Set(['qwen3:14b-q8_0', 'qwen3:14b-q4_k_m']);
+const DEEP_SUMMARY_MODELS = new Set([
+  'qwen3:14b-q8_0',
+  'qwen3:14b-q4_k_m',
+  'qwen2.5:7b',
+  'qwen2.5:7b-instruct',
+  'llama3.1:8b',
+  'llama3.1:8b-instruct',
+]);
 
-async function getModelDetails({ baseUrl, model, timeoutMs = 30000 }) {
-  return ollamaRequest(baseUrl, '/api/show', { model: String(model || '') }, timeoutMs);
+const thinkingCapabilityCache = new Map();
+const THINKING_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function clearThinkingCapabilityCache() {
+  thinkingCapabilityCache.clear();
 }
 
-async function requireThinkingModel({ baseUrl, model, timeoutMs = 30000 }) {
+async function getModelDetails({ baseUrl, model, timeoutMs = 30000, signal = null, maxAttempts = 1 }) {
+  return ollamaRequest(baseUrl, '/api/show', { model: String(model || '') }, timeoutMs, signal, { maxAttempts });
+}
+
+async function requireThinkingModel({ baseUrl, model, timeoutMs = 30000, signal = null, maxAttempts = 1 }) {
   const normalized = String(model || '').trim().toLocaleLowerCase();
   if (!DEEP_SUMMARY_MODELS.has(normalized)) {
-    const error = new Error('Deep Search requires qwen3:14b-q8_0 or qwen3:14b-q4_K_M; it will not fall back to a smaller model.');
+    const error = new Error(`Deep Search requires qwen3:14b-q8_0 or qwen3:14b-q4_K_M (or supported reasoning models such as qwen2.5:7b, llama3.1:8b); received "${model}".`);
     error.code = 'OLLAMA_MODEL_NOT_ALLOWED';
     throw error;
   }
-  const details = await getModelDetails({ baseUrl, model, timeoutMs });
+  const cacheKey = `${baseUrl}:${normalized}`;
+  const cached = thinkingCapabilityCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp) < THINKING_CACHE_TTL_MS) {
+    return cached.result;
+  }
+  const details = await getModelDetails({ baseUrl, model, timeoutMs, signal, maxAttempts });
   const capabilities = Array.isArray(details?.capabilities) ? details.capabilities.map((value) => String(value).toLowerCase()) : [];
-  if (!capabilities.includes('thinking')) {
+  if (normalized.startsWith('qwen3') && !capabilities.includes('thinking')) {
     const error = new Error(`Deep Search model ${model} does not report the required thinking capability.`);
     error.code = 'OLLAMA_THINKING_REQUIRED';
     throw error;
   }
-  return { model: String(model), capabilities, details: { family: details?.details?.family || null, parameterSize: details?.details?.parameter_size || null } };
+  const result = { model: String(model), capabilities, details: { family: details?.details?.family || null, parameterSize: details?.details?.parameter_size || null } };
+  thinkingCapabilityCache.set(cacheKey, { timestamp: Date.now(), result });
+  return result;
 }
 
-async function planDeepSearchProbes({ baseUrl, model, question, hardwarePreference = 'auto', timeoutMs = 600000, signal = null }) {
+async function planDeepSearchProbes({ baseUrl, model, question, hardwarePreference = 'auto', timeoutMs = 600000, signal = null, onMetrics = null }) {
+  const isThinkingModel = String(model || '').toLowerCase().startsWith('qwen3');
+  const defaultContext = isThinkingModel ? 32768 : 8192;
   const format = {
     type: 'object',
     properties: {
@@ -279,10 +410,10 @@ async function planDeepSearchProbes({ baseUrl, model, question, hardwarePreferen
     required: ['probes'],
   };
   const content = await chat({
-    baseUrl, model, hardwarePreference, timeoutMs, signal, think: true, format,
-    options: { temperature: 0, num_predict: 500, num_ctx: 32768 },
+    baseUrl, model, hardwarePreference, timeoutMs, signal, think: isThinkingModel, format, onMetrics,
+    options: { temperature: 0, num_predict: 2000, num_ctx: defaultContext },
     messages: [
-      { role: 'system', content: 'Preserve the user question exactly in meaning. Produce short semantic-search probes covering: the practical request, the governing principle, qualifications or limits, and possible counter-teachings. Do not answer the question. Return JSON only.' },
+      { role: 'system', content: 'Preserve the user question exactly in meaning. Produce 2 to 4 distinct, highly focused semantic-search probe phrases (do not repeat the question verbatim) covering: 1) governing spiritual principle, 2) practical application or qualifications/limits, 3) counter-teachings or related scriptural concepts. Do not answer the question. Return JSON only.' },
       { role: 'user', content: `Question:\n${String(question).trim()}` },
     ],
   });
@@ -292,14 +423,17 @@ async function planDeepSearchProbes({ baseUrl, model, question, hardwarePreferen
   return probes;
 }
 
-async function adjudicateTeachingUnits({ baseUrl, model, question, units, reviewer = 1, hardwarePreference = 'auto', timeoutMs = 600000, signal = null }) {
+async function adjudicateTeachingUnits({ baseUrl, model, question, units, reviewer = 1, hardwarePreference = 'auto', timeoutMs = 600000, signal = null, onMetrics = null }) {
+  const isThinkingModel = String(model || '').toLowerCase().startsWith('qwen3');
+  const defaultContext = isThinkingModel ? 32768 : 8192;
   const examplesRequested = /\b(?:example|examples|experience|experiences|story|stories|anecdote|anecdotes|case study|case studies)\b/iu.test(String(question || ''));
   const items = (Array.isArray(units) ? units : []).map((unit, index) => ({
     number: index + 1,
     answerUnitId: unit.answerUnitId,
     author: unit.author,
     unitKind: unit.unitKind,
-    associatedQuestion: unit.associatedQuestion || '',
+    associatedQuestion: String(unit.associatedQuestion || '').slice(0, 1000),
+    readingTruncated: Boolean(unit.readingTruncated),
     text: String(unit.text || ''),
   }));
   if (!items.length) return [];
@@ -325,26 +459,41 @@ async function adjudicateTeachingUnits({ baseUrl, model, question, units, review
     },
     required: ['decisions'],
   };
-  const content = await chat({
-    baseUrl, model, hardwarePreference, timeoutMs, signal, think: true, format,
-    options: { temperature: reviewer === 1 ? 0 : 0.05, num_predict: 1800, num_ctx: 32768 },
+  const systemPrompt = [
+    `You are independent reviewer ${reviewer} for a semantic teaching search.`,
+    'Literal wording is not required. A governing principle can be meaningfully relevant when it responsibly governs or illuminates the user’s situation.',
+    'Classify each complete Swami unit as direct_answer, governing_principle, qualification, illustration, counter_teaching, or irrelevant.',
+    'Use direct_answer when the text actually answers the requested question, including identity statements answering who someone is. Matching the source question wording is unnecessary. A general principle alone is not a direct answer. Physical measurements and practical tasks require evidence for that measurement or task, not a spiritual analogy.',
+    'Reject merely similar wording, a devotee question, non-Swami speech, incomplete clauses, and stories missing their consequence or Swami’s explicit lesson.',
+    'A readingTruncated candidate is an exact contiguous excerpt of complete paragraphs from a longer unit. Reject it if surrounding context is needed. Never classify a truncated reading as a complete illustration.',
+    `Personal experiences and success anecdotes are ${examplesRequested ? 'allowed because the user explicitly requested examples' : 'irrelevant because the user did not request examples'}.`,
+    'Use a short neutral cluster label only to group distinct teachings. Do not rewrite or summarize teaching text.',
+    'Keep relationship to one short sentence (at most 25 words) and cluster to at most 6 words. Return exactly one decision per candidate. Never repeat sentences.',
+    'Return JSON only.',
+  ].join(' ');
+  const userMessage = { role: 'user', content: `Question:\n${String(question).trim()}\n\nComplete candidate units:\n${JSON.stringify(items)}` };
+  let content = await chat({
+    baseUrl, model, hardwarePreference, timeoutMs, signal, think: isThinkingModel, format, onMetrics,
+    options: { temperature: reviewer === 1 ? 0 : 0.05, repeat_penalty: 1.15, num_predict: Math.max(1500, Math.min(4000, 512 + items.length * 400)), num_ctx: defaultContext },
     messages: [
-      {
-        role: 'system',
-        content: [
-          `You are independent reviewer ${reviewer} for a semantic teaching search.`,
-          'Literal wording is not required. A governing principle can be meaningfully relevant when it responsibly governs or illuminates the user’s situation.',
-          'Classify each complete Swami unit as direct_answer, governing_principle, qualification, illustration, counter_teaching, or irrelevant.',
-          'Reject merely similar wording, a devotee question, non-Swami speech, incomplete clauses, and stories missing their consequence or Swami’s explicit lesson.',
-          `Personal experiences and success anecdotes are ${examplesRequested ? 'allowed because the user explicitly requested examples' : 'irrelevant because the user did not request examples'}.`,
-          'Use a short neutral cluster label only to group distinct teachings. Do not rewrite or summarize teaching text.',
-          'Return JSON only.',
-        ].join(' '),
-      },
-      { role: 'user', content: `Question:\n${String(question).trim()}\n\nComplete candidate units:\n${JSON.stringify(items)}` },
+      { role: 'system', content: systemPrompt },
+      userMessage,
     ],
   });
-  const parsed = parseStructuredJson(content, 'deep teaching adjudication');
+  let parsed;
+  try {
+    parsed = parseStructuredJson(content, 'deep teaching adjudication');
+  } catch {
+    content = await chat({
+      baseUrl, model, hardwarePreference, timeoutMs, signal, think: isThinkingModel, format, onMetrics,
+      options: { temperature: 0, repeat_penalty: 1.15, num_predict: Math.max(2000, Math.min(4000, 512 + items.length * 400)), num_ctx: defaultContext },
+      messages: [
+        { role: 'system', content: `${systemPrompt} Your previous response was not valid JSON. Return ONLY valid JSON matching the schema.` },
+        userMessage,
+      ],
+    });
+    parsed = parseStructuredJson(content, 'deep teaching adjudication');
+  }
   const decisions = new Map((Array.isArray(parsed?.decisions) ? parsed.decisions : []).map((decision) => [Number(decision.number), decision]));
   return items.map((item) => {
     const decision = decisions.get(item.number) || {};
@@ -397,12 +546,20 @@ function parseStructuredJson(value, label) {
   const withoutFence = raw.replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '').trim();
   const firstBrace = withoutFence.indexOf('{');
   const lastBrace = withoutFence.lastIndexOf('}');
+  const firstBracket = withoutFence.indexOf('[');
+  const lastBracket = withoutFence.lastIndexOf(']');
   const candidates = [withoutFence];
   if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(withoutFence.slice(firstBrace, lastBrace + 1));
+  if (firstBracket >= 0 && lastBracket > firstBracket) candidates.push(withoutFence.slice(firstBracket, lastBracket + 1));
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const trimmed = withoutFence.slice(firstBrace, lastBrace + 1);
+    candidates.push(trimmed + ']}');
+    candidates.push(trimmed + '}');
+  }
   for (const candidate of [...new Set(candidates)]) {
     try { return JSON.parse(candidate); } catch { /* try the next bounded representation */ }
   }
-  throw new Error(`Ollama returned invalid JSON for ${label}`);
+  throw new Error(`Ollama returned invalid JSON for ${label}. Raw output (${raw.length} chars): ${raw.slice(0, 300)} ... [tail]: ${raw.slice(-300)}`);
 }
 
 async function verifyGroundedAnswer({ baseUrl, model, question, answer, evidence, hardwarePreference = 'auto', timeoutMs = 180000 }) {
@@ -764,6 +921,7 @@ module.exports = {
   getOllamaHardware,
   getModelDetails,
   requireThinkingModel,
+  clearThinkingCapabilityCache,
   planDeepSearchProbes,
   adjudicateTeachingUnits,
   cleanGeneratedAnswer,

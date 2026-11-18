@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const {
   applyHardwarePreference,
   adjudicateTeachingUnits,
@@ -44,6 +45,74 @@ test('thinking is sent explicitly and Ollama reasoning text is never returned as
     assert.equal(request.options.num_ctx, 32768);
     assert.doesNotMatch(content, /private reasoning/iu);
   } finally { global.fetch = originalFetch; }
+});
+
+test('Ollama requests enforce a hard wall-clock deadline', async () => {
+  const server = http.createServer((_request, _response) => {});
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const started = Date.now();
+  try {
+    await assert.rejects(() => chat({
+      baseUrl: `http://127.0.0.1:${port}`,
+      model: 'qwen2.5:7b',
+      messages: [{ role: 'user', content: 'Question' }],
+      timeoutMs: 40,
+    }), /timed out/iu);
+    assert.ok(Date.now() - started < 1000);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('chat eliminates multiplicative retries by defaulting to a single attempt', async () => {
+  let attempts = 0;
+  const server = http.createServer((_request, response) => {
+    attempts += 1;
+    response.destroy();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    await assert.rejects(() => chat({
+      baseUrl: `http://127.0.0.1:${port}`,
+      model: 'qwen2.5:7b',
+      messages: [{ role: 'user', content: 'Question' }],
+      timeoutMs: 1000,
+    }));
+    assert.equal(attempts, 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('aborting chat signal immediately closes the HTTP connection within 5 seconds', async () => {
+  const controller = new AbortController();
+  let serverConnectionClosed = false;
+  const server = http.createServer((req, _res) => {
+    req.on('close', () => { serverConnectionClosed = true; });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const started = Date.now();
+  try {
+    const chatPromise = chat({
+      baseUrl: `http://127.0.0.1:${port}`,
+      model: 'qwen2.5:7b',
+      messages: [{ role: 'user', content: 'Question' }],
+      signal: controller.signal,
+      timeoutMs: 10000,
+    });
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(chatPromise, /cancelled|aborted/iu);
+    assert.ok(Date.now() - started < 5000);
+    for (let i = 0; i < 20 && !serverConnectionClosed; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(serverConnectionClosed, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('Qwen capability inspection and deep helpers use the supported thinking contract', async () => {
@@ -332,6 +401,38 @@ test('deep synthesis removes model citation markers and joins adjacent fragments
     assert.equal(result.paragraphs[0].text, 'Realisation means recognising the sin. Repentance means feeling sorry for it.');
     assert.deepEqual(result.paragraphs[0].claimNumbers, [1]);
     assert.equal(result.paragraphs[1].text, 'Non-repetition is the practical proof.');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('parseStructuredJson recovers valid completed items from truncated JSON arrays', () => {
+  const truncated = '{"decisions": [{"number": 1, "classification": "direct_answer"}, {"number": 2, "class';
+  const parsed = parseStructuredJson(truncated, 'test');
+  assert.equal(parsed?.decisions?.length, 1);
+  assert.equal(parsed.decisions[0].classification, 'direct_answer');
+});
+
+test('adjudicateTeachingUnits retries when initial response is invalid JSON', async () => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    const content = calls === 1
+      ? 'not valid json at all <<<'
+      : JSON.stringify({ decisions: [{ number: 1, classification: 'direct_answer', cluster: 'c', relationship: 'r', context_complete: true, story_complete: true }] });
+    return new Response(JSON.stringify({ message: { content } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const results = await adjudicateTeachingUnits({
+      baseUrl: 'http://127.0.0.1:11434', model: 'gemma3:4b', question: 'Q',
+      units: [{ answerUnitId: 'u1', text: 'Text', author: 'Swami' }],
+    });
+    assert.equal(calls, 2);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].classification, 'direct_answer');
   } finally {
     global.fetch = originalFetch;
   }

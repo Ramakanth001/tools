@@ -63,12 +63,19 @@ const MappingSchema = z.object({
 
 const OllamaSchema = z.object({
   ollamaBaseUrl: z.string().url().default('http://127.0.0.1:11434'),
-  model: z.string().trim().min(1).default('embeddinggemma'),
+  model: z.string().trim().min(1).default('bge-m3'),
 });
 
 const SummaryModelSchema = z.object({
   summaryModel: z.string().trim().min(1).default('gemma3:4b'),
-  deepSummaryModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q4_K_M'),
+  deepSummaryModel: z.enum([
+    'qwen2.5:7b',
+    'qwen2.5:7b-instruct',
+    'llama3.1:8b',
+    'llama3.1:8b-instruct',
+    'qwen3:14b-q8_0',
+    'qwen3:14b-q4_K_M',
+  ]).default('qwen2.5:7b'),
   hardwarePreference: z.enum(['auto', 'gpu', 'cpu']).default('auto'),
 });
 
@@ -235,6 +242,27 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
     if (!data) return;
     try {
       const status = await db.getIndexStatus(data.indexConnection);
+      if (status?.recentRuns?.length) {
+        for (const run of status.recentRuns) {
+          if (['running', 'queued'].includes(run.status) && !syncManager.get(run.id)) {
+            run.status = 'cancelled';
+            run.error = run.error || 'Interrupted by server restart';
+            try {
+              const pool = db.createPool(data.indexConnection);
+              const client = await pool.connect();
+              try {
+                await client.query(
+                  "UPDATE semantic_qa.sync_runs SET status = 'cancelled', error = COALESCE(error, 'Interrupted by server restart'), finished_at = COALESCE(finished_at, now()) WHERE id = $1 AND status IN ('running', 'queued')",
+                  [run.id]
+                );
+                await db.dropSyncStage(client, db.stageNames(run.id));
+              } finally {
+                client.release();
+              }
+            } catch { /* ignore cleanup error */ }
+          }
+        }
+      }
       res.json({ ok: true, ...status, ...indexCompatibility(status) });
     } catch (error) { routeError(res, error); }
   });
@@ -295,8 +323,46 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
     res.json({ ok: true, job });
   });
 
-  router.post('/sync/:jobId/cancel', (req, res) => {
-    const job = syncManager.cancel(req.params.jobId);
+  router.post('/sync/:jobId/cancel', async (req, res) => {
+    let job = syncManager.cancel(req.params.jobId);
+    if (!job) {
+      const indexConnection = req.body?.indexConnection;
+      if (indexConnection) {
+        try {
+          const pool = db.createPool(indexConnection);
+          const client = await pool.connect();
+          try {
+            const check = await client.query(
+              'SELECT id, mode, status, processed, changed, total, started_at FROM semantic_qa.sync_runs WHERE id = $1',
+              [req.params.jobId]
+            );
+            if (check.rows.length) {
+              await client.query(`
+                UPDATE semantic_qa.sync_runs
+                SET status = 'cancelled', error = 'Synchronization cancelled by user', finished_at = now()
+                WHERE id = $1
+              `, [req.params.jobId]);
+              await db.dropSyncStage(client, db.stageNames(req.params.jobId));
+              const r = check.rows[0];
+              job = {
+                id: r.id,
+                mode: r.mode,
+                status: 'cancelled',
+                processed: Number(r.processed),
+                changed: Number(r.changed),
+                total: Number(r.total),
+                error: 'Synchronization cancelled by user',
+                logs: [`[${new Date().toISOString()}] Synchronization cancelled by user`],
+                createdAt: r.started_at,
+                finishedAt: new Date().toISOString(),
+              };
+            }
+          } finally {
+            client.release();
+          }
+        } catch { /* ignore fallback error */ }
+      }
+    }
     if (!job) return res.status(404).json({ ok: false, error: 'Synchronization job not found' });
     res.json({ ok: true, job });
   });
@@ -345,24 +411,32 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
       searchMode: z.enum(['semantic', 'search', 'distance']).default('semantic'),
       topK: z.coerce.number().int().min(1).max(100).optional(),
       threshold: z.coerce.number().min(-1).max(1).default(0.60),
+      sourceType: z.enum(['all', 'discourse', 'qa']).default('all'),
       summary: z.object({
         enabled: z.boolean().default(false),
         mode: z.enum(['off', 'standard', 'deep']).optional(),
         model: z.string().trim().min(1).default('gemma3:4b'),
-        deepModel: z.enum(['qwen3:14b-q8_0', 'qwen3:14b-q4_K_M']).default('qwen3:14b-q4_K_M'),
-        deliberation: z.enum(['maximum']).default('maximum'),
+        deepModel: z.enum([
+          'qwen2.5:7b',
+          'qwen2.5:7b-instruct',
+          'llama3.1:8b',
+          'llama3.1:8b-instruct',
+          'qwen3:14b-q8_0',
+          'qwen3:14b-q4_K_M',
+        ]).default('qwen2.5:7b'),
+        deliberation: z.enum(['maximum', 'adaptive', 'fast']).default('fast'),
         maxRecords: z.coerce.number().int().min(1).max(MAX_RECORDS).default(DEFAULT_MAX_RECORDS),
         maxLines: z.coerce.number().int().min(1).max(MAX_LINES).default(DEFAULT_MAX_LINES),
         deepMaxRecords: z.coerce.number().int().min(1).max(MAX_DEEP_RECORDS).default(DEFAULT_DEEP_RECORDS),
-        parallelRequests: z.coerce.number().int().min(1).max(1).default(1),
+        parallelRequests: z.coerce.number().int().min(1).max(4).default(1),
         requestTimeoutMs: z.coerce.number().int().min(60000).max(MAX_DEEP_REQUEST_TIMEOUT_MS).default(DEFAULT_DEEP_REQUEST_TIMEOUT_MS),
         hardwarePreference: z.enum(['auto', 'gpu', 'cpu']).default('auto'),
       }).optional().default({
         enabled: false,
         mode: 'off',
         model: 'gemma3:4b',
-        deepModel: 'qwen3:14b-q4_K_M',
-        deliberation: 'maximum',
+        deepModel: 'qwen2.5:7b',
+        deliberation: 'fast',
         maxRecords: DEFAULT_MAX_RECORDS,
         maxLines: DEFAULT_MAX_LINES,
         deepMaxRecords: DEFAULT_DEEP_RECORDS,
@@ -383,12 +457,19 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
               query: data.question,
               limit: targetLimit,
             });
+            let distanceMatches = distanceResult.matches || [];
+            if (data.sourceType && data.sourceType !== 'all') {
+              distanceMatches = distanceMatches.filter((m) => {
+                const st = m.metadata?.source_type || (String(m.sourceId).startsWith('discourse') ? 'discourse' : 'qa');
+                return st === data.sourceType;
+              });
+            }
             return res.json({
               ok: true,
               searchMode: 'distance',
               executionTimeMs: distanceResult.executionTimeMs,
-              totalFound: distanceResult.totalFound,
-              matches: distanceResult.matches,
+              totalFound: distanceMatches.length,
+              matches: distanceMatches,
               query: data.question,
             });
           });
@@ -397,12 +478,19 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           query: data.question,
           limit: targetLimit,
         });
+        let distanceMatches = distanceResult?.matches || [];
+        if (data.sourceType && data.sourceType !== 'all') {
+          distanceMatches = distanceMatches.filter((m) => {
+            const st = m.metadata?.source_type || (String(m.sourceId).startsWith('discourse') ? 'discourse' : 'qa');
+            return st === data.sourceType;
+          });
+        }
         return res.json({
           ok: true,
           searchMode: 'distance',
           executionTimeMs: distanceResult?.executionTimeMs || 0,
-          totalFound: distanceResult?.totalFound || 0,
-          matches: distanceResult?.matches || [],
+          totalFound: distanceMatches.length,
+          matches: distanceMatches,
           query: data.question,
         });
       }
@@ -504,27 +592,38 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
         ? await db.searchAllPassageIndex(
           data.indexConnection,
           vectors[0],
-          buildLexicalQuery(data.question),
+          buildLexicalQuery(data.question, { expandSpiritual: true }),
           Math.max(0.25, data.threshold - 0.18),
           rankedRecordLimit * 3,
+          data.question,
+          data.sourceType || 'all',
         )
         : needsSemanticVector
           ? await db.searchPassageIndex(
             data.indexConnection,
             vectors[0],
-            buildLexicalQuery(data.question),
+            buildLexicalQuery(data.question, { expandSpiritual: true }),
             candidateLimit,
             data.question,
+            data.sourceType || 'all',
           )
         : await db.searchTextIndex(data.indexConnection, data.question, rankedRecordLimit);
+      let candidateRows = result.rows || [];
+      if (data.sourceType && data.sourceType !== 'all') {
+        candidateRows = candidateRows.filter((r) => {
+          const st = r.metadata?.source_type || (String(r.sourceId).startsWith('discourse') ? 'discourse' : 'qa');
+          return st === data.sourceType;
+        });
+      }
       const rerankLimit = rankedRecordLimit;
+      const effectiveThreshold = needsSemanticVector ? data.threshold : SEARCH_THRESHOLD;
       const rankedMatches = orderMatches(
         needsSemanticVector
-          ? rerankPassageMatches(result.rows, data.question, rerankLimit)
-          : rerankTextMatches(result.rows, rankedRecordLimit),
+          ? rerankPassageMatches(candidateRows, data.question, rerankLimit, effectiveThreshold)
+          : rerankTextMatches(candidateRows, rankedRecordLimit),
         data.question,
+        effectiveThreshold,
       );
-      const effectiveThreshold = needsSemanticVector ? data.threshold : SEARCH_THRESHOLD;
       const rankedResponse = buildSearchResponse(
         rankedMatches.slice(0, effectiveTopK),
         effectiveThreshold,
@@ -580,7 +679,7 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           }
         }
       }
-      if (summaryResult.summary?.reason === 'no_answerable_evidence') {
+      if (summaryMode === 'standard' && summaryResult.summary?.status === 'not_available') {
         response.strongMatch = false;
         response.message = NO_MATCH_MESSAGE;
         delete response.acceptedMatch;
@@ -595,6 +694,10 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           retrievalCoverage: {
             exhaustive: Boolean(result.exhaustive),
             scannedPassages: Number(result.scannedPassages) || 0,
+            ...Object.fromEntries([
+              'totalPassages', 'candidatePoolSize', 'denseCandidateCount', 'lexicalCandidateCount',
+              'initialCandidateCount', 'discoveryCandidateCount', 'retainedCandidateCount',
+            ].filter((key) => Number.isFinite(result[key])).map((key) => [key, result[key]])),
           },
           maxRecords: data.summary.deepMaxRecords,
           baseUrl: data.ollamaBaseUrl,
@@ -602,6 +705,46 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
           parallelRequests: data.summary.parallelRequests,
           requestTimeoutMs: data.summary.requestTimeoutMs,
           hardwarePreference: data.summary.hardwarePreference,
+          deliberation: data.summary.deliberation,
+          retrieveProbes: async (probeList, signal) => {
+            if (!Array.isArray(probeList) || !probeList.length) return [];
+            const embeddingTexts = probeList.map((probe) => buildQueryEmbeddingText(probe, {
+              model: status.corpus.embeddingModel,
+              formatVersion: status.corpus.embeddingFormatVersion,
+            }));
+            const probeVectors = await embedding.embedTexts({
+              baseUrl: data.ollamaBaseUrl,
+              model: status.corpus.embeddingModel,
+              texts: embeddingTexts,
+              signal,
+            });
+            const CONCURRENCY_LIMIT = 3;
+            const results = new Array(probeList.length);
+            for (let chunkStart = 0; chunkStart < probeList.length; chunkStart += CONCURRENCY_LIMIT) {
+              const chunkEnd = Math.min(chunkStart + CONCURRENCY_LIMIT, probeList.length);
+              const promises = [];
+              for (let i = chunkStart; i < chunkEnd; i += 1) {
+                const probe = probeList[i];
+                const probeVector = probeVectors[i];
+                promises.push((async (slot) => {
+                  const semanticResult = await db.searchPassageIndex(
+                    data.indexConnection,
+                    probeVector,
+                    buildLexicalQuery(probe, { expandSpiritual: true }),
+                    Math.max(60, data.summary.deepMaxRecords * 4),
+                    probe,
+                    data.sourceType || 'all',
+                  );
+                  results[slot] = orderMatches(
+                    rerankPassageMatches(semanticResult.rows, probe, data.summary.deepMaxRecords),
+                    probe,
+                  ).slice(0, data.summary.deepMaxRecords);
+                })(i));
+              }
+              await Promise.all(promises);
+            }
+            return results;
+          },
           retrieveProbe: async (probe) => {
             const probeVector = (await embedding.embedTexts({
               baseUrl: data.ollamaBaseUrl,
@@ -611,20 +754,18 @@ function registerSemanticQaRoutes(app, { basePath = '/api/tools/semantic-qa', de
                 formatVersion: status.corpus.embeddingFormatVersion,
               })],
             }))[0];
-            const [semanticResult, textResult] = await Promise.all([
-              db.searchPassageIndex(
-                data.indexConnection,
-                probeVector,
-                buildLexicalQuery(probe),
-                Math.max(60, data.summary.deepMaxRecords * 4),
-                probe,
-              ),
-              db.searchTextIndex(data.indexConnection, probe, Math.max(20, data.summary.deepMaxRecords)),
-            ]);
-            return orderMatches([
-              ...rerankPassageMatches(semanticResult.rows, probe, data.summary.deepMaxRecords),
-              ...rerankTextMatches(textResult.rows, data.summary.deepMaxRecords),
-            ], probe).slice(0, data.summary.deepMaxRecords);
+            const semanticResult = await db.searchPassageIndex(
+              data.indexConnection,
+              probeVector,
+              buildLexicalQuery(probe, { expandSpiritual: true }),
+              Math.max(60, data.summary.deepMaxRecords * 4),
+              probe,
+              data.sourceType || 'all',
+            );
+            return orderMatches(
+              rerankPassageMatches(semanticResult.rows, probe, data.summary.deepMaxRecords),
+              probe,
+            ).slice(0, data.summary.deepMaxRecords);
           },
           readAnswerUnits: (references) => db.getAnswerUnits(data.indexConnection, references),
         });

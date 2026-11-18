@@ -1,0 +1,32 @@
+{
+  "templateDatabase": "universal_qa_v2",
+  "candidateDatabase": "universal_qa_v3_candidate",
+  "createdAt": "2026-11-16T16:38:53.184Z",
+  "removedUnits": [
+    {
+      "answer_unit_id": "discourse:2918:teaching:1",
+      "source_id": "discourse:2918",
+      "prefix": "[By Shri Shankara Datta]\n\nPranams to Your Lotus feet Datta S"
+    },
+    {
+      "answer_unit_id": "discourse:3192:teaching:1",
+      "source_id": "discourse:3192",
+      "prefix": "[By Shri Srivatsa Datta]\n\nBefore I start, I would like to th"
+    },
+    {
+      "answer_unit_id": "discourse:4291:teaching:1",
+      "source_id": "discourse:4291",
+      "prefix": "[By Shri Veena Datta]\n\nGURU DATTA SRI DATTA PRABHU DATTA\n\nI "
+    },
+    {
+      "answer_unit_id": "discourse:4294:teaching:1",
+      "source_id": "discourse:4294",
+      "prefix": "[By Shri Jitendra Datta]\n\nJaya Guru Datta, Sri Guru Datta,\n\n"
+    }
+  ],
+  "candidateCounts": {
+    "records": "6010",
+    "passages": "39095",
+    "answer_units": "11351"
+  }
+}

@@ -79,7 +79,7 @@ test('passage reranking accepts answer meaning without using the stored question
     },
   ], 'What is the meaning of Jesus saying The light is in me?', 5);
   assert.equal(matches[0].sourceId, 'correct');
-  assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
+  assert.ok(matches[0].rankingSignals.lexicalWeight > 0);
   assert.equal(matches[0].rankingSignals.titleWeight, 0);
   assert.equal(matches[0].rankingSignals.questionWeight, 0);
   assert.equal(matches[0].matchedPassages[0].text, 'Jesus saying The Light is in Me indicates qualified monism.');
@@ -100,7 +100,7 @@ test('one independent semantic support passage can lift a borderline answer with
   ], 'What does The Light is in Me mean?', 5);
   assert.ok(matches[0].relevanceScore >= 0.49);
   assert.equal(matches[0].rankingSignals.supportingPassages, 1);
-  assert.equal(matches[0].rankingSignals.lexicalWeight, 0);
+  assert.ok(matches[0].rankingSignals.lexicalWeight > 0);
 });
 
 test('an exact structured Q&A discovery question returns its paired Swami answer first', () => {
@@ -115,7 +115,7 @@ test('an exact structured Q&A discovery question returns its paired Swami answer
       sourceId: 'paired-qa', question: 'Why is “Lord help” emphasized?',
       passageIndex: 0, passageText: 'Swami replied with the complete answer.',
       passageStart: 0, passageEnd: 39, similarity: 0.73,
-      discoverySimilarity: 0.95, discoveryExact: true,
+      discoverySimilarity: 0.95, discoveryExact: true, answerUnitId: 'paired', discoveryAnswerUnitId: 'paired',
       metadata: { source_type: 'qa' },
     },
   ], 'Why is “Lord help” emphasized?', 5);
@@ -169,9 +169,9 @@ test('the final response order preserves an explicit quote identity constraint',
 });
 
 test('current embedding formats include distinct source context and retain the EmbeddingGemma prompts', () => {
-  assert.equal(GENERIC_EMBEDDING_FORMAT, 'generic-qa-v3');
-  assert.equal(EMBEDDINGGEMMA_FORMAT, 'embeddinggemma-asymmetric-v3');
-  assert.equal(RETRIEVAL_SCHEMA_VERSION, 'answer-unit-v5');
+  assert.equal(GENERIC_EMBEDDING_FORMAT, 'generic-contextual-v4');
+  assert.equal(EMBEDDINGGEMMA_FORMAT, 'embeddinggemma-asymmetric-v4');
+  assert.equal(RETRIEVAL_SCHEMA_VERSION, 'answer-unit-v7');
   assert.equal(
     buildDocumentEmbeddingText('Who is Ada?', 'Ada was a mathematician.', {
       model: 'embeddinggemma',
@@ -316,6 +316,18 @@ test('decision intent aligns should, can, do, and is questions without requiring
   assert.ok(matches[0].relevanceScore >= 0.49);
 });
 
+test('shared document words cannot supply missing physical task evidence', () => {
+  const text = 'An oil lamp is used in rituals. Food is cooked for the hungry. The temperature of devotion is an analogy. You can light an oil lamp because kerosene cannot be used in cooking food like oil. Oil from an oil lamp is instead used to cook food.';
+  const rows = [{ sourceId: 'discourse:ritual', question: 'Ritual lamps', answer: text, passageText: text, passageStart: 0, passageEnd: text.length, similarity: 0.8, lexicalScore: 2 }];
+  for (const query of ['Can an oil lamp cook food?', 'What is the temperature of an oil lamp flame?', 'Can a cake be baked with an oil lamp?']) {
+    assert.equal(buildSearchResponse(rerankPassageMatches(rows, query, 5), 0.49, query).strongMatch, false, query);
+  }
+  const answer = 'The temperature of an oil lamp flame is approximately 1000 degrees.';
+  const grounded = [{ ...rows[0], passageText: answer, answer }];
+  const query = 'What is the temperature of an oil lamp flame?';
+  assert.equal(buildSearchResponse(rerankPassageMatches(grounded, query, 5), 0.49, query).strongMatch, true);
+});
+
 test('content hashes are stable and change with source content', () => {
   const base = { sourceId: '1', question: 'Q', answer: 'A', metadata: { chapter: 2 }, sourceGroup: 'g', sourceOrder: 1 };
   assert.equal(contentHash(base), contentHash({ ...base }));
@@ -371,4 +383,241 @@ test('connection redaction does not expose secrets', () => {
   assert.deepEqual(redactConnection({ host: 'db', password: 'secret', connectionString: 'postgres://secret' }), {
     host: 'db', password: '[redacted]', connectionString: '[provided]',
   });
+});
+
+test('Phase 2 validation: buildPassageEmbeddingText with bge-m3 does not prepend empty Question header', () => {
+  const result = buildPassageEmbeddingText('Pure passage text.', { model: 'bge-m3' });
+  assert.equal(result, 'Pure passage text.');
+  assert.doesNotMatch(result, /Question:/);
+  assert.doesNotMatch(result, /Answer:/);
+});
+
+test('Phase 2 validation: buildPassageEmbeddingText injects title and associated question context', () => {
+  const resultBge = buildPassageEmbeddingText('Work without fruit.', {
+    model: 'bge-m3',
+    title: 'Gita Chapter 2',
+    associatedQuestion: 'What is Nishkama Karma?',
+  });
+  assert.equal(resultBge, 'Gita Chapter 2 — What is Nishkama Karma?\n\nWork without fruit.');
+
+  const resultGemma = buildPassageEmbeddingText('Work without fruit.', {
+    model: 'embeddinggemma',
+    title: 'Gita Chapter 2',
+    associatedQuestion: 'What is Nishkama Karma?',
+  });
+  assert.equal(resultGemma, 'title: Gita Chapter 2 (Question: What is Nishkama Karma?) | text: Work without fruit.');
+});
+
+test('Phase 3 validation: buildLexicalQuery expands spiritual transliterations when expandSpiritual is true', () => {
+  const query = 'What is the meaning of Gayathri?';
+  const standard = buildLexicalQuery(query);
+  assert.equal(standard, 'meaning OR gayathri');
+
+  const expanded = buildLexicalQuery(query, { expandSpiritual: true });
+  assert.match(expanded, /gayathri/);
+  assert.match(expanded, /gayatri/);
+});
+
+test('Phase 3 validation: buildQueryEmbeddingText folds diacritics', () => {
+  const query = 'What is Gāyatrī and śakti?';
+  const embedded = buildQueryEmbeddingText(query, { model: 'embeddinggemma' });
+  assert.equal(embedded, 'task: question answering | query: What is Gayatri and sakti?');
+});
+
+test('Phase 4 validation: rerankPassageMatches decouples discovery similarity from off-topic answers', () => {
+  const matches = rerankPassageMatches([
+    {
+      sourceId: 'off-topic-doc',
+      question: 'A discourse mentioning rituals',
+      passageIndex: 0,
+      passageText: 'An off topic concluding remark.',
+      passageStart: 0,
+      passageEnd: 32,
+      similarity: 0.12, // Very low answer similarity
+      discoverySimilarity: 0.88, // High question similarity
+      discoveryExact: false, // Not an exact question
+      metadata: {},
+    },
+  ], 'What is Gayathri?', 5);
+
+  assert.equal(matches.length, 1);
+  // Relevance score must not be falsely promoted into the 0.80s
+  assert.ok(matches[0].relevanceScore < 0.25, `Expected relevance < 0.25 but got ${matches[0].relevanceScore}`);
+});
+
+test('per-passage scoring chooses genuine strong answer over weak answer with high discovery', () => {
+  const rows = [
+    {
+      sourceId: 'doc:1',
+      question: 'General Discourse',
+      passageIndex: 0,
+      passageText: 'Weak introductory comment with high discovery',
+      passageStart: 0,
+      passageEnd: 46,
+      similarity: 0.12,
+      discoverySimilarity: 0.99,
+      discoveryExact: false,
+      metadata: {},
+    },
+    {
+      sourceId: 'doc:1',
+      question: 'General Discourse',
+      passageIndex: 1,
+      passageText: 'Actually relevant answer explaining the concept in detail',
+      passageStart: 50,
+      passageEnd: 108,
+      similarity: 0.80,
+      discoverySimilarity: 0.0,
+      discoveryExact: false,
+      metadata: {},
+    },
+  ];
+  const ranked = rerankPassageMatches(rows, 'explain the concept', 5);
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].passageIndex, 1);
+  assert.ok(ranked[0].relevanceScore >= 0.78, `Expected high relevance >= 0.78, got ${ranked[0].relevanceScore}`);
+  assert.equal(ranked[0].passageText, 'Actually relevant answer explaining the concept in detail');
+});
+
+test('per-passage scoring prevents discovery exact match leaking across different answer units', () => {
+  const rows = [
+    {
+      sourceId: 'doc:qa',
+      question: 'Two Questions Discourse',
+      passageIndex: 0,
+      answerUnitId: 'unit_a',
+      passageText: 'Answer A: Completely unrelated topic',
+      passageStart: 0,
+      passageEnd: 35,
+      similarity: 0.10,
+      discoverySimilarity: 0.95,
+      discoveryExact: false,
+      metadata: {},
+    },
+    {
+      sourceId: 'doc:qa',
+      question: 'Two Questions Discourse',
+      passageIndex: 1,
+      answerUnitId: 'unit_b',
+      passageText: 'Answer B: Exact match devotee question answer',
+      passageStart: 40,
+      passageEnd: 84,
+      similarity: 0.50,
+      discoverySimilarity: 1.0,
+      discoveryExact: true,
+      discoveryAnswerUnitId: 'unit_b',
+      metadata: {},
+    },
+  ];
+  const ranked = rerankPassageMatches(rows, 'Devotee question for B', 5);
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].passageIndex, 1);
+  assert.equal(ranked[0].answerUnitId, 'unit_b');
+  assert.equal(ranked[0].rankingSignals.exactQaDiscovery, true);
+});
+
+test('rerankPassageMatches smoothstep curve avoids cliff at 0.35 similarity', () => {
+  const makeRow = (similarity) => [{
+    sourceId: 'doc:smooth',
+    question: 'Title',
+    passageIndex: 0,
+    passageText: 'Passage text',
+    passageStart: 0,
+    passageEnd: 12,
+    similarity,
+    discoverySimilarity: 0.85,
+    discoveryExact: false,
+    metadata: {},
+  }];
+  const below = rerankPassageMatches(makeRow(0.34), 'unrelated query', 5);
+  const above = rerankPassageMatches(makeRow(0.36), 'unrelated query', 5);
+  const delta = Math.abs(above[0].relevanceScore - below[0].relevanceScore);
+  assert.ok(delta < 0.08, `Expected continuous delta < 0.08, got ${delta} (below: ${below[0].relevanceScore}, above: ${above[0].relevanceScore})`);
+});
+
+test('exact document title does not promote off-topic answer into strong match', () => {
+  const rows = [
+    {
+      sourceId: 'doc:multititle',
+      question: 'Discourse on Rituals and Sacrifice',
+      passageIndex: 0,
+      answerUnitId: 'unit_a',
+      passageText: 'An off-topic concluding remark.',
+      passageStart: 0,
+      passageEnd: 32,
+      similarity: 0.10, // low answer similarity
+      discoverySimilarity: 0.95, // title matched query
+      discoveryExact: false, // NOT an exact answer unit question
+      metadata: {},
+    },
+  ];
+  const ranked = rerankPassageMatches(rows, 'Discourse on Rituals and Sacrifice', 5);
+  assert.equal(ranked.length, 1);
+  assert.ok(ranked[0].relevanceScore < 0.25, `Expected relevance < 0.25, got ${ranked[0].relevanceScore}`);
+  assert.equal(ranked[0].rankingSignals.exactQaDiscovery, false);
+});
+
+test('exact-match ordering does not suppress available strong answer', () => {
+  const rows = [
+    {
+      sourceId: 'weak-exact',
+      relevanceScore: 0.20,
+      similarity: 0.20,
+      rankingSignals: { exactQaDiscovery: true },
+    },
+    {
+      sourceId: 'strong-answer',
+      relevanceScore: 0.90,
+      similarity: 0.88,
+      rankingSignals: { exactQaDiscovery: false },
+    },
+  ];
+  const response = buildSearchResponse(rows, 0.49, 'some query');
+  assert.equal(response.strongMatch, true);
+  assert.equal(response.acceptedMatch.sourceId, 'strong-answer');
+  assert.equal(response.matches[0].sourceId, 'strong-answer');
+});
+
+test('Item 9 validation: symmetric spiritual expansion expands both canonical root and variants with IAST preservation', () => {
+  // Query with canonical root
+  const canonicalQuery = 'What is the Gayatri mantra?';
+  const canonicalExpanded = buildLexicalQuery(canonicalQuery, { expandSpiritual: true });
+  // Query with non-canonical variant
+  const variantQuery = 'What is the Gayathri mantra?';
+  const variantExpanded = buildLexicalQuery(variantQuery, { expandSpiritual: true });
+
+  // Both must contain gayatri, gayathri, and accented gāyatrī
+  assert.ok(canonicalExpanded.includes('gayatri'));
+  assert.ok(canonicalExpanded.includes('gayathri'));
+  assert.ok(canonicalExpanded.includes('gāyatrī'));
+
+  assert.ok(variantExpanded.includes('gayatri'));
+  assert.ok(variantExpanded.includes('gayathri'));
+  assert.ok(variantExpanded.includes('gāyatrī'));
+
+  // Unexpanded queries must not expand
+  assert.equal(buildLexicalQuery('gayatri'), 'gayatri');
+  assert.equal(buildLexicalQuery('gayathri'), 'gayathri');
+});
+
+test('Item 10 validation: real hybrid ranking weights lexicalScore into relevanceScore and reports lexicalWeight', () => {
+  const matches = rerankPassageMatches([
+    {
+      sourceId: 'doc-hybrid',
+      passageIndex: 0,
+      passageText: 'Devotion and selfless sacrifice are the pillars of spiritual progress.',
+      passageStart: 0,
+      passageEnd: 71,
+      similarity: 0.50,
+      lexicalScore: 0.5,
+    },
+  ], 'What is devotion and selfless sacrifice?', 5);
+
+  assert.equal(matches.length, 1);
+  // smoothstep at 0.50: t = (0.50 - 0.20) / 0.40 = 0.75, smoothWeight = 0.75^2 * (3 - 1.5) = 0.84375
+  // lexicalBoost = min(0.08, 0.5 * 0.15) = 0.075
+  // passageLexicalBoost = 0.075 * 0.84375 ~= 0.0633
+  // initialRelevance = 0.50 + 0.0633 ~= 0.5633
+  assert.ok(matches[0].relevanceScore > 0.55, `Expected relevance > 0.55, got ${matches[0].relevanceScore}`);
+  assert.ok(matches[0].rankingSignals.lexicalWeight > 0.05, `Expected lexicalWeight > 0.05, got ${matches[0].rankingSignals.lexicalWeight}`);
 });

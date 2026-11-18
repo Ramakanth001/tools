@@ -1,0 +1,4171 @@
+{
+  "executedCases": 50,
+  "reviewedCases": 50,
+  "completeBenchmarkRun": true,
+  "benchmarkVersion": 1,
+  "variant": "deliberation-fast",
+  "deliberation": "fast",
+  "createdAt": "2026-11-17T12:25:13.689Z",
+  "corpusContract": {
+    "retrievalSchemaVersion": "answer-unit-v7",
+    "embeddingFormatVersion": "generic-contextual-v4",
+    "embeddingModel": "bge-m3"
+  },
+  "summary": {
+    "cases": 50,
+    "latencyMs": {
+      "p50": 524400,
+      "p95": 1506104
+    },
+    "candidateRecall": 0.8095238095238095,
+    "evidenceRecall": 0.5,
+    "evidencePrecision": 0.31133333333333335,
+    "forbiddenEvidenceRate": 0,
+    "answerStatusAccuracy": 0.24,
+    "abstentionAccuracy": 0.84,
+    "exactEvidenceRate": 1,
+    "promptTokens": 262467,
+    "completionTokens": 66750,
+    "casesWithEvidence": 38,
+    "casesWithoutEvidence": 12,
+    "citationsChecked": 95,
+    "citationsPassed": 95,
+    "citationsFailed": 0,
+    "citationPassRate": 1
+  },
+  "results": [
+    {
+      "id": "seed-datta-swami",
+      "category": "direct",
+      "latencyMs": 1506104,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "direct",
+      "answerStatusCorrect": true,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1113:reply:1",
+        "discourse:737:reply:5",
+        "discourse:2760:teaching:1",
+        "discourse:1322:reply:1",
+        "discourse:913:teaching:1",
+        "discourse:5453:reply:1",
+        "qa:320:answer:1",
+        "discourse:1759:reply:1",
+        "discourse:1517:reply:1",
+        "discourse:4893:reply:6",
+        "discourse:738:teaching:1",
+        "discourse:1523:reply:1",
+        "discourse:2854:reply:1",
+        "discourse:993:teaching:1",
+        "discourse:702:teaching:1",
+        "discourse:1504:reply:1",
+        "discourse:4291:teaching:1",
+        "discourse:4488:teaching:1",
+        "discourse:5072:reply:5",
+        "discourse:4587:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:738:teaching:1",
+        "discourse:1113:reply:1",
+        "qa:320:answer:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4674,
+        "completion": 511,
+        "total": 5185
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 243854.96,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 290866.5,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 1436.36,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 700103.31,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.63,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 1.03,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-meet-swami",
+      "category": "direct",
+      "latencyMs": 1153743,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "direct",
+      "answerStatusCorrect": true,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.6666666666666666,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "qa:320:answer:1",
+        "discourse:1113:reply:1",
+        "discourse:737:reply:4",
+        "discourse:2854:reply:1",
+        "discourse:4294:teaching:1",
+        "discourse:2760:teaching:1",
+        "discourse:3985:reply:1",
+        "discourse:4327:teaching:1",
+        "discourse:1322:reply:1",
+        "discourse:662:teaching:1",
+        "discourse:3386:reply:1",
+        "discourse:4488:teaching:1",
+        "discourse:702:teaching:1",
+        "discourse:5451:reply:1",
+        "discourse:993:teaching:1",
+        "discourse:3024:teaching:1",
+        "discourse:5072:reply:2",
+        "discourse:891:teaching:1",
+        "discourse:3056:teaching:1",
+        "discourse:4291:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:320:answer:1",
+        "discourse:2854:reply:1",
+        "discourse:3985:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4636,
+        "completion": 873,
+        "total": 5509
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 236293.23,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 207840.77,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1394.11,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 471482.16,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.42,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.71,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-nature-datta",
+      "category": "direct",
+      "latencyMs": 1928956,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.25,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:5568:reply:1",
+        "discourse:733:reply:1",
+        "discourse:5612:teaching:1",
+        "discourse:1239:reply:1",
+        "discourse:1759:reply:1",
+        "discourse:4236:teaching:1",
+        "discourse:1123:reply:1",
+        "qa:49:answer:1",
+        "discourse:1049:reply:1",
+        "discourse:603:teaching:1",
+        "discourse:779:teaching:1",
+        "qa:87:answer:1",
+        "discourse:2196:teaching:1",
+        "discourse:5263:reply:1",
+        "qa:162:answer:1",
+        "discourse:845:teaching:1",
+        "discourse:913:teaching:1",
+        "discourse:846:teaching:1",
+        "discourse:2401:reply:1",
+        "discourse:5173:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:49:answer:1",
+        "discourse:5568:reply:1",
+        "discourse:1123:reply:1",
+        "discourse:733:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 7243,
+        "completion": 5252,
+        "total": 12495
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 165089.56,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 136848.23,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 749.72,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 1444075.02,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 1.78,
+          "processed": 4,
+          "total": 4
+        },
+        "verify": {
+          "durationMs": 0.92,
+          "processed": 4,
+          "total": 4
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 4,
+      "citationsPassed": 4,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-datta-dattatreya",
+      "category": "qualification",
+      "latencyMs": 531163,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "direct",
+      "answerStatusCorrect": true,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "qa:162:answer:1",
+        "discourse:2068:reply:1",
+        "discourse:3501:reply:6",
+        "discourse:2184:reply:1",
+        "discourse:317:reply:1",
+        "discourse:1239:reply:1",
+        "qa:55:answer:1",
+        "discourse:697:teaching:1",
+        "discourse:1059:reply:1",
+        "discourse:3142:reply:1",
+        "qa:380:answer:1",
+        "qa:86:answer:1",
+        "discourse:1759:reply:1",
+        "discourse:2027:reply:1",
+        "qa:168:answer:1",
+        "discourse:1585:reply:1",
+        "discourse:3135:reply:1",
+        "discourse:2119:reply:1",
+        "discourse:2367:reply:1",
+        "discourse:2781:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:2068:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4360,
+        "completion": 661,
+        "total": 5021
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 112267.17,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 59058.2,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 654.26,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 268978.26,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.2,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.43,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-pornography",
+      "category": "ethical_dilemma",
+      "latencyMs": 453911,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:766:reply:5",
+        "discourse:4726:reply:1",
+        "discourse:4531:reply:1",
+        "qa:396:answer:1",
+        "discourse:5573:reply:3",
+        "discourse:4163:reply:22",
+        "discourse:5073:reply:1",
+        "discourse:1756:reply:1",
+        "discourse:2498:reply:1",
+        "discourse:1546:reply:1",
+        "discourse:4979:reply:1",
+        "qa:98:answer:1",
+        "discourse:1714:reply:1",
+        "discourse:2960:reply:1",
+        "discourse:5094:reply:5",
+        "discourse:1951:reply:1",
+        "discourse:2560:reply:1",
+        "discourse:2222:reply:1",
+        "discourse:2072:reply:9",
+        "qa:221:answer:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4366,
+        "completion": 607,
+        "total": 4973
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 100535.69,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 48825.9,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 666.74,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 238765.3,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.08,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "seed-unanswered-prayers",
+      "category": "direct",
+      "latencyMs": 776299,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "direct",
+      "answerStatusCorrect": true,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.16666666666666666,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:3158:reply:1",
+        "discourse:3362:reply:1",
+        "qa:98:answer:1",
+        "discourse:3034:reply:1",
+        "discourse:2570:reply:1",
+        "qa:136:answer:1",
+        "discourse:1364:reply:1",
+        "discourse:1393:reply:1",
+        "qa:159:answer:1",
+        "discourse:3463:reply:1",
+        "discourse:3820:reply:1",
+        "qa:156:answer:1",
+        "discourse:1267:reply:1",
+        "discourse:3572:reply:2",
+        "discourse:3603:reply:7",
+        "discourse:2292:reply:1",
+        "discourse:4193:reply:1",
+        "discourse:264:teaching:1",
+        "qa:425:answer:1",
+        "discourse:4513:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:159:answer:1",
+        "discourse:3034:reply:1",
+        "discourse:3463:reply:1",
+        "discourse:2570:reply:1",
+        "discourse:3158:reply:1",
+        "discourse:3362:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5381,
+        "completion": 2122,
+        "total": 7503
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 113278.76,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 39268.07,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 718.38,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 585394.9,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.5,
+          "processed": 6,
+          "total": 6
+        },
+        "verify": {
+          "durationMs": 0.78,
+          "processed": 6,
+          "total": 6
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 6,
+      "citationsPassed": 6,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-world-real",
+      "category": "direct",
+      "latencyMs": 759098,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:978:reply:1",
+        "discourse:273:reply:1",
+        "discourse:5559:reply:1",
+        "discourse:1814:reply:1",
+        "discourse:239:teaching:1",
+        "qa:60:answer:1",
+        "discourse:458:reply:1",
+        "discourse:5497:reply:1",
+        "discourse:5749:teaching:1",
+        "discourse:3108:reply:1",
+        "discourse:5674:teaching:1",
+        "qa:225:answer:1",
+        "discourse:1815:reply:1",
+        "discourse:3920:reply:1",
+        "discourse:461:teaching:1",
+        "discourse:653:teaching:1",
+        "discourse:772:reply:2",
+        "discourse:1799:reply:1",
+        "discourse:2554:reply:1",
+        "discourse:736:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:60:answer:1",
+        "discourse:5497:reply:1",
+        "discourse:3108:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5276,
+        "completion": 2137,
+        "total": 7413
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 101997.43,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 47017.44,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 749.51,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 570920.29,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.29,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.79,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-child-anxiety",
+      "category": "direct",
+      "latencyMs": 797448,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.5,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "qa:208:answer:1",
+        "discourse:2438:reply:1",
+        "discourse:565:reply:2",
+        "discourse:1711:reply:1",
+        "discourse:4420:reply:1",
+        "qa:217:answer:1",
+        "discourse:584:teaching:1",
+        "discourse:2533:reply:1",
+        "discourse:2019:reply:1",
+        "discourse:759:reply:1",
+        "discourse:1431:reply:1",
+        "discourse:891:teaching:1",
+        "qa:78:answer:1",
+        "discourse:4750:reply:1",
+        "discourse:5563:reply:2",
+        "discourse:271:reply:2",
+        "discourse:304:reply:1",
+        "discourse:1410:reply:1",
+        "discourse:839:reply:1",
+        "discourse:2387:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:208:answer:1",
+        "discourse:1711:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5862,
+        "completion": 2224,
+        "total": 8086
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 100550.09,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 37772.68,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 603.05,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 630769.07,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.22,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.38,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-serve-swami",
+      "category": "direct",
+      "latencyMs": 484476,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.5,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1286:reply:1",
+        "discourse:3129:reply:1",
+        "discourse:2967:reply:1",
+        "qa:323:answer:1",
+        "discourse:3018:reply:2",
+        "discourse:2204:reply:1",
+        "discourse:453:teaching:1",
+        "discourse:4327:teaching:1",
+        "discourse:4260:reply:1",
+        "discourse:1966:reply:1",
+        "discourse:2608:reply:1",
+        "qa:312:answer:1",
+        "discourse:4876:reply:1",
+        "discourse:2746:reply:4",
+        "discourse:4163:reply:4",
+        "discourse:4537:reply:1",
+        "discourse:5115:reply:2",
+        "discourse:437:teaching:1",
+        "qa:311:answer:1",
+        "discourse:3664:reply:3"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:323:answer:1",
+        "discourse:4537:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4850,
+        "completion": 812,
+        "total": 5662
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 99064.39,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 32778.89,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 723.54,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 310266.95,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.37,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.52,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-datta-test",
+      "category": "direct",
+      "latencyMs": 854363,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:4486:reply:1",
+        "discourse:978:reply:1",
+        "discourse:1184:reply:8",
+        "discourse:239:teaching:1",
+        "qa:421:answer:1",
+        "discourse:385:teaching:1",
+        "discourse:971:reply:1",
+        "discourse:273:reply:1",
+        "discourse:2922:reply:1",
+        "discourse:437:teaching:1",
+        "qa:162:answer:1",
+        "discourse:1449:reply:1",
+        "discourse:319:reply:2",
+        "discourse:3376:reply:2",
+        "qa:87:answer:1",
+        "discourse:1155:reply:6",
+        "discourse:2039:reply:1",
+        "discourse:291:reply:1",
+        "qa:444:answer:1",
+        "discourse:969:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:421:answer:1"
+      ],
+      "tokenUsage": {
+        "prompt": 6152,
+        "completion": 2154,
+        "total": 8306
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 116104.85,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 41597.93,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 913.6,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 656028.37,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.22,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.46,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-life-direction",
+      "category": "direct",
+      "latencyMs": 478710,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.2,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:3007:reply:5",
+        "discourse:2106:reply:1",
+        "discourse:239:teaching:1",
+        "discourse:2922:reply:1",
+        "discourse:1589:reply:1",
+        "discourse:3376:reply:2",
+        "discourse:982:reply:1",
+        "qa:430:answer:1",
+        "discourse:1332:reply:1",
+        "discourse:1890:reply:1",
+        "discourse:736:teaching:1",
+        "discourse:3103:reply:5",
+        "discourse:448:reply:1",
+        "discourse:970:reply:1",
+        "discourse:373:reply:1",
+        "discourse:672:teaching:1",
+        "discourse:969:reply:1",
+        "qa:310:answer:1",
+        "qa:326:answer:1",
+        "discourse:437:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:430:answer:1",
+        "discourse:1890:reply:1",
+        "discourse:1589:reply:1",
+        "discourse:2922:reply:1",
+        "discourse:970:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 6369,
+        "completion": 679,
+        "total": 7048
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 100570.12,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 39478.85,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 473.5,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 309218.36,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.43,
+          "processed": 5,
+          "total": 5
+        },
+        "verify": {
+          "durationMs": 0.78,
+          "processed": 5,
+          "total": 5
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 5,
+      "citationsPassed": 5,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-rigidity",
+      "category": "direct",
+      "latencyMs": 1215401,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.5,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:437:teaching:1",
+        "discourse:239:teaching:1",
+        "discourse:5449:reply:1",
+        "discourse:970:reply:1",
+        "discourse:273:reply:1",
+        "qa:434:answer:1",
+        "discourse:969:reply:1",
+        "qa:424:answer:1",
+        "discourse:1345:reply:2",
+        "discourse:772:reply:2",
+        "qa:420:answer:1",
+        "discourse:1155:reply:6",
+        "discourse:3650:reply:1",
+        "discourse:373:reply:1",
+        "qa:444:answer:1",
+        "discourse:134:reply:1",
+        "discourse:2204:reply:1",
+        "qa:201:answer:1",
+        "qa:438:answer:1",
+        "discourse:853:reply:4"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:434:answer:1",
+        "qa:420:answer:1"
+      ],
+      "tokenUsage": {
+        "prompt": 7125,
+        "completion": 3663,
+        "total": 10788
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 99134.96,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 33745.21,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 450.87,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 1047224.14,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.29,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.55,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-oil-lamp",
+      "category": "direct",
+      "latencyMs": 972657,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:90:teaching:1",
+        "discourse:1118:teaching:1",
+        "discourse:533:teaching:1",
+        "discourse:1841:reply:1",
+        "discourse:1691:reply:2",
+        "discourse:1690:reply:1",
+        "discourse:1582:reply:1",
+        "discourse:95:teaching:1",
+        "discourse:901:reply:4",
+        "discourse:736:teaching:1",
+        "discourse:130:teaching:1",
+        "discourse:2200:reply:1",
+        "discourse:1587:reply:1",
+        "qa:187:answer:1",
+        "discourse:537:teaching:1",
+        "qa:144:answer:1",
+        "discourse:2545:reply:4",
+        "discourse:519:teaching:1",
+        "discourse:3353:reply:1",
+        "discourse:632:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1841:reply:1",
+        "discourse:1118:teaching:1",
+        "discourse:1690:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 6301,
+        "completion": 2689,
+        "total": 8990
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 102161.09,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 40929.54,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 680.73,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 778690.07,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.37,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.64,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-light-in-me",
+      "category": "direct",
+      "latencyMs": 419624,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:228:reply:1",
+        "discourse:1008:reply:1",
+        "discourse:1322:reply:1",
+        "discourse:1159:reply:1",
+        "discourse:1434:reply:1",
+        "discourse:476:teaching:1",
+        "discourse:2200:reply:1",
+        "discourse:1199:reply:1",
+        "discourse:1831:reply:1",
+        "discourse:3109:reply:1",
+        "qa:98:answer:1",
+        "discourse:5453:reply:1",
+        "discourse:1154:reply:1",
+        "discourse:1094:reply:1",
+        "discourse:1013:teaching:1",
+        "discourse:90:teaching:1",
+        "discourse:89:teaching:1",
+        "discourse:4511:reply:1",
+        "discourse:4384:reply:1",
+        "discourse:260:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1322:reply:1",
+        "discourse:1831:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4154,
+        "completion": 583,
+        "total": 4737
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 108111.83,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 37819.17,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 602.79,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 240543.58,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.27,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.5,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-inner-meaning-yajna",
+      "category": "direct",
+      "latencyMs": 427298,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:914:teaching:1",
+        "discourse:237:teaching:1",
+        "discourse:791:teaching:1",
+        "discourse:533:teaching:1",
+        "qa:180:answer:1",
+        "discourse:1222:reply:1",
+        "discourse:301:reply:1",
+        "qa:187:answer:1",
+        "discourse:660:teaching:1",
+        "qa:198:answer:1",
+        "discourse:2669:reply:1",
+        "discourse:552:teaching:1",
+        "discourse:74:teaching:1",
+        "discourse:100:teaching:1",
+        "discourse:5074:reply:10",
+        "discourse:2507:reply:1",
+        "discourse:1647:reply:1",
+        "discourse:95:teaching:1",
+        "qa:195:answer:1",
+        "discourse:2783:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:180:answer:1",
+        "discourse:1222:reply:1",
+        "discourse:914:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4089,
+        "completion": 558,
+        "total": 4647
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 101545.63,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 32402.68,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 763.03,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 243180.69,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.3,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.43,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-recognize-human-incarnation",
+      "category": "direct",
+      "latencyMs": 421901,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "qa:42:answer:1",
+        "qa:168:answer:1",
+        "discourse:2228:reply:1",
+        "qa:41:answer:1",
+        "discourse:118:reply:1",
+        "qa:40:answer:1",
+        "discourse:2504:reply:1",
+        "discourse:1416:reply:1",
+        "discourse:3359:reply:1",
+        "qa:37:answer:1",
+        "discourse:1198:reply:1",
+        "discourse:4787:reply:1",
+        "qa:155:answer:1",
+        "discourse:736:teaching:1",
+        "qa:341:answer:1",
+        "discourse:4708:reply:1",
+        "discourse:1089:reply:4",
+        "discourse:4341:reply:1",
+        "discourse:2081:reply:1",
+        "discourse:850:reply:3"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:37:answer:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4479,
+        "completion": 537,
+        "total": 5016
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 120005.08,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 31948.69,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 621.29,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 238634.41,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.2,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.41,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-shankara-soul-as-god",
+      "category": "direct",
+      "latencyMs": 776706,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:5048:reply:1",
+        "discourse:5763:reply:1",
+        "discourse:113:teaching:1",
+        "discourse:5265:reply:1",
+        "discourse:3000:reply:1",
+        "discourse:888:reply:2",
+        "discourse:749:teaching:1",
+        "discourse:160:reply:1",
+        "discourse:400:teaching:1",
+        "discourse:576:teaching:1",
+        "discourse:337:reply:1",
+        "discourse:1807:reply:2",
+        "discourse:1060:reply:1",
+        "discourse:828:reply:3",
+        "discourse:589:teaching:1",
+        "discourse:908:reply:1",
+        "discourse:1139:reply:1",
+        "discourse:994:reply:1",
+        "discourse:1019:reply:1",
+        "discourse:750:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:5265:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5331,
+        "completion": 2031,
+        "total": 7362
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 108229.64,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 31744.69,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 803.26,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 601455.83,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.16,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.33,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-meaning-upanayanam",
+      "category": "direct",
+      "latencyMs": 419239,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:255:teaching:1",
+        "discourse:910:reply:1",
+        "discourse:2096:reply:1",
+        "discourse:4452:reply:1",
+        "discourse:2782:teaching:1",
+        "discourse:876:reply:1",
+        "discourse:843:teaching:1",
+        "discourse:2556:reply:1",
+        "discourse:2095:reply:1",
+        "discourse:4718:reply:1",
+        "discourse:1671:reply:1",
+        "discourse:5093:reply:7",
+        "discourse:1149:reply:1",
+        "discourse:1192:reply:1",
+        "discourse:4376:reply:1",
+        "discourse:1842:reply:2",
+        "discourse:917:reply:2",
+        "discourse:819:reply:2",
+        "discourse:971:reply:1",
+        "discourse:1228:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:2096:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4797,
+        "completion": 551,
+        "total": 5348
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 98221.94,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 31951.98,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 586.32,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 253397.61,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.2,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.59,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-cinema-song-gayatri",
+      "category": "direct",
+      "latencyMs": 429638,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.5,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:388:reply:1",
+        "discourse:1111:reply:1",
+        "discourse:84:teaching:1",
+        "discourse:1911:reply:1",
+        "discourse:617:teaching:1",
+        "qa:184:answer:1",
+        "discourse:324:reply:1",
+        "discourse:860:reply:2",
+        "qa:182:answer:1",
+        "discourse:4718:reply:1",
+        "discourse:4869:teaching:1",
+        "discourse:724:reply:8",
+        "discourse:5509:reply:1",
+        "discourse:1089:reply:3",
+        "discourse:2681:reply:1",
+        "discourse:788:teaching:1",
+        "discourse:1590:reply:1",
+        "discourse:666:reply:1",
+        "discourse:807:teaching:1",
+        "discourse:756:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:184:answer:1",
+        "discourse:1111:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5098,
+        "completion": 540,
+        "total": 5638
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 103207.35,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 29646.9,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 713.6,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 261819.03,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.39,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.62,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-idol-worship-symbolism",
+      "category": "direct",
+      "latencyMs": 796769,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1690:reply:1",
+        "discourse:373:reply:3",
+        "discourse:943:reply:1",
+        "discourse:899:teaching:1",
+        "discourse:450:teaching:1",
+        "discourse:941:reply:5",
+        "discourse:1998:reply:1",
+        "discourse:1651:reply:1",
+        "discourse:425:teaching:1",
+        "discourse:197:reply:1",
+        "qa:59:answer:1",
+        "discourse:3387:reply:1",
+        "discourse:1207:reply:1",
+        "discourse:1759:reply:1",
+        "discourse:3820:reply:1",
+        "discourse:1352:reply:1",
+        "discourse:971:reply:1",
+        "discourse:138:reply:1",
+        "discourse:2032:reply:1",
+        "discourse:255:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:197:reply:1",
+        "discourse:1690:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5290,
+        "completion": 2092,
+        "total": 7382
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 102902.62,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 32885.89,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1313.01,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 629350.46,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.53,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.74,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-maya-vs-mula-maya",
+      "category": "direct",
+      "latencyMs": 452394,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:259:reply:1",
+        "discourse:772:reply:2",
+        "discourse:3499:reply:1",
+        "discourse:5053:reply:4",
+        "discourse:3500:reply:1",
+        "discourse:258:reply:6",
+        "discourse:450:teaching:1",
+        "discourse:2395:reply:1",
+        "discourse:112:reply:1",
+        "discourse:485:reply:1",
+        "discourse:686:teaching:1",
+        "discourse:1684:reply:1",
+        "discourse:1674:reply:1",
+        "discourse:551:teaching:1",
+        "discourse:689:teaching:1",
+        "discourse:3007:reply:6",
+        "discourse:1027:reply:1",
+        "discourse:566:teaching:1",
+        "discourse:715:teaching:1",
+        "discourse:1290:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4355,
+        "completion": 721,
+        "total": 5076
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 108111.84,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 32604.75,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 807.63,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 279610.73,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.12,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.12,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "seed-burning-ghee-yajna",
+      "category": "direct",
+      "latencyMs": 2052337,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:237:teaching:1",
+        "discourse:2783:teaching:1",
+        "discourse:1100:reply:1",
+        "qa:187:answer:1",
+        "discourse:4790:reply:15",
+        "discourse:5632:reply:9",
+        "qa:198:answer:1",
+        "discourse:2507:reply:1",
+        "discourse:914:teaching:1",
+        "qa:180:answer:1",
+        "discourse:1222:reply:1",
+        "discourse:552:teaching:1",
+        "discourse:892:teaching:1",
+        "discourse:1562:reply:1",
+        "discourse:5528:teaching:1",
+        "discourse:4769:reply:7",
+        "discourse:95:teaching:1",
+        "discourse:74:teaching:1",
+        "discourse:1118:teaching:1",
+        "discourse:1181:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:237:teaching:1",
+        "qa:187:answer:1",
+        "discourse:1100:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 8384,
+        "completion": 7067,
+        "total": 15451
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 103082.26,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 26989.09,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1313.62,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 1886567.47,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.32,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.6,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-soul-as-creator-impossible",
+      "category": "direct",
+      "latencyMs": 410330,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1660:reply:1",
+        "discourse:113:teaching:1",
+        "discourse:5048:reply:1",
+        "discourse:5763:reply:1",
+        "discourse:1137:reply:1",
+        "discourse:1824:reply:1",
+        "discourse:1439:reply:1",
+        "discourse:805:teaching:1",
+        "discourse:1523:reply:1",
+        "discourse:2442:reply:1",
+        "discourse:1816:reply:1",
+        "discourse:1312:reply:1",
+        "discourse:1815:reply:1",
+        "discourse:3000:reply:1",
+        "discourse:3342:reply:1",
+        "discourse:5510:reply:1",
+        "discourse:67:teaching:1",
+        "discourse:1807:reply:1",
+        "discourse:4263:reply:1",
+        "discourse:750:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1816:reply:1",
+        "discourse:1137:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4650,
+        "completion": 544,
+        "total": 5194
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 103949.36,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 28217.81,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 707.17,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 245410.13,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.24,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.46,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-correlate-advaita-dvaita",
+      "category": "direct",
+      "latencyMs": 419337,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:4893:reply:6",
+        "discourse:702:teaching:1",
+        "discourse:2674:reply:1",
+        "discourse:1523:reply:1",
+        "discourse:453:teaching:1",
+        "discourse:1194:teaching:1",
+        "discourse:737:reply:5",
+        "discourse:635:teaching:1",
+        "discourse:5674:teaching:1",
+        "discourse:241:teaching:1",
+        "discourse:123:reply:1",
+        "discourse:2141:teaching:1",
+        "discourse:840:teaching:1",
+        "discourse:2901:reply:1",
+        "discourse:891:teaching:1",
+        "qa:59:answer:1",
+        "discourse:4295:teaching:1",
+        "discourse:3212:reply:20",
+        "discourse:2123:reply:1",
+        "discourse:3323:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:2674:reply:1",
+        "discourse:1523:reply:1",
+        "discourse:635:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4822,
+        "completion": 548,
+        "total": 5370
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 119618.42,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 28871.99,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 730.05,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 233954.99,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.28,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.58,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-nature-unimaginable-god",
+      "category": "direct",
+      "latencyMs": 435990,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.2,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:4784:reply:1",
+        "discourse:5443:reply:1",
+        "discourse:2802:reply:1",
+        "discourse:549:teaching:1",
+        "discourse:2705:teaching:1",
+        "discourse:2635:reply:1",
+        "qa:327:answer:1",
+        "discourse:4319:reply:1",
+        "discourse:450:teaching:1",
+        "discourse:1171:reply:1",
+        "discourse:4290:teaching:1",
+        "discourse:1524:teaching:1",
+        "discourse:2158:teaching:1",
+        "discourse:5078:reply:1",
+        "discourse:555:teaching:1",
+        "discourse:2667:teaching:1",
+        "discourse:2890:reply:1",
+        "discourse:112:reply:1",
+        "discourse:353:reply:3",
+        "discourse:396:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:2802:reply:1",
+        "discourse:4784:reply:1",
+        "qa:327:answer:1",
+        "discourse:549:teaching:1",
+        "discourse:2890:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4976,
+        "completion": 625,
+        "total": 5601
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 106458.31,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 40663.32,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 595.67,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 258780.74,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.73,
+          "processed": 5,
+          "total": 5
+        },
+        "verify": {
+          "durationMs": 1.17,
+          "processed": 5,
+          "total": 5
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 5,
+      "citationsPassed": 5,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-rituals-without-meaning",
+      "category": "direct",
+      "latencyMs": 903049,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.5,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:2632:reply:1",
+        "discourse:878:reply:5",
+        "discourse:1126:reply:1",
+        "discourse:617:teaching:1",
+        "discourse:2489:reply:36",
+        "discourse:807:teaching:1",
+        "discourse:1544:reply:1",
+        "discourse:3659:reply:1",
+        "discourse:774:reply:1",
+        "discourse:2527:reply:1",
+        "discourse:1039:reply:3",
+        "discourse:1531:reply:1",
+        "discourse:519:teaching:1",
+        "discourse:1083:reply:1",
+        "discourse:1802:reply:11",
+        "discourse:860:reply:2",
+        "discourse:537:teaching:1",
+        "discourse:116:teaching:1",
+        "discourse:2522:reply:1",
+        "discourse:1111:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1126:reply:1",
+        "discourse:2632:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 6162,
+        "completion": 2359,
+        "total": 8521
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 100242.61,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 27811.39,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 715.6,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 742879.98,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.2,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.55,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-sacred-thread-eligibility",
+      "category": "direct",
+      "latencyMs": 410625,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:301:reply:1",
+        "discourse:537:teaching:1",
+        "discourse:843:teaching:1",
+        "discourse:971:reply:1",
+        "discourse:931:teaching:1",
+        "discourse:892:teaching:1",
+        "discourse:851:teaching:1",
+        "discourse:255:teaching:1",
+        "discourse:1272:reply:1",
+        "qa:106:answer:1",
+        "discourse:2096:reply:1",
+        "discourse:2493:reply:1",
+        "discourse:788:teaching:1",
+        "discourse:3935:reply:2",
+        "discourse:533:teaching:1",
+        "qa:185:answer:1",
+        "discourse:4888:reply:2",
+        "discourse:934:reply:1",
+        "discourse:819:reply:2",
+        "discourse:910:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:537:teaching:1",
+        "discourse:843:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4794,
+        "completion": 511,
+        "total": 5305
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 105604.92,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 33615.74,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 780.63,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 237026.18,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.35,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.66,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-women-chant-gayatri",
+      "category": "direct",
+      "latencyMs": 391912,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:1911:reply:1",
+        "qa:182:answer:1",
+        "discourse:617:teaching:1",
+        "discourse:324:reply:1",
+        "discourse:84:teaching:1",
+        "discourse:910:reply:1",
+        "discourse:2681:reply:1",
+        "discourse:537:teaching:1",
+        "discourse:1111:reply:1",
+        "qa:184:answer:1",
+        "discourse:807:teaching:1",
+        "discourse:860:reply:2",
+        "discourse:3659:reply:2",
+        "discourse:1543:reply:1",
+        "discourse:1590:reply:1",
+        "discourse:691:teaching:1",
+        "discourse:819:reply:2",
+        "discourse:781:teaching:1",
+        "discourse:4718:reply:1",
+        "qa:183:answer:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4884,
+        "completion": 509,
+        "total": 5393
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 100643.42,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 23624.92,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 645.34,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 239614.75,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.15,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "seed-shraddha-ancestors",
+      "category": "direct",
+      "latencyMs": 797649,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1073:reply:1",
+        "discourse:5356:reply:1",
+        "discourse:774:reply:3",
+        "discourse:1039:reply:1",
+        "discourse:1037:teaching:1",
+        "discourse:3460:reply:1",
+        "discourse:4958:reply:1",
+        "discourse:1083:reply:1",
+        "discourse:518:teaching:1",
+        "qa:349:answer:1",
+        "discourse:2681:reply:1",
+        "discourse:770:reply:1",
+        "discourse:4766:reply:1",
+        "discourse:657:teaching:1",
+        "discourse:84:teaching:1",
+        "discourse:975:reply:2",
+        "discourse:2632:reply:1",
+        "discourse:1352:reply:1",
+        "qa:59:answer:1",
+        "discourse:1554:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:3460:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5561,
+        "completion": 2066,
+        "total": 7627
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 101431.9,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 32511.23,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 598.19,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 633750.13,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.13,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.3,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-gayatri-meter-or-deity",
+      "category": "direct",
+      "latencyMs": 475189,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:324:reply:1",
+        "discourse:2681:reply:1",
+        "discourse:255:teaching:1",
+        "discourse:3659:reply:2",
+        "discourse:316:reply:1",
+        "qa:182:answer:1",
+        "discourse:1111:reply:1",
+        "discourse:2782:teaching:1",
+        "discourse:617:teaching:1",
+        "discourse:1089:reply:3",
+        "discourse:84:teaching:1",
+        "discourse:781:teaching:1",
+        "discourse:4236:teaching:1",
+        "discourse:1535:reply:1",
+        "discourse:691:teaching:1",
+        "discourse:1911:reply:1",
+        "discourse:537:teaching:1",
+        "discourse:159:teaching:1",
+        "discourse:1590:reply:1",
+        "discourse:4718:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1111:reply:1",
+        "qa:182:answer:1",
+        "discourse:1590:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5140,
+        "completion": 670,
+        "total": 5810
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 105983.81,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 33465.7,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 690.61,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 307273.28,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.42,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.76,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-family-duty-vs-devotion",
+      "category": "direct",
+      "latencyMs": 1284802,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1557:reply:1",
+        "discourse:1023:reply:1",
+        "qa:207:answer:1",
+        "discourse:1457:reply:1",
+        "discourse:2426:reply:1",
+        "discourse:3940:reply:1",
+        "discourse:3101:reply:1",
+        "discourse:821:reply:1",
+        "discourse:4536:reply:1",
+        "discourse:2818:reply:1",
+        "discourse:3579:reply:1",
+        "discourse:3820:reply:1",
+        "discourse:1204:reply:1",
+        "discourse:2037:reply:3",
+        "discourse:754:reply:3",
+        "discourse:1431:reply:1",
+        "discourse:2420:reply:1",
+        "discourse:997:reply:1",
+        "discourse:747:reply:8",
+        "discourse:5220:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1557:reply:1",
+        "discourse:3940:reply:1",
+        "qa:207:answer:1",
+        "discourse:1457:reply:1",
+        "discourse:2426:reply:1",
+        "discourse:4536:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 6824,
+        "completion": 3908,
+        "total": 10732
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 106361.13,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 31630.83,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 863.78,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 1115154.15,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.78,
+          "processed": 6,
+          "total": 6
+        },
+        "verify": {
+          "durationMs": 1.25,
+          "processed": 6,
+          "total": 6
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 6,
+      "citationsPassed": 6,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-pray-for-worldly-wealth",
+      "category": "ethical_dilemma",
+      "latencyMs": 466478,
+      "expectedAnswerStatus": "related_teachings",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": true,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:1576:reply:1",
+        "discourse:1152:reply:1",
+        "discourse:5554:reply:1",
+        "discourse:2162:reply:1",
+        "qa:110:answer:1",
+        "discourse:475:teaching:1",
+        "discourse:1486:reply:1",
+        "discourse:735:reply:1",
+        "discourse:84:teaching:1",
+        "discourse:1478:reply:1",
+        "discourse:1539:reply:1",
+        "discourse:835:reply:11",
+        "discourse:2978:reply:1",
+        "discourse:4315:reply:1",
+        "discourse:584:teaching:1",
+        "discourse:2957:reply:2",
+        "discourse:1980:reply:1",
+        "discourse:4350:reply:1",
+        "discourse:2668:reply:1",
+        "qa:136:answer:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1486:reply:1",
+        "discourse:5554:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4904,
+        "completion": 710,
+        "total": 5614
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 103545.27,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 34509.9,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 845.84,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 297854.37,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.32,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.48,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-vegetarian-spiritual",
+      "category": "direct",
+      "latencyMs": 473448,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:291:reply:1",
+        "discourse:162:reply:1",
+        "discourse:971:reply:1",
+        "discourse:1727:reply:1",
+        "discourse:759:reply:2",
+        "discourse:4532:reply:1",
+        "qa:348:answer:1",
+        "discourse:383:teaching:1",
+        "discourse:969:reply:1",
+        "discourse:980:reply:1",
+        "discourse:3648:reply:1",
+        "discourse:5356:reply:1",
+        "discourse:1514:reply:1",
+        "discourse:1576:reply:1",
+        "discourse:2499:reply:1",
+        "qa:301:answer:1",
+        "discourse:2661:reply:1",
+        "qa:409:answer:1",
+        "discourse:724:reply:1",
+        "discourse:294:reply:2"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:4532:reply:1",
+        "discourse:3648:reply:1",
+        "discourse:1514:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4737,
+        "completion": 861,
+        "total": 5598
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 104431.97,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 24919.87,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 577.95,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 313866.02,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.36,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.6,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-insult-to-guru",
+      "category": "direct",
+      "latencyMs": 400855,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:4293:reply:1",
+        "discourse:2773:reply:1",
+        "discourse:453:teaching:1",
+        "discourse:134:reply:1",
+        "discourse:878:reply:10",
+        "discourse:1337:reply:1",
+        "discourse:1083:reply:1",
+        "discourse:458:reply:1",
+        "discourse:497:teaching:1",
+        "discourse:2447:reply:1",
+        "discourse:2974:reply:6",
+        "discourse:3037:reply:9",
+        "discourse:330:reply:1",
+        "discourse:424:teaching:1",
+        "discourse:998:reply:1",
+        "discourse:2989:reply:1",
+        "discourse:5490:reply:1",
+        "discourse:67:teaching:1",
+        "discourse:4508:reply:1",
+        "discourse:4886:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:4293:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4925,
+        "completion": 517,
+        "total": 5442
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 105397.7,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 29107.74,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 817.35,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 230653.24,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.27,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.3,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-story-shankara-chandala",
+      "category": "story_or_anecdote",
+      "latencyMs": 443209,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": false,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:715:teaching:1",
+        "discourse:713:teaching:1",
+        "discourse:1811:reply:1",
+        "discourse:3071:reply:1",
+        "discourse:1830:reply:1",
+        "discourse:592:teaching:1",
+        "discourse:969:reply:1",
+        "discourse:714:teaching:1",
+        "discourse:710:reply:2",
+        "discourse:5431:reply:1",
+        "discourse:578:teaching:1",
+        "discourse:4344:reply:13",
+        "discourse:67:teaching:1",
+        "discourse:2105:reply:1",
+        "discourse:1678:reply:1",
+        "discourse:712:teaching:1",
+        "discourse:2896:reply:1",
+        "discourse:689:teaching:1",
+        "discourse:5548:reply:1",
+        "qa:236:answer:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4894,
+        "completion": 554,
+        "total": 5448
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 115981.74,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 37423.67,
+          "processed": 6,
+          "total": 6
+        },
+        "read": {
+          "durationMs": 835.24,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 239024.7,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.09,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.1,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "seed-story-kannappa-nayanar",
+      "category": "story_or_anecdote",
+      "latencyMs": 379977,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": false,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:971:reply:1",
+        "discourse:239:teaching:1",
+        "discourse:273:reply:1",
+        "discourse:523:teaching:1",
+        "discourse:554:teaching:1",
+        "discourse:4568:reply:2",
+        "discourse:735:reply:1",
+        "discourse:80:teaching:1",
+        "discourse:1416:reply:1",
+        "discourse:4705:reply:3",
+        "discourse:498:teaching:1",
+        "discourse:1161:reply:7",
+        "discourse:1827:reply:1",
+        "discourse:198:reply:1",
+        "discourse:551:teaching:1",
+        "discourse:303:reply:1",
+        "discourse:3563:reply:1",
+        "discourse:653:teaching:1",
+        "discourse:969:reply:1",
+        "discourse:679:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4805,
+        "completion": 320,
+        "total": 5125
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 103053.48,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 52845.76,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1237.86,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 193231.66,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.1,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.09,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "seed-story-satyakama-jabala",
+      "category": "story_or_anecdote",
+      "latencyMs": 369583,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": false,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:87:teaching:1",
+        "discourse:1781:reply:1",
+        "discourse:4508:reply:1",
+        "discourse:5656:teaching:1",
+        "discourse:5658:reply:1",
+        "discourse:592:teaching:1",
+        "discourse:80:teaching:1",
+        "discourse:158:teaching:1",
+        "discourse:969:reply:1",
+        "discourse:2096:reply:1",
+        "discourse:2467:reply:1",
+        "discourse:1037:teaching:1",
+        "discourse:453:teaching:1",
+        "discourse:2773:reply:1",
+        "discourse:582:teaching:1",
+        "discourse:5094:reply:9",
+        "qa:249:answer:1",
+        "discourse:2751:teaching:1",
+        "discourse:471:reply:1",
+        "discourse:5074:reply:5"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4537,
+        "completion": 332,
+        "total": 4869
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 115533.61,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 32948.59,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 788.08,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 185471.38,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.11,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "seed-translit-sankara-advaita",
+      "category": "transliterated",
+      "latencyMs": 524400,
+      "expectedAnswerStatus": "related_teachings",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": true,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:423:reply:2",
+        "discourse:4320:teaching:1",
+        "discourse:453:teaching:1",
+        "discourse:576:teaching:1",
+        "qa:59:answer:1",
+        "discourse:4512:reply:1",
+        "discourse:644:teaching:1",
+        "discourse:801:reply:7",
+        "discourse:165:reply:1",
+        "discourse:5749:teaching:1",
+        "discourse:1015:reply:1",
+        "discourse:803:teaching:1",
+        "discourse:262:teaching:1",
+        "discourse:806:teaching:1",
+        "discourse:450:teaching:1",
+        "discourse:451:teaching:1",
+        "discourse:635:teaching:1",
+        "discourse:2123:reply:1",
+        "discourse:467:teaching:1",
+        "discourse:750:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "qa:59:answer:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4676,
+        "completion": 944,
+        "total": 5620
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 105208.27,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 43443.63,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 865.31,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 342887.33,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.24,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.33,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-translit-bhakti-lakshanam",
+      "category": "transliterated",
+      "latencyMs": 830348,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 0,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:4707:reply:1",
+        "discourse:2738:reply:1",
+        "discourse:1140:reply:1",
+        "discourse:2983:reply:1",
+        "discourse:2208:reply:1",
+        "discourse:3226:reply:1",
+        "discourse:4537:reply:1",
+        "discourse:4733:reply:1",
+        "discourse:5094:reply:10",
+        "discourse:2212:reply:1",
+        "discourse:5683:teaching:1",
+        "discourse:693:teaching:1",
+        "discourse:2374:reply:1",
+        "discourse:2632:reply:1",
+        "discourse:5668:teaching:1",
+        "discourse:2639:reply:1",
+        "discourse:5131:reply:11",
+        "qa:139:answer:1",
+        "discourse:1688:reply:1",
+        "discourse:4797:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:5683:teaching:1",
+        "discourse:5668:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5912,
+        "completion": 2062,
+        "total": 7974
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 103734.84,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 44139.99,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 919.92,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 649213.4,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.21,
+          "processed": 2,
+          "total": 2
+        },
+        "verify": {
+          "durationMs": 0.31,
+          "processed": 2,
+          "total": 2
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 2,
+      "citationsPassed": 2,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-translit-prajnanam-brahma",
+      "category": "transliterated",
+      "latencyMs": 437412,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.3333333333333333,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:2849:reply:1",
+        "discourse:635:teaching:1",
+        "discourse:453:teaching:1",
+        "discourse:804:teaching:1",
+        "discourse:1671:reply:1",
+        "discourse:547:teaching:1",
+        "discourse:5624:teaching:1",
+        "discourse:1674:reply:1",
+        "discourse:2109:teaching:1",
+        "discourse:4341:reply:1",
+        "discourse:1321:reply:1",
+        "discourse:582:teaching:1",
+        "discourse:670:teaching:1",
+        "discourse:467:teaching:1",
+        "discourse:271:reply:1",
+        "discourse:4290:teaching:1",
+        "discourse:4601:reply:1",
+        "discourse:700:reply:1",
+        "discourse:68:teaching:1",
+        "discourse:550:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:2849:reply:1",
+        "discourse:635:teaching:1",
+        "discourse:547:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4681,
+        "completion": 589,
+        "total": 5270
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 107538.16,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 45342.09,
+          "processed": 5,
+          "total": 5
+        },
+        "read": {
+          "durationMs": 778.24,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 255902.2,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.29,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.46,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-discourse-jnana-bhakti-karma",
+      "category": "multi_unit_discourse",
+      "latencyMs": 524981,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 1,
+      "evidencePrecision": 0.25,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:5658:reply:1",
+        "discourse:4662:reply:1",
+        "discourse:3257:reply:1",
+        "discourse:1506:reply:1",
+        "discourse:3007:reply:2",
+        "discourse:2752:teaching:1",
+        "discourse:1646:reply:1",
+        "discourse:5074:reply:4",
+        "discourse:1226:reply:1",
+        "discourse:793:teaching:1",
+        "discourse:4880:reply:1",
+        "discourse:3157:reply:2",
+        "discourse:4768:reply:3",
+        "qa:263:answer:1",
+        "qa:433:answer:1",
+        "discourse:69:teaching:1",
+        "discourse:791:teaching:1",
+        "discourse:5689:teaching:1",
+        "discourse:1286:reply:1",
+        "discourse:1987:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:4662:reply:1",
+        "discourse:4880:reply:1",
+        "discourse:5658:reply:1",
+        "discourse:1646:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5091,
+        "completion": 974,
+        "total": 6065
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 114447.17,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 25530.95,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 783.63,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 353552.88,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.8,
+          "processed": 4,
+          "total": 4
+        },
+        "verify": {
+          "durationMs": 0.89,
+          "processed": 4,
+          "total": 4
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 4,
+      "citationsPassed": 4,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "seed-discourse-stages-dualism-monism",
+      "category": "multi_unit_discourse",
+      "latencyMs": 424371,
+      "expectedAnswerStatus": "direct",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": 1,
+      "evidenceRecall": 0,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:843:teaching:1",
+        "discourse:327:teaching:1",
+        "discourse:1000:reply:1",
+        "discourse:1008:reply:1",
+        "discourse:194:teaching:1",
+        "discourse:824:teaching:1",
+        "discourse:123:reply:1",
+        "discourse:3342:reply:1",
+        "discourse:913:teaching:1",
+        "discourse:1596:reply:3",
+        "discourse:1604:reply:1",
+        "discourse:746:reply:3",
+        "discourse:5215:reply:1",
+        "discourse:1060:reply:1",
+        "discourse:5674:teaching:1",
+        "discourse:5559:reply:1",
+        "discourse:5738:teaching:1",
+        "discourse:1194:teaching:1",
+        "discourse:772:reply:2",
+        "discourse:997:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:1604:reply:1",
+        "discourse:3342:reply:1",
+        "discourse:824:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4302,
+        "completion": 512,
+        "total": 4814
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 107981.44,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 39310.01,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 913.41,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 245082.98,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.47,
+          "processed": 3,
+          "total": 3
+        },
+        "verify": {
+          "durationMs": 0.64,
+          "processed": 3,
+          "total": 3
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 3,
+      "citationsPassed": 3,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "negative-france",
+      "category": "unanswerable",
+      "latencyMs": 431892,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": true,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:449:reply:3",
+        "discourse:495:reply:1",
+        "discourse:126:teaching:1",
+        "discourse:120:teaching:1",
+        "discourse:87:teaching:1",
+        "qa:339:answer:1",
+        "discourse:519:teaching:1",
+        "discourse:1274:reply:1",
+        "discourse:140:reply:2",
+        "discourse:1604:reply:1",
+        "qa:388:answer:1",
+        "discourse:669:teaching:1",
+        "qa:319:answer:1",
+        "discourse:4608:reply:1",
+        "discourse:731:reply:3",
+        "qa:54:answer:1",
+        "discourse:5652:teaching:1",
+        "discourse:67:teaching:1",
+        "discourse:260:reply:1",
+        "discourse:3086:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4515,
+        "completion": 503,
+        "total": 5018
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 100680.96,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 52857.61,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 573.47,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 240746.93,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "negative-heating-lamp",
+      "category": "unanswerable",
+      "latencyMs": 677639,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:1841:reply:1",
+        "discourse:255:teaching:1",
+        "discourse:1691:reply:1",
+        "discourse:90:teaching:1",
+        "qa:187:answer:1",
+        "discourse:1582:reply:1",
+        "discourse:1100:reply:1",
+        "discourse:2806:reply:1",
+        "qa:222:answer:1",
+        "discourse:519:teaching:1",
+        "discourse:68:teaching:1",
+        "discourse:3031:reply:1",
+        "discourse:537:teaching:1",
+        "qa:81:answer:1",
+        "discourse:1118:teaching:1",
+        "discourse:2545:reply:4",
+        "discourse:533:teaching:1",
+        "discourse:1587:reply:1",
+        "discourse:1690:reply:1",
+        "qa:176:answer:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:255:teaching:1"
+      ],
+      "tokenUsage": {
+        "prompt": 4745,
+        "completion": 508,
+        "total": 5253
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 117243.05,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 180293.97,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1440.03,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 261882.36,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.29,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.41,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "negative-cake",
+      "category": "unanswerable",
+      "latencyMs": 707981,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": true,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:3820:reply:1",
+        "discourse:1604:reply:1",
+        "qa:263:answer:1",
+        "discourse:5638:reply:8",
+        "discourse:1742:reply:1",
+        "discourse:3028:reply:1",
+        "qa:81:answer:1",
+        "discourse:2484:reply:1",
+        "discourse:3705:reply:1",
+        "discourse:4787:reply:1",
+        "discourse:5353:reply:1",
+        "discourse:2309:reply:1",
+        "discourse:3136:reply:1",
+        "qa:222:answer:1",
+        "discourse:2522:reply:1",
+        "discourse:774:reply:1",
+        "discourse:2008:reply:1",
+        "discourse:5215:reply:1",
+        "discourse:578:teaching:1",
+        "discourse:1804:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4310,
+        "completion": 708,
+        "total": 5018
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 126815.49,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 169994.03,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 984.7,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 277100.66,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "negative-football",
+      "category": "unanswerable",
+      "latencyMs": 1001913,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": true,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:2121:reply:1",
+        "qa:98:answer:1",
+        "discourse:3820:reply:1",
+        "discourse:679:teaching:1",
+        "discourse:5606:teaching:1",
+        "qa:136:answer:1",
+        "discourse:1027:reply:1",
+        "discourse:1432:reply:1",
+        "discourse:1708:reply:1",
+        "discourse:551:teaching:1",
+        "discourse:597:teaching:1",
+        "discourse:736:teaching:1",
+        "discourse:3079:reply:1",
+        "discourse:439:reply:1",
+        "qa:116:answer:1",
+        "discourse:351:reply:1",
+        "discourse:71:teaching:1",
+        "discourse:1275:reply:1",
+        "discourse:998:reply:1",
+        "discourse:273:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 5593,
+        "completion": 2012,
+        "total": 7605
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 117627.84,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 73989.98,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 874.77,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 697919.92,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.13,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.12,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "negative-noise",
+      "category": "unanswerable",
+      "latencyMs": 730132,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "related_teachings",
+      "answerStatusCorrect": false,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 0,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": false,
+      "candidateAnswerUnitIds": [
+        "discourse:3007:reply:1",
+        "discourse:239:teaching:1",
+        "discourse:644:teaching:1",
+        "discourse:1880:reply:2",
+        "discourse:211:reply:3",
+        "discourse:969:reply:1",
+        "discourse:273:reply:1",
+        "discourse:450:teaching:1",
+        "discourse:5115:reply:3",
+        "discourse:3027:reply:6",
+        "discourse:5218:reply:1",
+        "discourse:5657:teaching:1",
+        "qa:444:answer:1",
+        "discourse:522:teaching:1",
+        "discourse:936:reply:2",
+        "discourse:974:reply:1",
+        "discourse:1753:reply:1",
+        "discourse:260:reply:1",
+        "discourse:3312:reply:1",
+        "discourse:5749:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [
+        "discourse:969:reply:1"
+      ],
+      "tokenUsage": {
+        "prompt": 5011,
+        "completion": 640,
+        "total": 5651
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 125000.54,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 200682.54,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1250.72,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 296845.37,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.2,
+          "processed": 1,
+          "total": 1
+        },
+        "verify": {
+          "durationMs": 0.26,
+          "processed": 1,
+          "total": 1
+        }
+      },
+      "exactEvidence": true,
+      "citationsChecked": 1,
+      "citationsPassed": 1,
+      "citationsFailed": 0,
+      "hasEvidence": true
+    },
+    {
+      "id": "negative-quantum-mechanics",
+      "category": "unanswerable",
+      "latencyMs": 633703,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": true,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:2273:reply:17",
+        "discourse:427:reply:2",
+        "discourse:458:reply:1",
+        "discourse:852:teaching:1",
+        "discourse:239:teaching:1",
+        "discourse:3635:reply:4",
+        "discourse:689:teaching:1",
+        "discourse:978:reply:1",
+        "qa:160:answer:1",
+        "discourse:273:reply:1",
+        "discourse:373:reply:1",
+        "discourse:720:reply:3",
+        "discourse:651:teaching:1",
+        "discourse:763:reply:1",
+        "discourse:2951:reply:1",
+        "discourse:320:reply:1",
+        "discourse:343:reply:1",
+        "discourse:929:reply:1",
+        "discourse:591:teaching:1",
+        "discourse:3290:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 4879,
+        "completion": 579,
+        "total": 5458
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 113562.38,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 160791.77,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 2628.36,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 248606.46,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "negative-python-venv",
+      "category": "unanswerable",
+      "latencyMs": 1162106,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": true,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:458:reply:1",
+        "discourse:211:reply:6",
+        "discourse:1850:reply:1",
+        "discourse:3580:reply:1",
+        "discourse:4386:reply:1",
+        "discourse:1267:reply:1",
+        "discourse:1637:reply:1",
+        "discourse:2106:reply:1",
+        "discourse:974:reply:1",
+        "discourse:239:teaching:1",
+        "discourse:3601:reply:1",
+        "discourse:5528:teaching:1",
+        "qa:158:answer:1",
+        "discourse:1083:reply:1",
+        "discourse:1321:reply:1",
+        "discourse:3820:reply:1",
+        "discourse:1332:reply:1",
+        "discourse:320:reply:1",
+        "discourse:352:reply:1",
+        "discourse:214:reply:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 5853,
+        "completion": 2153,
+        "total": 8006
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 158042.99,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 182847.77,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1727.58,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 697362.94,
+          "processed": 5,
+          "total": 5
+        },
+        "cluster": {
+          "durationMs": 0.14,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.14,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    },
+    {
+      "id": "negative-sourdough-baking",
+      "category": "unanswerable",
+      "latencyMs": 655004,
+      "expectedAnswerStatus": "insufficient",
+      "groundTruthReviewer": "Human Reviewer",
+      "actualAnswerStatus": "insufficient",
+      "answerStatusCorrect": true,
+      "candidateRecall": null,
+      "evidenceRecall": null,
+      "evidencePrecision": 1,
+      "forbiddenEvidenceRate": 0,
+      "forbiddenEvidenceAnswerUnitIds": [],
+      "abstentionCorrect": true,
+      "candidateAnswerUnitIds": [
+        "discourse:3346:reply:1",
+        "discourse:5366:reply:1",
+        "discourse:1562:reply:1",
+        "discourse:284:reply:1",
+        "discourse:4322:reply:1",
+        "discourse:1389:reply:1",
+        "discourse:5106:reply:1",
+        "discourse:5353:reply:1",
+        "discourse:2523:reply:1",
+        "discourse:2933:reply:1",
+        "discourse:4727:reply:1",
+        "discourse:1271:reply:1",
+        "discourse:458:reply:1",
+        "discourse:1100:reply:1",
+        "discourse:2710:reply:1",
+        "discourse:5355:reply:5",
+        "discourse:1969:reply:1",
+        "discourse:2790:reply:1",
+        "discourse:771:reply:2",
+        "discourse:5687:teaching:1"
+      ],
+      "evidenceAnswerUnitIds": [],
+      "tokenUsage": {
+        "prompt": 7712,
+        "completion": 468,
+        "total": 8180
+      },
+      "phaseTimings": {
+        "plan": {
+          "durationMs": 105992.12,
+          "processed": 1,
+          "total": 1
+        },
+        "retrieve": {
+          "durationMs": 151076.06,
+          "processed": 4,
+          "total": 4
+        },
+        "read": {
+          "durationMs": 1562.24,
+          "processed": 20,
+          "total": 20
+        },
+        "adjudicate": {
+          "durationMs": 274454.93,
+          "processed": 4,
+          "total": 4
+        },
+        "cluster": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        },
+        "verify": {
+          "durationMs": 0.07,
+          "processed": 0,
+          "total": 0
+        }
+      },
+      "exactEvidence": null,
+      "citationsChecked": 0,
+      "citationsPassed": 0,
+      "citationsFailed": 0,
+      "hasEvidence": false
+    }
+  ]
+}

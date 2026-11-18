@@ -1,3 +1,4 @@
+const { isCitableSwamiUnit } = require('./corpusStructure');
 const SUMMARY_MODE = 'verbatim-selection';
 const DEFAULT_MAX_RECORDS = 15;
 const DEFAULT_MAX_LINES = 3;
@@ -203,8 +204,11 @@ function filterRelevantMatches(matches, threshold, {
   const limit = clampInteger(maxRecords, 1, MAX_RECORDS, DEFAULT_MAX_RECORDS);
   const admitted = (Array.isArray(matches) ? matches : [])
     .filter((match) => (
+      match.rankingSignals?.taskSupported !== false && match.rankingSignals?.authorSupported !== false &&
+      !match.rankingSignals?.decisionActionMissing &&
       Number(match.relevanceScore ?? match.similarity) >= Number(threshold) &&
-      Number(match.similarity) >= Number(minimumDenseSimilarity)
+      (Number(match.similarity) >= Number(minimumDenseSimilarity) ||
+        match.matchedPassages?.some((passage) => passage.isExact === true))
     ));
   const quotedPhrases = extractQuotedPhrases(question);
   if (quotedPhrases.length) {
@@ -220,12 +224,27 @@ function filterRelevantMatches(matches, threshold, {
   return admitted.slice(0, limit);
 }
 
+function validEvidence(passage) {
+  if (!isCitableSwamiUnit({ ...passage, author: passage.author || 'Swami', displayText: passage.answer })) return false;
+  if ((passage.author && passage.author !== 'Swami') || passage.contextComplete === false || passage.storyComplete === false) return false;
+  if (passage.answer === undefined) return true; // Standalone selection callers lack source text.
+  return Number.isInteger(passage.start) && Number.isInteger(passage.end) &&
+    passage.start >= 0 && passage.end > passage.start &&
+    String(passage.answer).slice(passage.start, passage.end) === passage.text;
+}
+
 function buildEvidencePassages(matches) {
   const passages = [];
   const seen = new Set();
   for (const match of matches) {
     const indexedPassages = Array.isArray(match.matchedPassages) && match.matchedPassages.length
       ? match.matchedPassages.map((passage) => ({
+        ...passage,
+        passageRelevance: Number(passage.relevanceScore ?? passage.passageRelevance ?? match.relevanceScore ?? match.similarity),
+        isExact: (passage.isExact !== undefined || passage.discoveryExact !== undefined)
+          ? Boolean(passage.isExact || passage.discoveryExact)
+          : Boolean(match.rankingSignals?.exactQaDiscovery && (!match.matchedPassages?.length || match.matchedPassages.length === 1 || Number(passage.passageIndex) === Number(match.passageIndex))),
+        discoveryExact: Boolean(passage.discoveryExact),
         text: passage.citationText || passage.text,
         start: Number.isInteger(passage.citationStart) ? passage.citationStart : passage.start,
         end: Number.isInteger(passage.citationEnd) ? passage.citationEnd : passage.end,
@@ -241,6 +260,7 @@ function buildEvidencePassages(matches) {
     const sourcePassages = indexedPassages || splitAnswerForIndex(match.answer);
     const answerPassages = sourcePassages;
     for (const passage of answerPassages) {
+      if (!validEvidence({ ...passage, answer: match.answer })) continue;
       const key = normalizeEvidenceText(passage.text);
       if (!key || seen.has(key)) continue;
       seen.add(key);
@@ -255,7 +275,10 @@ function buildEvidencePassages(matches) {
         recordSimilarity: Number(match.similarity),
         relevanceRank: match.relevanceRank ?? null,
         semanticSimilarity: Number(passage.semanticSimilarity),
-        exactQaDiscovery: match.rankingSignals?.exactQaDiscovery === true,
+        passageRelevance: Number(passage.relevanceScore ?? match.relevanceScore ?? match.similarity),
+        exactQaDiscovery: (passage.isExact !== undefined || passage.discoveryExact !== undefined)
+          ? Boolean(passage.isExact || passage.discoveryExact)
+          : Boolean(match.rankingSignals?.exactQaDiscovery && (!match.matchedPassages?.length || match.matchedPassages.length === 1 || Number(passage.passageIndex) === Number(match.passageIndex))),
       });
       if (passages.length >= MAX_TOTAL_PASSAGES) return passages;
     }
@@ -268,13 +291,15 @@ function selectGroundedEvidence(passages, limit, question = '') {
   const candidates = passages
     .filter((passage) => (
       Number.isFinite(passage.semanticSimilarity) &&
-      passage.semanticSimilarity >= MIN_RECORD_DENSE_SIMILARITY
+      (passage.semanticSimilarity >= MIN_RECORD_DENSE_SIMILARITY || passage.exactQaDiscovery === true) &&
+      validEvidence(passage)
     ))
     .sort((left, right) => (
       Number(Boolean(right.exactQaDiscovery)) - Number(Boolean(left.exactQaDiscovery)) ||
-      right.semanticSimilarity - left.semanticSimilarity ||
-      right.recordRelevance - left.recordRelevance ||
+      (right.passageRelevance || 0) - (left.passageRelevance || 0) ||
       Number(left.relevanceRank || Number.MAX_SAFE_INTEGER) - Number(right.relevanceRank || Number.MAX_SAFE_INTEGER) ||
+      right.recordRelevance - left.recordRelevance ||
+      right.semanticSimilarity - left.semanticSimilarity ||
       String(left.sourceId).localeCompare(String(right.sourceId))
     ));
   if (!candidates.length) return [];
@@ -406,7 +431,7 @@ async function buildSemanticSummary({
   }
 
   const selected = selectGroundedEvidence(
-    passages,
+    passages.map(expandEvidenceContext).filter(validEvidence),
     Math.min(15, Math.max(1, Number(maxRecords) || DEFAULT_MAX_RECORDS)),
     question,
   );
@@ -417,7 +442,6 @@ async function buildSemanticSummary({
       Number.isInteger(Number(candidate.start)) && Number.isInteger(Number(candidate.end)) &&
       String(candidate.answer).slice(Number(candidate.start), Number(candidate.end)) === candidate.text
     ))
-    .map(expandEvidenceContext)
     .map((candidate) => ({
       sourceId: candidate.sourceId,
       sourceGroup: candidate.sourceGroup,
@@ -448,9 +472,11 @@ async function buildSemanticSummary({
       },
     };
   }
-  const evidence = candidateEvidence
+  const selectedCandidates = candidateEvidence
     .filter((item) => item.author === 'Swami' && item.contextComplete && item.storyComplete)
-    .slice(0, clampInteger(maxLines, 1, MAX_LINES, DEFAULT_MAX_LINES))
+    .slice(0, clampInteger(maxLines, 1, MAX_LINES, DEFAULT_MAX_LINES));
+  const displayedExact = Boolean(selectedCandidates[0]?.exactQaDiscovery);
+  const evidence = selectedCandidates
     .map(({ exactQaDiscovery: _exactQaDiscovery, ...item }, index) => ({ ...item, evidenceNumber: index + 1 }));
   if (!evidence.length) return {
     relevantMatches: [],
@@ -462,8 +488,8 @@ async function buildSemanticSummary({
     summary: {
       status: 'ready',
       mode: SUMMARY_MODE,
-      answerStatus: candidateEvidence[0]?.exactQaDiscovery ? 'direct' : 'related_teachings',
-      notice: candidateEvidence[0]?.exactQaDiscovery
+      answerStatus: displayedExact ? 'direct' : 'related_teachings',
+      notice: displayedExact
         ? 'A directly matching Swami reply was selected verbatim.'
         : 'Verified Swami teachings selected verbatim.',
       text: evidence.map((item) => item.text).join('\n\n'),
